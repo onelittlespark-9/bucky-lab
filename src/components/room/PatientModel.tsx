@@ -1,7 +1,6 @@
 import { useSim } from "@/lib/sim/store";
 import { patientById } from "@/lib/sim/patients";
 import { scaleLandmarkY, LANDMARKS } from "@/lib/sim/projections";
-import { patientKinematics } from "@/lib/sim/patient-kinematics";
 import { HumanAtlasBodyOverlay } from "./HumanAtlasBodyOverlay";
 
 type V3 = [number, number, number];
@@ -12,7 +11,6 @@ function PatientLandmarks() {
   const equipment = useSim(s => s.equipment);
   const showLandmarks = useSim(s => s.showLandmarks);
   const setLandmarkCR = useSim(s => s.setLandmarkCR);
-  const projectionId = useSim(s => s.projectionId);
   const patient = patientById(patientId);
   const H = patient.heightCm / 100;
   const s = H / 1.7;
@@ -37,22 +35,6 @@ function PatientLandmarks() {
     groupRot = [-Math.PI / 2, 0, yaw];
   }
 
-  patientKinematics({
-    H,
-    s,
-    shoulder: m.shoulder,
-    hip: m.hip,
-    limb: m.limb,
-    elbowFlex: pose.elbowFlex,
-    hipInternal: pose.hipInternal,
-    armRaise: pose.armRaise,
-    shoulderRoll: pose.shoulderRoll,
-    kneeFlex: pose.kneeFlex,
-    projectionId,
-    placement: equipment.placement,
-    buckyTilt: equipment.buckyTilt,
-  });
-
   if (!showLandmarks) return null;
 
   const landmarks = LANDMARKS.filter(l => l.y > 0 && ![
@@ -64,7 +46,7 @@ function PatientLandmarks() {
     <group position={groupPos} rotation={groupRot}>
       <group scale={s}>
         {landmarks.map(lm => {
-          const yy = H / s - scaleLandmarkY(lm.y, patient.heightCm) / 100 / s;
+          const yy = 1.7 - scaleLandmarkY(lm.y, patient.heightCm) / 100 / s;
           const xx = lm.x / 100 * m.torsoWidth;
           return (
             <mesh
