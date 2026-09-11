@@ -1,12 +1,11 @@
 import { Html, OrbitControls, useThree } from "@react-three/drei";
-import { useRef } from "react";
+import { useRef, type CSSProperties, type MutableRefObject } from "react";
 import * as THREE from "three";
 import { useSim } from "@/lib/sim/store";
 import { patientById } from "@/lib/sim/patients";
 import { projectionById } from "@/lib/sim/projections";
 
 const clamp = (v:number,min:number,max:number) => Math.max(min,Math.min(max,v));
-
 type FocusPoint = [number,number,number];
 
 function focusForProjection(region:string, anatomy:string): { target:FocusPoint; distance:number } {
@@ -19,13 +18,13 @@ function focusForProjection(region:string, anatomy:string): { target:FocusPoint;
   return {target:[0,1.2,0],distance:1.55};
 }
 
-function CameraFocus({focusRef}:{focusRef:React.MutableRefObject<((target:FocusPoint,distance:number)=>void)|null>}) {
+function CameraFocus({focusRef}:{focusRef:MutableRefObject<((target:FocusPoint,distance:number)=>void)|null>}) {
   const {camera, controls} = useThree();
   focusRef.current = (target,distance) => {
     const c = controls as any;
     const t = new THREE.Vector3(...target);
     const direction = new THREE.Vector3().subVectors(camera.position, c?.target ?? t);
-    direction.y = direction.y * .25;
+    direction.y *= .25;
     if (direction.lengthSq() < .01) direction.set(0,.12,1);
     direction.normalize();
     camera.position.copy(t).addScaledVector(direction,distance);
@@ -36,17 +35,12 @@ function CameraFocus({focusRef}:{focusRef:React.MutableRefObject<((target:FocusP
 }
 
 export function RoomQuickControls(){
-  const tube=useSim(s=>s.tube);
-  const projectionId=useSim(s=>s.projectionId);
-  const patientId=useSim(s=>s.patientId);
-  const showLightField=useSim(s=>s.showLightField);
-  const setShowLightField=useSim(s=>s.setShowLightField);
-  const patchTube=useSim(s=>s.patchTube);
-  const projection=projectionById(projectionId);
-  const patient=patientById(patientId);
+  const tube=useSim(s=>s.tube), projectionId=useSim(s=>s.projectionId), patientId=useSim(s=>s.patientId);
+  const showLightField=useSim(s=>s.showLightField), setShowLightField=useSim(s=>s.setShowLightField), patchTube=useSim(s=>s.patchTube);
+  const projection=projectionById(projectionId), patient=patientById(patientId);
   const focusRef=useRef<((target:FocusPoint,distance:number)=>void)|null>(null);
   const focus=()=>{const f=focusForProjection(projection.region,projection.anatomy);focusRef.current?.(f.target,f.distance);};
-  const focusBeam=()=>{const f=focusForProjection(projection.region,projection.anatomy);const y=clamp(tube.crY/100,.25,1.8);focusRef.current?.([tube.crX/100,y,0],Math.min(f.distance,1.35));};
+  const focusBeam=()=>{focusRef.current?.([tube.crX/100,clamp(tube.crY/100,.25,1.8),0],1.25);};
   const nudge=(dx:number,dy:number)=>patchTube({crX:clamp(tube.crX+dx,-20,20),crY:clamp(tube.crY+dy,0,patient.heightCm)});
   const setField=(factor:number)=>patchTube({collimationW:clamp(projection.collimationW*factor,5,45),collimationH:clamp(projection.collimationH*factor,5,45)});
   return <>
@@ -55,37 +49,18 @@ export function RoomQuickControls(){
     <Html position={[-1.55,2.05,0]} transform={false} style={{pointerEvents:"auto"}}>
       <div style={{width:230,background:"rgba(8,12,15,.92)",border:"1px solid rgba(255,255,255,.12)",borderRadius:12,padding:10,color:"white",fontFamily:"system-ui",fontSize:11,boxShadow:"0 10px 30px rgba(0,0,0,.35)"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7}}><strong style={{fontSize:12}}>QUICK POSITIONING</strong><span style={{opacity:.55}}>no sliders</span></div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-          <button onClick={focus} style={buttonStyle}>Focus exam</button>
-          <button onClick={focusBeam} style={buttonStyle}>Focus CR</button>
-          <button onClick={()=>patchTube({crX:projection.cr.x*(projection.anatomy.startsWith("torso")?patient.morph.torsoWidth:1),crY:projection.cr.y})} style={buttonStyle}>Centre CR</button>
-          <button onClick={()=>patchTube({sid:projection.sid})} style={buttonStyle}>Standard SID</button>
-        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}><button onClick={focus} style={buttonStyle}>Focus exam</button><button onClick={focusBeam} style={buttonStyle}>Focus CR</button><button onClick={()=>patchTube({crX:projection.cr.x*(projection.anatomy.startsWith("torso")?patient.morph.torsoWidth:1),crY:projection.cr.y})} style={buttonStyle}>Centre CR</button><button onClick={()=>patchTube({sid:projection.sid})} style={buttonStyle}>Standard SID</button></div>
         <div style={sectionStyle}>CR NUDGE</div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5}}>
-          <span/><button onClick={()=>nudge(0,1)} style={buttonStyle}>▲</button><span/>
-          <button onClick={()=>nudge(-1,0)} style={buttonStyle}>◀</button><button onClick={()=>nudge(0,-1)} style={buttonStyle}>●</button><button onClick={()=>nudge(1,0)} style={buttonStyle}>▶</button>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5,marginTop:5}}>
-          <button onClick={()=>nudge(-5,0)} style={buttonStyle}>−5 X</button><button onClick={()=>nudge(0,-5)} style={buttonStyle}>−5 Y</button><button onClick={()=>nudge(5,0)} style={buttonStyle}>+5 X</button>
-        </div>
-        <div style={sectionStyle}>COLLIMATION</div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5}}>
-          <button onClick={()=>setField(.72)} style={buttonStyle}>Tight</button>
-          <button onClick={()=>setField(1)} style={buttonStyle}>Standard</button>
-          <button onClick={()=>setField(1.2)} style={buttonStyle}>Wide</button>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5,marginTop:5}}>
-          <button onClick={()=>patchTube({collimationW:clamp(tube.collimationW-.5,5,45),collimationH:clamp(tube.collimationH-.5,5,45)})} style={buttonStyle}>Field −</button>
-          <button onClick={()=>patchTube({collimationW:clamp(tube.collimationW+.5,5,45),collimationH:clamp(tube.collimationH+.5,5,45)})} style={buttonStyle}>Field +</button>
-        </div>
-        <div style={sectionStyle}>LIGHT FIELD</div>
-        <button onClick={()=>setShowLightField(!showLightField)} style={{...buttonStyle,width:"100%",background:showLightField?"rgba(255,235,130,.2)":"rgba(255,255,255,.06)",borderColor:showLightField?"rgba(255,235,130,.6)":"rgba(255,255,255,.12)"}}>{showLightField?"● PRIMARY BEAM LIGHT FIELD ON":"○ LIGHT FIELD OFF"}</button>
-        <p style={{margin:"7px 0 0",lineHeight:1.35,opacity:.58}}>Use Focus exam before positioning. Focus CR brings the anatomy and beam into view; the light field remains visible over the patient.</p>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5}}><span/><button onClick={()=>nudge(0,1)} style={buttonStyle}>▲</button><span/><button onClick={()=>nudge(-1,0)} style={buttonStyle}>◀</button><button onClick={()=>nudge(0,-1)} style={buttonStyle}>●</button><button onClick={()=>nudge(1,0)} style={buttonStyle}>▶</button></div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5,marginTop:5}}><button onClick={()=>nudge(-5,0)} style={buttonStyle}>−5 X</button><button onClick={()=>nudge(0,-5)} style={buttonStyle}>−5 Y</button><button onClick={()=>nudge(5,0)} style={buttonStyle}>+5 X</button></div>
+        <div style={sectionStyle}>COLLIMATION</div><div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5}}><button onClick={()=>setField(.72)} style={buttonStyle}>Tight</button><button onClick={()=>setField(1)} style={buttonStyle}>Standard</button><button onClick={()=>setField(1.2)} style={buttonStyle}>Wide</button></div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5,marginTop:5}}><button onClick={()=>patchTube({collimationW:clamp(tube.collimationW-.5,5,45),collimationH:clamp(tube.collimationH-.5,5,45)})} style={buttonStyle}>Field −</button><button onClick={()=>patchTube({collimationW:clamp(tube.collimationW+.5,5,45),collimationH:clamp(tube.collimationH+.5,5,45)})} style={buttonStyle}>Field +</button></div>
+        <div style={sectionStyle}>LIGHT FIELD</div><button onClick={()=>setShowLightField(!showLightField)} style={{...buttonStyle,width:"100%",background:showLightField?"rgba(255,235,130,.2)":"rgba(255,255,255,.06)",borderColor:showLightField?"rgba(255,235,130,.6)":"rgba(255,255,255,.12)"}}>{showLightField?"● PRIMARY BEAM LIGHT FIELD ON":"○ LIGHT FIELD OFF"}</button>
+        <p style={{margin:"7px 0 0",lineHeight:1.35,opacity:.58}}>Focus the exam first. Focus CR brings the anatomy and beam into view; the primary-beam field stays visible over the patient.</p>
       </div>
     </Html>
   </>;
 }
 
-const buttonStyle:React.CSSProperties={background:"rgba(255,255,255,.07)",color:"white",border:"1px solid rgba(255,255,255,.12)",borderRadius:7,padding:"6px 5px",fontSize:10,cursor:"pointer"};
-const sectionStyle:React.CSSProperties={fontSize:9,letterSpacing:".12em",opacity:.55,margin:"10px 0 5px"};
+const buttonStyle:CSSProperties={background:"rgba(255,255,255,.07)",color:"white",border:"1px solid rgba(255,255,255,.12)",borderRadius:7,padding:"6px 5px",fontSize:10,cursor:"pointer"};
+const sectionStyle:CSSProperties={fontSize:9,letterSpacing:".12em",opacity:.55,margin:"10px 0 5px"};
