@@ -131,6 +131,7 @@ export interface ImagingRequest {
 /**
  * 20 imaging requests using ONLY projection IDs that currently exist.
  * Only 1 is deliberately invalid (~5%).
+ * Chest requests follow clinical standards: PA only unless immobile; lateral only for specific indications (e.g. pacemaker check).
  */
 export const IMAGING_REQUESTS: ImagingRequest[] = [
   // 1. INVALID – FOOSH wrong side
@@ -152,14 +153,14 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     urgency: "urgent",
   },
 
-  // 2. Chest – acute
+  // 2. Chest – acute (PA only – patient is mobile)
   {
     id: "req-chest-sob",
     title: "Chest – shortness of breath",
     clinicalHistory:
-      "48-year-old with increasing shortness of breath and right-sided pleuritic chest pain for 2 days. ?pneumonia / ?PE",
-    requestedProjections: ["pa-chest", "lat-chest"],
-    requestedViewsLabel: "PA and left lateral chest",
+      "48-year-old with increasing shortness of breath and right-sided pleuritic chest pain for 2 days. Patient is mobile and able to stand. ?pneumonia / ?PE",
+    requestedProjections: ["pa-chest"],
+    requestedViewsLabel: "PA chest",
     requestedLaterality: null,
     patientId: "tomas",
     isValid: true,
@@ -168,7 +169,7 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     urgency: "urgent",
   },
 
-  // 3. Wrist / scaphoid (using existing pa-wrist)
+  // 3. Wrist / scaphoid
   {
     id: "req-scaphoid",
     title: "Scaphoid series",
@@ -185,7 +186,7 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     urgency: "urgent",
   },
 
-  // 4. Shoulder / humerus (using ap-shoulder)
+  // 4. Shoulder / humerus
   {
     id: "req-humerus",
     title: "Humerus / shoulder – trauma",
@@ -236,7 +237,7 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     urgency: "urgent",
   },
 
-  // 7. Facial / skull area (using skull-lat for now)
+  // 7. Facial / skull area
   {
     id: "req-facial",
     title: "Facial bones",
@@ -433,11 +434,11 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     urgency: "urgent",
   },
 
-  // 19. Chest pre-op
+  // 19. Chest pre-op (PA only)
   {
     id: "req-chest-preop",
     title: "Chest – pre-operative",
-    clinicalHistory: "Pre-operative chest radiograph for elective hip replacement. No respiratory symptoms.",
+    clinicalHistory: "Pre-operative chest radiograph for elective hip replacement. Patient is mobile. No respiratory symptoms.",
     requestedProjections: ["pa-chest"],
     requestedViewsLabel: "PA chest",
     requestedLaterality: null,
@@ -448,20 +449,20 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     urgency: "routine",
   },
 
-  // 20. Another lower limb
+  // 20. Lateral chest – appropriate indication (pacemaker check)
   {
-    id: "req-knee-2",
-    title: "Knee – direct blow",
-    clinicalHistory: "Direct blow to the right knee. Localised pain and swelling. ?fracture",
-    requestedProjections: ["ap-knee", "lat-knee"],
-    requestedViewsLabel: "Right knee AP and lateral",
-    requestedLaterality: "right",
-    correctLaterality: "right",
-    patientId: "tomas",
+    id: "req-chest-pacemaker",
+    title: "Chest – pacemaker check",
+    clinicalHistory:
+      "Recent permanent pacemaker insertion. Request for PA and lateral chest to confirm lead position and exclude complication.",
+    requestedProjections: ["pa-chest", "lat-chest"],
+    requestedViewsLabel: "PA and left lateral chest (pacemaker check)",
+    requestedLaterality: null,
+    patientId: "gordon",
     isValid: true,
     pathologyId: "none",
-    region: "Lower limb",
-    urgency: "urgent",
+    region: "Thorax",
+    urgency: "routine",
   },
 ];
 
