@@ -4,7 +4,7 @@ import { PatientModel } from "./PatientModel";
 import { InternalAnatomy } from "./InternalAnatomy";
 import { DetailedSkeletalOverlay } from "./DetailedSkeletalOverlay";
 import { PatientRig } from "./PatientRig";
-import { XraySourceAssembly } from "./XraySourceAssembly";
+import { XraySourceVisibility } from "./XraySourceVisibility";
 import type { AnatomyLayer } from "@/lib/sim/muscle-segmentation";
 
 function TableAndBucky() {
@@ -50,7 +50,7 @@ export function XrayRoom() {
       <DetailedSkeletalOverlay />
     </PatientRig>
     <AnatomyControls />
-    <XraySourceAssembly />
+    <XraySourceVisibility />
     <ContactShadows opacity={.35} scale={8} blur={2.2} far={5} />
     <OrbitControls enablePan minPolarAngle={.2} maxPolarAngle={Math.PI / 2.05} minDistance={1.2} maxDistance={6} target={[0, .9, 0]} />
   </>;
