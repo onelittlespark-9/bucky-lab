@@ -33,7 +33,6 @@ export function PatientModel() {
   const setLandmarkCR = useSim((s) => s.setLandmarkCR);
   const projectionId = useSim((s) => s.projectionId);
   const patient = patientById(patientId);
-  const projection = projectionById(projectionId);
   const m = patient.morph;
   const h = patient.heightCm / 100;
 
@@ -60,8 +59,10 @@ export function PatientModel() {
   let groupRot: [number, number, number];
   if (wall) {
     const standY = place === "seated" ? 0.45 : 0.02;
-    const standZ = place === "upright-bucky" ? -0.5 : -0.32;
-    groupPos = [ox, standY + oy, standZ + oz];
+    const standZ = place === "upright-bucky" ? -0.48 : -0.32;
+    // Bucky face ~ -0.68; clamp so patient can touch IR but not pass through
+    const z = Math.min(standZ + oz, -0.42);
+    groupPos = [ox, standY + oy, z];
     groupRot = [0, yaw, 0];
   } else {
     const top = equipment.tableHeight + 0.06;
@@ -90,32 +91,12 @@ export function PatientModel() {
     <group position={groupPos} rotation={groupRot}>
       <group position={[0, 0, 0]} rotation={[kyph, 0, 0]}>
         <group position={[0, h * 0.48, 0]}>
-          <mesh geometry={torsoGeo} position={[0, 0, 0]} castShadow>
+          <mesh geometry={torsoGeo} castShadow>
             <meshPhysicalMaterial color={skin} roughness={0.55} metalness={0} sheen={0.3} sheenColor={skin} />
           </mesh>
           <mesh geometry={gownGeo} position={[0, -0.02, 0]}>
             <meshLambertMaterial color={patient.gown} transparent opacity={0.92} />
           </mesh>
-
-          {m.breast > 0.2 ? (
-            <>
-              <mesh
-                position={[-0.07 * m.torsoWidth, 0.42 * m.torsoLength, 0.09 * m.torsoDepth]}
-                scale={[m.breast, m.breast, m.breast]}
-              >
-                <sphereGeometry args={[0.055, 16, 12]} />
-                <meshPhysicalMaterial color={skin} roughness={0.55} />
-              </mesh>
-              <mesh
-                position={[0.07 * m.torsoWidth, 0.42 * m.torsoLength, 0.09 * m.torsoDepth]}
-                scale={[m.breast, m.breast, m.breast]}
-              >
-                <sphereGeometry args={[0.055, 16, 12]} />
-                <meshPhysicalMaterial color={skin} roughness={0.55} />
-              </mesh>
-            </>
-          ) : null}
-
           <group position={[0, 0.62 * m.torsoLength, kyph * 0.05]} rotation={[-chin * 0.3, 0, 0]}>
             <mesh position={[0, 0.05, 0]}>
               <cylinderGeometry args={[0.045, 0.055, 0.1, 16]} />
@@ -126,29 +107,12 @@ export function PatientModel() {
                 <sphereGeometry args={[0.095, 24, 18]} />
                 <meshPhysicalMaterial color={skin} roughness={0.5} />
               </mesh>
-              <mesh position={[0, -0.04, 0.02]}>
-                <sphereGeometry args={[0.07, 16, 12]} />
-                <meshPhysicalMaterial color={skin} roughness={0.55} />
-              </mesh>
-              <mesh position={[0, -0.01, 0.09]}>
-                <sphereGeometry args={[0.018, 8, 6]} />
-                <meshPhysicalMaterial color={skin} roughness={0.6} />
-              </mesh>
-              <mesh position={[-0.035, 0.02, 0.075]}>
-                <sphereGeometry args={[0.012, 8, 6]} />
-                <meshStandardMaterial color="#1a1a1c" />
-              </mesh>
-              <mesh position={[0.035, 0.02, 0.075]}>
-                <sphereGeometry args={[0.012, 8, 6]} />
-                <meshStandardMaterial color="#1a1a1c" />
-              </mesh>
               <mesh position={[0, 0.06, 0]} rotation={[0.2, 0, 0]}>
                 <sphereGeometry args={[0.098, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.5]} />
                 <meshStandardMaterial color={patient.hair} />
               </mesh>
             </group>
           </group>
-
           {([-1, 1] as const).map((side) => (
             <group
               key={side}
@@ -164,21 +128,12 @@ export function PatientModel() {
                   <capsuleGeometry args={[limbR * 0.85, 0.2, 6, 12]} />
                   <meshPhysicalMaterial color={skin} roughness={0.55} />
                 </mesh>
-                <mesh position={[0, -0.26, 0.02]}>
-                  <sphereGeometry args={[0.04 * m.limb, 12, 8]} />
-                  <meshPhysicalMaterial color={skin} roughness={0.55} />
-                </mesh>
               </group>
             </group>
           ))}
         </group>
-
         {([-1, 1] as const).map((side) => (
-          <group
-            key={side}
-            position={[side * 0.09 * m.hip, h * 0.48, 0]}
-            rotation={[0, side * hipInt, side * 0.04]}
-          >
+          <group key={side} position={[side * 0.09 * m.hip, h * 0.48, 0]} rotation={[0, side * hipInt, side * 0.04]}>
             <mesh position={[0, -0.2, 0]}>
               <capsuleGeometry args={[limbR * 1.15, 0.32, 6, 12]} />
               <meshPhysicalMaterial color={skin} roughness={0.55} />
@@ -188,15 +143,10 @@ export function PatientModel() {
                 <capsuleGeometry args={[limbR * 0.95, 0.3, 6, 12]} />
                 <meshPhysicalMaterial color={skin} roughness={0.55} />
               </mesh>
-              <mesh position={[0, -0.38, 0.04]} rotation={[0.4, 0, 0]}>
-                <boxGeometry args={[0.07 * m.limb, 0.04, 0.14]} />
-                <meshPhysicalMaterial color={skin} roughness={0.6} />
-              </mesh>
             </group>
           </group>
         ))}
       </group>
-
       {showLandmarks
         ? landmarks.map((lm) => {
             const y = (1 - scaleLandmarkY(lm.y, patient.heightCm) / patient.heightCm) * h;
