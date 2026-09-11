@@ -46,47 +46,28 @@ function smoothstep(edge0: number, edge1: number, x: number) { const t = THREE.M
 function rotateAround(point: THREE.Vector3, pivot: THREE.Vector3, quaternion: THREE.Quaternion) { point.sub(pivot).applyQuaternion(quaternion).add(pivot); }
 
 function deformSkin(root: THREE.Group, H: number, pose: { shoulderRoll: number; armRaise: number; elbowFlex: number; hipInternal: number; kneeFlex: number }) {
-  const scale = H / ATLAS_HEIGHT_M;
-  const shoulderY = 0.79 * H;
-  const elbowY = 0.63 * H;
-  const pelvisY = 0.47 * H;
-  const kneeY = 0.245 * H;
+  const scale = H / ATLAS_HEIGHT_M, shoulderY = 0.79 * H, elbowY = 0.63 * H, pelvisY = 0.47 * H, kneeY = 0.245 * H;
   const shoulderRoll = THREE.MathUtils.clamp(pose.shoulderRoll, 0, 1) * THREE.MathUtils.degToRad(28);
   const raise = THREE.MathUtils.clamp(pose.armRaise, 0, 1) * THREE.MathUtils.degToRad(65);
-  const elbow = THREE.MathUtils.clamp(pose.elbowFlex, 0, 135) * Math.PI / 180;
-  const hip = THREE.MathUtils.clamp(pose.hipInternal, -45, 45) * Math.PI / 180;
-  const knee = THREE.MathUtils.clamp(pose.kneeFlex, 0, 135) * Math.PI / 180;
-  const shoulderAxis = new THREE.Vector3(0, 0, 1);
-  const kneeAxis = new THREE.Vector3(1, 0, 0);
-
+  const elbow = THREE.MathUtils.clamp(pose.elbowFlex, 0, 135) * Math.PI / 180, hip = THREE.MathUtils.clamp(pose.hipInternal, -45, 45) * Math.PI / 180, knee = THREE.MathUtils.clamp(pose.kneeFlex, 0, 135) * Math.PI / 180;
+  const shoulderAxis = new THREE.Vector3(0, 0, 1), kneeAxis = new THREE.Vector3(1, 0, 0);
   root.traverse(object => {
     if (!(object instanceof THREE.Mesh)) return;
-    const attribute = object.geometry.getAttribute("position");
-    const base = object.userData.basePositions as Float32Array | undefined;
+    const attribute = object.geometry.getAttribute("position"), base = object.userData.basePositions as Float32Array | undefined;
     if (!base) return;
     const target = attribute.array as Float32Array;
     for (let i = 0; i < target.length; i += 3) {
-      const original = new THREE.Vector3(base[i], base[i + 1], base[i + 2]);
-      const p = original.clone();
-      const side: -1 | 1 = p.x < 0 ? -1 : 1;
-      const ax = Math.abs(p.x);
-      const shoulderPivot = new THREE.Vector3(side * 0.19, shoulderY, 0);
-      const elbowPivot = new THREE.Vector3(side * 0.31, elbowY, 0);
-      const hipPivot = new THREE.Vector3(side * 0.16, pelvisY, 0);
-      const kneePivot = new THREE.Vector3(side * 0.16, kneeY, 0);
-      const shoulderQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(-shoulderRoll * 0.65, 0, -side * raise, "XYZ"));
-      const elbowQ = new THREE.Quaternion().setFromAxisAngle(shoulderAxis, -side * elbow);
-      const hipQ = new THREE.Quaternion().setFromAxisAngle(shoulderAxis, side * hip * 0.55);
-      const kneeQ = new THREE.Quaternion().setFromAxisAngle(kneeAxis, -knee);
+      const original = new THREE.Vector3(base[i], base[i + 1], base[i + 2]), p = original.clone();
+      const side: -1 | 1 = p.x < 0 ? -1 : 1, ax = Math.abs(p.x);
+      const shoulderPivot = new THREE.Vector3(side * 0.19, shoulderY, 0), elbowPivot = new THREE.Vector3(side * 0.31, elbowY, 0), hipPivot = new THREE.Vector3(side * 0.16, pelvisY, 0), kneePivot = new THREE.Vector3(side * 0.16, kneeY, 0);
+      const shoulderQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(-shoulderRoll * 0.65, 0, -side * raise, "XYZ")), elbowQ = new THREE.Quaternion().setFromAxisAngle(shoulderAxis, -side * elbow), hipQ = new THREE.Quaternion().setFromAxisAngle(shoulderAxis, side * hip * 0.55), kneeQ = new THREE.Quaternion().setFromAxisAngle(kneeAxis, -knee);
       const shoulderEnvelope = smoothstep(0.13 * scale, 0.22 * scale, ax) * smoothstep(0.66 * H, 0.73 * H, p.y) * (1 - smoothstep(0.79 * H, 0.84 * H, p.y));
       const upperArm = smoothstep(0.18 * scale, 0.27 * scale, ax) * smoothstep(0.60 * H, 0.70 * H, p.y) * (1 - smoothstep(0.70 * H, 0.82 * H, p.y));
       const forearm = smoothstep(0.24 * scale, 0.34 * scale, ax) * smoothstep(0.43 * H, 0.61 * H, p.y) * (1 - smoothstep(0.59 * H, 0.67 * H, p.y));
       if (upperArm > 0.001) { rotateAround(p, shoulderPivot, shoulderQ); p.lerp(original, 1 - upperArm); }
       else if (forearm > 0.001) { const transformedElbow = elbowPivot.clone(); rotateAround(transformedElbow, shoulderPivot, shoulderQ); rotateAround(p, shoulderPivot, shoulderQ); rotateAround(p, transformedElbow, elbowQ); p.lerp(original, 1 - forearm); }
       else if (shoulderEnvelope > 0.001) { rotateAround(p, shoulderPivot, shoulderQ); p.lerp(original, 1 - shoulderEnvelope); }
-      const hipEnvelope = smoothstep(0.10 * scale, 0.18 * scale, ax);
-      const thigh = hipEnvelope * smoothstep(0.32 * H, 0.40 * H, p.y) * (1 - smoothstep(0.45 * H, 0.55 * H, p.y));
-      const lowerLeg = hipEnvelope * smoothstep(0.06 * H, 0.20 * H, p.y) * (1 - smoothstep(0.22 * H, 0.31 * H, p.y));
+      const hipEnvelope = smoothstep(0.10 * scale, 0.18 * scale, ax), thigh = hipEnvelope * smoothstep(0.32 * H, 0.40 * H, p.y) * (1 - smoothstep(0.45 * H, 0.55 * H, p.y)), lowerLeg = hipEnvelope * smoothstep(0.06 * H, 0.20 * H, p.y) * (1 - smoothstep(0.22 * H, 0.31 * H, p.y));
       if (thigh > 0.001) { rotateAround(p, hipPivot, hipQ); p.lerp(original, 1 - thigh); }
       else if (lowerLeg > 0.001) { const transformedKnee = kneePivot.clone(); rotateAround(transformedKnee, hipPivot, hipQ); rotateAround(p, hipPivot, hipQ); rotateAround(p, transformedKnee, kneeQ); p.lerp(original, 1 - lowerLeg); }
       target[i] = p.x; target[i + 1] = p.y; target[i + 2] = p.z;
@@ -96,9 +77,9 @@ function deformSkin(root: THREE.Group, H: number, pose: { shoulderRoll: number; 
 }
 
 export function HumanAtlasBodyOverlay() {
-  const visible = useSim(s => s.anatomyVisibility.skin); const patientId = useSim(s => s.patientId); const pose = useSim(s => s.pose);
-  const [atlas, setAtlas] = useState<THREE.Group | null>(null); const [error, setError] = useState<string | null>(null);
-  useEffect(() => { let cancelled = false; loadBodySurface().then(group => { if (cancelled) { group.traverse(o => { if (o instanceof THREE.Mesh) { o.geometry.dispose(); if (Array.isArray(o.material)) o.material.forEach(m => m.dispose()); else m.dispose(); } }); return; } setAtlas(group); }).catch(reason => { if (!cancelled) setError(reason instanceof Error ? reason.message : "Human Atlas body surface could not be loaded."); }); return () => { cancelled = true; }; }, []);
+  const visible = useSim(s => s.anatomyVisibility.skin), patientId = useSim(s => s.patientId), pose = useSim(s => s.pose);
+  const [atlas, setAtlas] = useState<THREE.Group | null>(null), [error, setError] = useState<string | null>(null);
+  useEffect(() => { let cancelled = false; loadBodySurface().then(group => { if (cancelled) { group.traverse(o => { if (o instanceof THREE.Mesh) { o.geometry.dispose(); if (Array.isArray(o.material)) o.material.forEach(material => material.dispose()); else o.material.dispose(); } }); return; } setAtlas(group); }).catch(reason => { if (!cancelled) setError(reason instanceof Error ? reason.message : "Human Atlas body surface could not be loaded."); }); return () => { cancelled = true; }; }, []);
   useEffect(() => { if (!atlas) return; const patient = patientById(patientId); deformSkin(atlas, patient.heightCm / 100, pose); }, [atlas, patientId, pose]);
   useEffect(() => () => { atlas?.traverse(o => { if (o instanceof THREE.Mesh) { o.geometry.dispose(); if (Array.isArray(o.material)) o.material.forEach(m => m.dispose()); else o.material.dispose(); } }); }, [atlas]);
   if (!visible || error || !atlas) return null;
