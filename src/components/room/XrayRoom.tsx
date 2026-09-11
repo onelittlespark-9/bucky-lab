@@ -29,17 +29,18 @@ function LightField() {
   let tubePos: [number, number, number];
   if (wall) {
     const tilt = (equipment.buckyTilt * Math.PI) / 180;
-    fieldPos = [tube.crX / 100, equipment.buckyHeight, -0.42];
+    fieldPos = [tube.crX / 100, equipment.buckyHeight, -0.68];
     fieldRot = [tilt, 0, 0];
     const detY = equipment.buckyHeight;
     const detX = lock ? 0 : tube.crX / 100;
     tubePos = [detX, detY, -0.55 + sidM];
   } else {
-    fieldPos = [equipment.tableX + tube.crX / 100, equipment.tableHeight + 0.05, equipment.tableZ];
+    // Field on table-top above under-couch detector
+    fieldPos = [equipment.tableX + tube.crX / 100, equipment.tableHeight + 0.08, equipment.tableZ];
     fieldRot = [-Math.PI / 2, 0, 0];
     tubePos = [
       equipment.tableX + (lock ? 0 : tube.crX / 100),
-      equipment.tableHeight + 0.05 + sidM,
+      equipment.tableHeight + 0.08 + sidM,
       equipment.tableZ,
     ];
   }
@@ -88,7 +89,6 @@ function LightField() {
           side={THREE.DoubleSide}
         />
       </mesh>
-
       <mesh position={fieldPos} rotation={fieldRot} renderOrder={2}>
         <planeGeometry args={[fieldW, fieldH]} />
         <meshBasicMaterial
@@ -103,13 +103,7 @@ function LightField() {
         <planeGeometry args={[fieldW, fieldH]} />
         <meshBasicMaterial color="#e2c35a" transparent opacity={0.9} depthWrite={false} wireframe />
       </mesh>
-      <pointLight
-        position={mid}
-        color="#ffe08a"
-        intensity={bright ? 2.2 : 0.9}
-        distance={Math.max(1.2, sidM)}
-        decay={2}
-      />
+      <pointLight position={mid} color="#ffe08a" intensity={bright ? 2.2 : 0.9} distance={Math.max(1.2, sidM)} decay={2} />
     </group>
   );
 }
@@ -144,9 +138,9 @@ function TubeHead() {
     pos = [detX, detY, -0.55 + sidM];
     rot = [0, Math.PI, -angle];
   } else {
-    const detY = equipment.tableHeight + 0.05 + sidM;
+    const detY = equipment.tableHeight + 0.08 + sidM;
     const detX = equipment.tableX + (lock ? 0 : tube.crX / 100);
-    const detZ = equipment.tableZ + (lock ? 0 : -(tube.crY / 100 - 0.85) * 0.2);
+    const detZ = equipment.tableZ;
     pos = [detX, detY, detZ];
     rot = [Math.PI / 2 - angle, 0, 0];
   }
@@ -188,59 +182,97 @@ function TableAndBucky() {
     equipment.placement === "upright-bucky" ||
     equipment.placement === "standing" ||
     equipment.placement === "seated";
-  const tabletop = equipment.placement === "table";
+  const onTable = equipment.placement === "table";
   const tilt = (equipment.buckyTilt * Math.PI) / 180;
+  const th = equipment.tableHeight;
 
   return (
     <>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
-        <planeGeometry args={[8, 8]} />
+        <planeGeometry args={[10, 10]} />
         <meshStandardMaterial color="#12161a" />
       </mesh>
-      <gridHelper args={[8, 16, "#2a3338", "#1a2026"]} position={[0, 0.01, 0]} />
+      <gridHelper args={[10, 20, "#2a3338", "#1a2026"]} position={[0, 0.01, 0]} />
 
-      {tabletop ? (
+      {onTable ? (
         <group position={[equipment.tableX, 0, equipment.tableZ]}>
-          <mesh position={[0, equipment.tableHeight * 0.5, 0]} receiveShadow>
-            <boxGeometry args={[0.72, equipment.tableHeight, 2.2]} />
-            <meshStandardMaterial color="#8b9096" metalness={0.2} roughness={0.5} />
+          {([-0.28, 0.28] as const).map((x) =>
+            ([-0.85, 0.85] as const).map((z) => (
+              <mesh key={`leg-${x}-${z}`} position={[x, th * 0.5, z]}>
+                <boxGeometry args={[0.06, th, 0.06]} />
+                <meshStandardMaterial color="#3a4148" metalness={0.5} roughness={0.4} />
+              </mesh>
+            )),
+          )}
+          <mesh position={[0, th, 0]} receiveShadow>
+            <boxGeometry args={[0.72, 0.05, 2.15]} />
+            <meshStandardMaterial color="#6a5f58" roughness={0.85} />
           </mesh>
-          <mesh position={[0, equipment.tableHeight + 0.03, 0]} receiveShadow>
-            <boxGeometry args={[0.7, 0.06, 2.18]} />
-            <meshStandardMaterial color="#6a5f58" roughness={0.8} />
+          <mesh position={[0, th - 0.04, 0]}>
+            <boxGeometry args={[0.7, 0.03, 2.12]} />
+            <meshStandardMaterial color="#8b9096" metalness={0.3} roughness={0.45} />
           </mesh>
-          <mesh position={[0, equipment.tableHeight - 0.08, 0]}>
-            <boxGeometry args={[0.5, 0.04, 0.43]} />
-            <meshStandardMaterial color="#1a1e22" />
+          {/* Under-couch Bucky / detector tray */}
+          <mesh position={[0, th - 0.14, 0]}>
+            <boxGeometry args={[0.48, 0.05, 0.52]} />
+            <meshStandardMaterial color="#1a1e24" metalness={0.4} roughness={0.35} />
+          </mesh>
+          <mesh position={[0, th - 0.11, 0]}>
+            <boxGeometry args={[0.42, 0.015, 0.43]} />
+            <meshStandardMaterial color="#0a0c10" roughness={0.9} />
+          </mesh>
+          <mesh position={[-0.32, th - 0.14, 0]}>
+            <boxGeometry args={[0.03, 0.04, 1.4]} />
+            <meshStandardMaterial color="#4a5560" metalness={0.5} roughness={0.4} />
+          </mesh>
+          <mesh position={[0.32, th - 0.14, 0]}>
+            <boxGeometry args={[0.03, 0.04, 1.4]} />
+            <meshStandardMaterial color="#4a5560" metalness={0.5} roughness={0.4} />
           </mesh>
         </group>
       ) : null}
 
       {wall ? (
-        <group position={[0, 0, -0.72]}>
-          <mesh position={[0, 1.05, 0]}>
-            <boxGeometry args={[0.08, 2.1, 0.08]} />
-            <meshStandardMaterial color="#3a4148" metalness={0.4} roughness={0.4} />
+        <group position={[0, 0, -0.78]}>
+          <mesh position={[0, 0.03, 0]}>
+            <boxGeometry args={[0.55, 0.06, 0.4]} />
+            <meshStandardMaterial color="#2a3038" metalness={0.4} roughness={0.45} />
           </mesh>
-          <group position={[0, equipment.buckyHeight, 0.06]} rotation={[tilt, 0, 0]}>
+          <mesh position={[0, 1.15, 0]}>
+            <boxGeometry args={[0.12, 2.3, 0.12]} />
+            <meshStandardMaterial color="#3a4148" metalness={0.45} roughness={0.4} />
+          </mesh>
+          <mesh position={[0, 2.15, -0.08]}>
+            <boxGeometry args={[0.28, 0.35, 0.2]} />
+            <meshStandardMaterial color="#2a3036" metalness={0.35} roughness={0.5} />
+          </mesh>
+          <group position={[0, equipment.buckyHeight, 0.1]} rotation={[tilt, 0, 0]}>
             <mesh>
-              <boxGeometry args={[0.43, 0.52, 0.04]} />
-              <meshStandardMaterial color="#1a1e22" />
+              <boxGeometry args={[0.55, 0.62, 0.08]} />
+              <meshStandardMaterial color="#1c2228" metalness={0.3} roughness={0.4} />
             </mesh>
-            <mesh position={[0, 0, 0.03]}>
-              <boxGeometry args={[0.35, 0.43, 0.01]} />
-              <meshStandardMaterial color="#0d1013" />
+            <mesh position={[0, 0, 0.05]}>
+              <boxGeometry args={[0.43, 0.48, 0.02]} />
+              <meshStandardMaterial color="#050608" roughness={0.95} />
+            </mesh>
+            <mesh position={[-0.3, 0, 0]}>
+              <boxGeometry args={[0.04, 0.5, 0.06]} />
+              <meshStandardMaterial color="#4a5560" />
+            </mesh>
+            <mesh position={[0.3, 0, 0]}>
+              <boxGeometry args={[0.04, 0.5, 0.06]} />
+              <meshStandardMaterial color="#4a5560" />
             </mesh>
           </group>
         </group>
       ) : null}
 
-      <mesh position={[0, 1.6, 3.4]}>
-        <boxGeometry args={[6, 3.2, 0.08]} />
+      <mesh position={[0, 1.6, 4]}>
+        <boxGeometry args={[8, 3.2, 0.08]} />
         <meshStandardMaterial color="#1a2026" />
       </mesh>
-      <mesh position={[-3.2, 1.6, 0]}>
-        <boxGeometry args={[0.08, 3.2, 6]} />
+      <mesh position={[-3.8, 1.6, 0]}>
+        <boxGeometry args={[0.08, 3.2, 8]} />
         <meshStandardMaterial color="#161c22" />
       </mesh>
     </>
