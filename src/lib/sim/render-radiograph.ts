@@ -55,11 +55,7 @@ function pathsToOD(p: Paths, kvp: number): number {
   );
 }
 
-function samplePhoto(
-  photo: ImageData,
-  u: number,
-  v: number,
-): number | null {
+function samplePhoto(photo: ImageData, u: number, v: number): number | null {
   if (u < 0 || v < 0 || u > 1 || v > 1) return null;
   const x = u * (photo.width - 1);
   const y = v * (photo.height - 1);
@@ -97,7 +93,12 @@ function localCoords(
   const angle = (tube.angle * Math.PI) / 180;
   const rx = cmX;
   const ry = cmY * Math.cos(angle) - Math.sin(angle) * 4;
-  if (projection.anatomy === "torso-ap" || projection.anatomy === "torso-lat" || projection.anatomy === "cspine-lat" || projection.anatomy === "shoulder-ap") {
+  if (
+    projection.anatomy === "torso-ap" ||
+    projection.anatomy === "torso-lat" ||
+    projection.anatomy === "cspine-lat" ||
+    projection.anatomy === "shoulder-ap"
+  ) {
     return { x: tube.crX + rx, y: tube.crY + ry };
   }
   if (projection.anatomy === "skull-lat") {
@@ -106,7 +107,12 @@ function localCoords(
   return { x: rx + tube.crX * 0.15, y: ry + (tube.crY - projection.cr.y) * 0.25 };
 }
 
-function photoUV(projection: Projection, x: number, y: number, patient: Patient): { u: number; v: number } | null {
+function photoUV(
+  projection: Projection,
+  x: number,
+  y: number,
+  patient: Patient,
+): { u: number; v: number } | null {
   if (!projection.referenceImage) return null;
   if (projection.id === "pa-chest") {
     const y0 = 18 * (patient.heightCm / 170);
@@ -131,8 +137,6 @@ export async function renderRadiograph(args: {
   height?: number;
 }): Promise<RadiographResult> {
   const { patient, projection, pose, tube, exposure } = args;
-  // pathologyId is accepted so the call from the store succeeds.
-  // Visual rendering of pathology will be added in a later step.
   const aspect = tube.collimationW / tube.collimationH;
   const height = args.height ?? 640;
   const width = args.width ?? Math.round(height * aspect);
@@ -148,9 +152,6 @@ export async function renderRadiograph(args: {
 
   const signal = new Float32Array(width * height);
   let sum = 0;
-  let sumSq = 0;
-  let minS = Infinity;
-  let maxS = 0;
 
   for (let py = 0; py < height; py++) {
     for (let px = 0; px < width; px++) {
@@ -165,8 +166,7 @@ export async function renderRadiograph(args: {
         if (uv) {
           const g = samplePhoto(photo, uv.u, uv.v);
           if (g !== null) {
-            const edge =
-              Math.min(uv.u, uv.v, 1 - uv.u, 1 - uv.v) * 8;
+            const edge = Math.min(uv.u, uv.v, 1 - uv.u, 1 - uv.v) * 8;
             const fade = clamp(edge, 0, 1);
             const Tphoto = clamp(invDisplay(g) / 0.12, 0.002, 1);
             const habitus = Math.exp(-muEffective("soft", kvp) * (thickness - 22) * 0.35);
@@ -183,9 +183,6 @@ export async function renderRadiograph(args: {
       }
       signal[py * width + px] = s;
       sum += s;
-      sumSq += s * s;
-      if (s < minS) minS = s;
-      if (s > maxS) maxS = s;
     }
   }
 
@@ -204,16 +201,31 @@ export async function renderRadiograph(args: {
   let contrastAcc = 0;
   let contrastN = 0;
 
+  /**
+   * Display mapping so students can SEE factor changes:
+   * - mAs / SID → brightness (receptor exposure) via mean signal
+   * - low mAs → more quantum noise (grain)
+   * - high kVp → longer grey scale (lower contrast); low kVp → high contrast
+   * - short SID → slightly softer edges (geometric unsharpness proxy)
+   */
   const logMean = Math.log(mean + 1e-5);
-  const windowW = 3.2 - clamp((kvp - 60) / 80, 0, 1.1);
-  const windowL = logMean + (mean > 90 ? 0.15 : mean < 12 ? -0.25 : 0);
+  const contrastScale = clamp((kvp - 45) / 80, 0, 1);
+  const windowW = 1.55 + contrastScale * 2.4;
+  const windowL = logMean + (mean > 100 ? 0.2 : mean < 10 ? -0.35 : 0);
+  const noiseGain = 0.35 + 1.8 / Math.sqrt(Math.max(0.25, mean / 40));
+  const sidBlur = clamp((120 - tube.sid) / 80, 0, 1);
 
   for (let i = 0; i < n; i++) {
     let s = signal[i]!;
-    const sigma = 0.55 / Math.sqrt(Math.max(0.4, s));
     const nx = i % width;
     const ny = (i / width) | 0;
-    const nse = (fbm(nx * 0.85, ny * 0.85, seed + 4) - 0.5) * 2 * sigma * 8;
+    if (sidBlur > 0.05 && nx > 0 && nx < width - 1) {
+      const left = signal[i - 1]!;
+      const right = signal[i + 1]!;
+      s = s * (1 - 0.22 * sidBlur) + (left + right) * 0.11 * sidBlur;
+    }
+    const sigma = noiseGain / Math.sqrt(Math.max(0.35, s));
+    const nse = (fbm(nx * 0.85, ny * 0.85, seed + 4) - 0.5) * 2 * sigma * 10;
     s = Math.max(0, s + nse);
     noiseAcc += Math.abs(nse);
     if (s > well) {
@@ -223,8 +235,11 @@ export async function renderRadiograph(args: {
     const L = Math.log(s + 1e-5);
     let d = (L - windowL) / windowW + 0.5;
     d = 1 - clamp(d, 0, 1);
-    if (kvp > 110) {
-      d = 0.12 + d * 0.76;
+    if (kvp >= 100) {
+      d = 0.08 + d * 0.84;
+    } else if (kvp <= 55) {
+      d = d < 0.5 ? d * 0.85 : 0.5 + (d - 0.5) * 1.15;
+      d = clamp(d, 0, 1);
     }
     const v = Math.round(clamp(d, 0, 1) * 255);
     const o = i * 4;
