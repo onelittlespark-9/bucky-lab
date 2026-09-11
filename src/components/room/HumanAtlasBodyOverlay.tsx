@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import * as THREE from "three";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { useSim } from "@/lib/sim/store";
 import { patientById } from "@/lib/sim/patients";
 import type { V3 } from "@/lib/sim/patient-kinematics";
@@ -31,14 +32,7 @@ async function loadBodySurface(): Promise<THREE.Group> {
         geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(buffer, part.indices, part.indexCount), 1));
         geometries.push(geometry);
       }
-      const merged = THREE.BufferGeometryUtils?.mergeGeometries ? THREE.BufferGeometryUtils.mergeGeometries(geometries, false) : null;
-      if (!merged) {
-        const { mergeGeometries } = await import("three/examples/jsm/utils/BufferGeometryUtils.js");
-        const fallback = mergeGeometries(geometries, false); if (!fallback) throw new Error(`Human Atlas chunk ${chunkIndex} could not be merged.`);
-        fallback.computeBoundingSphere();
-        const mesh = new THREE.Mesh(fallback, new THREE.MeshPhysicalMaterial({ color: "#b88970", roughness: 0.66, metalness: 0, clearcoat: 0.03, side: THREE.DoubleSide, depthWrite: true }));
-        mesh.name = `Human Atlas body surface chunk ${chunkIndex}`; mesh.castShadow = true; mesh.receiveShadow = true; mesh.userData.basePositions = new Float32Array(fallback.getAttribute("position").array as Float32Array); root.add(mesh); return;
-      }
+      const merged = mergeGeometries(geometries, false); if (!merged) throw new Error(`Human Atlas chunk ${chunkIndex} could not be merged.`);
       merged.computeBoundingSphere();
       const mesh = new THREE.Mesh(merged, new THREE.MeshPhysicalMaterial({ color: "#b88970", roughness: 0.66, metalness: 0, clearcoat: 0.03, side: THREE.DoubleSide, depthWrite: true }));
       mesh.name = `Human Atlas body surface chunk ${chunkIndex}`; mesh.castShadow = true; mesh.receiveShadow = true; mesh.userData.basePositions = new Float32Array(merged.getAttribute("position").array as Float32Array); root.add(mesh);
@@ -59,8 +53,7 @@ function PatientTransform({ children }: { children: ReactNode }) {
 
 function rotateWeighted(point: THREE.Vector3, pivot: THREE.Vector3, axis: THREE.Vector3, angle: number, weight: number) {
   if (weight <= 0.001) return;
-  const q = new THREE.Quaternion().setFromAxisAngle(axis, angle * weight);
-  point.sub(pivot).applyQuaternion(q).add(pivot);
+  const q = new THREE.Quaternion().setFromAxisAngle(axis, angle * weight); point.sub(pivot).applyQuaternion(q).add(pivot);
 }
 function smoothstep(edge0: number, edge1: number, x: number) { const t = THREE.MathUtils.clamp((x - edge0) / (edge1 - edge0), 0, 1); return t * t * (3 - 2 * t); }
 
@@ -76,9 +69,7 @@ function deformSkin(root: THREE.Group, H: number, pose: { shoulderRoll: number; 
     const attribute = object.geometry.getAttribute("position"); const base = object.userData.basePositions as Float32Array | undefined; if (!base) return;
     const target = attribute.array as Float32Array;
     for (let i = 0; i < target.length; i += 3) {
-      const p = new THREE.Vector3(base[i], base[i + 1], base[i + 2]);
-      const side: -1 | 1 = p.x < 0 ? -1 : 1;
-      const ax = Math.abs(p.x);
+      const p = new THREE.Vector3(base[i], base[i + 1], base[i + 2]); const side: -1 | 1 = p.x < 0 ? -1 : 1; const ax = Math.abs(p.x);
       const armEnvelope = smoothstep(0.085 * scale, 0.14 * scale, ax);
       const upper = armEnvelope * smoothstep(0.64 * H, 0.79 * H, p.y) * (1 - smoothstep(0.78 * H, 0.86 * H, p.y));
       const lower = armEnvelope * smoothstep(0.43 * H, 0.64 * H, p.y) * (1 - smoothstep(0.63 * H, 0.71 * H, p.y));
