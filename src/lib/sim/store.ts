@@ -15,6 +15,8 @@ import { patientById, PATIENTS } from "./patients";
 import { projectionById, PROJECTIONS, scaleLandmarkY } from "./projections";
 import { predictEI, suggestedTechnique } from "./exposure";
 import { renderRadiograph, preloadRadiographAssets } from "./render-radiograph";
+import type { PathologyId } from "./requests";
+import { requestById } from "./requests";
 
 preloadRadiographAssets(PROJECTIONS);
 
@@ -23,6 +25,10 @@ export interface SimStore {
   mode: Mode;
   patientId: string;
   projectionId: string;
+  /** Current imaging request id (if started from the request list) */
+  requestId: string | null;
+  /** Pathology that should appear on the radiograph */
+  pathologyId: PathologyId;
   pose: SimPose;
   tube: TubeState;
   exposure: ExposureState;
@@ -36,7 +42,7 @@ export interface SimStore {
   setMode: (m: Mode) => void;
   setPatient: (id: string) => void;
   setProjection: (id: string) => void;
-  startExam: (projectionId: string, patientId?: string) => void;
+  startExam: (projectionId: string, patientId?: string, requestId?: string) => void;
   patchPose: (p: Partial<SimPose>) => void;
   patchTube: (t: Partial<TubeState>) => void;
   patchExposure: (e: Partial<ExposureState>) => void;
@@ -155,6 +161,8 @@ export const useSim = create<SimStore>((set, get) => ({
   mode: "practice",
   patientId: "amara",
   projectionId: "pa-chest",
+  requestId: null,
+  pathologyId: "none",
   pose: presentedPose("pa-chest"),
   tube: presentedTube("pa-chest", "amara", "practice"),
   exposure: defaultExposure("pa-chest"),
@@ -178,12 +186,15 @@ export const useSim = create<SimStore>((set, get) => ({
       result: null,
     });
   },
-  startExam: (projectionId, patientId) => {
+  startExam: (projectionId, patientId, requestId) => {
     const pid = patientId ?? get().patientId;
     const { mode } = get();
+    const req = requestId ? requestById(requestId) : null;
     set({
       projectionId,
       patientId: pid,
+      requestId: requestId ?? null,
+      pathologyId: req?.pathologyId ?? "none",
       pose: presentedPose(projectionId),
       tube: presentedTube(projectionId, pid, mode),
       exposure: defaultExposure(projectionId),
@@ -235,6 +246,7 @@ export const useSim = create<SimStore>((set, get) => ({
         pose: s.pose,
         tube: s.tube,
         exposure: s.exposure,
+        pathologyId: s.pathologyId,
       });
       set({ result, screen: "viewer", exposing: false });
     } catch (err) {
