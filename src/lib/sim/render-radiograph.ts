@@ -115,9 +115,9 @@ function photoUV(
 ): { u: number; v: number } | null {
   if (!projection.referenceImage) return null;
   if (projection.id === "pa-chest") {
-    const y0 = 18 * (patient.heightCm / 170);
-    const y1 = 56 * (patient.heightCm / 170);
-    const hw = 18 * patient.morph.torsoWidth;
+    const y0 = 12 * (patient.heightCm / 170);
+    const y1 = 62 * (patient.heightCm / 170);
+    const hw = 20 * patient.morph.torsoWidth;
     return { u: (x + hw) / (hw * 2), v: (y - y0) / (y1 - y0) };
   }
   if (projection.id === "pa-hand") {
@@ -193,7 +193,6 @@ export async function renderRadiograph(args: {
 
   const n = width * height;
   const mean = sum / n;
-
   const well = 280;
   const canvas = document.createElement("canvas");
   canvas.width = width;
@@ -253,9 +252,8 @@ export async function renderRadiograph(args: {
     }
   }
 
-  if (exposure.marker) {
-    stampMarker(img, width, height, exposure.marker, 28, height - 48);
-  }
+  const markerLetter = exposure.marker === "L" || exposure.marker === "R" ? exposure.marker : "R";
+  stampMarker(img, width, height, markerLetter, Math.round(width * 0.08), Math.round(height * 0.12));
   drawCrosshair(img, width, height, width / 2, height / 2);
 
   g.putImageData(img, 0, 0);
@@ -271,28 +269,13 @@ export async function renderRadiograph(args: {
     exposure,
     tube,
   );
-  const scores = scoreExposure({
-    patient,
-    projection,
-    pose,
-    tube,
-    exposure,
-    metrics,
-  });
+  const scores = scoreExposure({ patient, projection, pose, tube, exposure, metrics });
   const overall =
     scores.reduce((a, c) => a + c.weight * gradeNum(c.grade), 0) /
     scores.reduce((a, c) => a + c.weight, 0);
   const overallGrade = overall >= 0.85 ? "excellent" : overall >= 0.62 ? "acceptable" : "repeat";
 
-  return {
-    metrics,
-    scores,
-    overall,
-    overallGrade,
-    width,
-    height,
-    dataUrl,
-  };
+  return { metrics, scores, overall, overallGrade, width, height, dataUrl };
 }
 
 function gradeNum(g: "excellent" | "acceptable" | "repeat"): number {
@@ -301,19 +284,27 @@ function gradeNum(g: "excellent" | "acceptable" | "repeat"): number {
 
 function stampMarker(img: ImageData, w: number, h: number, letter: "L" | "R", x: number, y: number) {
   const glyph = letter === "L" ? L_GLYPH : R_GLYPH;
+  const scale = 5;
+  const put = (px: number, py: number, r: number, g: number, b: number) => {
+    if (px < 0 || py < 0 || px >= w || py >= h) return;
+    const o = (py * w + px) * 4;
+    img.data[o] = r;
+    img.data[o + 1] = g;
+    img.data[o + 2] = b;
+    img.data[o + 3] = 255;
+  };
   for (let gy = 0; gy < glyph.length; gy++) {
     const row = glyph[gy]!;
     for (let gx = 0; gx < row.length; gx++) {
       if (row[gx] !== "#") continue;
-      for (let oy = 0; oy < 3; oy++) {
-        for (let ox = 0; ox < 3; ox++) {
-          const px = x + gx * 3 + ox;
-          const py = y + gy * 3 + oy;
-          if (px < 0 || py < 0 || px >= w || py >= h) continue;
-          const o = (py * w + px) * 4;
-          img.data[o] = 245;
-          img.data[o + 1] = 245;
-          img.data[o + 2] = 250;
+      for (let oy = -1; oy <= scale; oy++) {
+        for (let ox = -1; ox <= scale; ox++) {
+          put(x + gx * scale + ox, y + gy * scale + oy, 10, 10, 12);
+        }
+      }
+      for (let oy = 0; oy < scale; oy++) {
+        for (let ox = 0; ox < scale; ox++) {
+          put(x + gx * scale + ox, y + gy * scale + oy, 250, 250, 255);
         }
       }
     }
