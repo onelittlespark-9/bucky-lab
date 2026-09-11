@@ -35,7 +35,6 @@ function LightField() {
     const detX = lock ? 0 : tube.crX / 100;
     tubePos = [detX, detY, -0.55 + sidM];
   } else {
-    // Field on table-top above under-couch detector
     fieldPos = [equipment.tableX + tube.crX / 100, equipment.tableHeight + 0.08, equipment.tableZ];
     fieldRot = [-Math.PI / 2, 0, 0];
     tubePos = [
@@ -78,7 +77,7 @@ function LightField() {
       <mesh
         geometry={coneGeo}
         position={tubePos}
-        rotation={wall ? [0, Math.PI, -angle] : [Math.PI / 2 - angle, 0, 0]}
+        rotation={wall ? [0, 0, -angle] : [Math.PI / 2 - angle, 0, 0]}
         renderOrder={1}
       >
         <meshBasicMaterial
@@ -136,7 +135,7 @@ function TubeHead() {
     const detY = lock ? equipment.buckyHeight : equipment.buckyHeight + (tube.crY / 100 - 1.0) * 0.15;
     const detX = lock ? 0 : tube.crX / 100;
     pos = [detX, detY, -0.55 + sidM];
-    rot = [0, Math.PI, -angle];
+    rot = [0, 0, -angle];
   } else {
     const detY = equipment.tableHeight + 0.08 + sidM;
     const detX = equipment.tableX + (lock ? 0 : tube.crX / 100);
@@ -212,7 +211,6 @@ function TableAndBucky() {
             <boxGeometry args={[0.7, 0.03, 2.12]} />
             <meshStandardMaterial color="#8b9096" metalness={0.3} roughness={0.45} />
           </mesh>
-          {/* Under-couch Bucky / detector tray */}
           <mesh position={[0, th - 0.14, 0]}>
             <boxGeometry args={[0.48, 0.05, 0.52]} />
             <meshStandardMaterial color="#1a1e24" metalness={0.4} roughness={0.35} />
