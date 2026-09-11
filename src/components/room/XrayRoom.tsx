@@ -1,9 +1,9 @@
 import { ContactShadows, OrbitControls, Html } from "@react-three/drei";
-import * as THREE from "three";
 import { useSim } from "@/lib/sim/store";
 import { PatientModel } from "./PatientModel";
 import { InternalAnatomy } from "./InternalAnatomy";
 import { DetailedSkeletalOverlay } from "./DetailedSkeletalOverlay";
+import { PatientRig } from "./PatientRig";
 import { XraySourceAssembly } from "./XraySourceAssembly";
 import type { AnatomyLayer } from "@/lib/sim/muscle-segmentation";
 
@@ -44,8 +44,12 @@ export function XrayRoom() {
     <directionalLight position={[2.5, 4, 2]} intensity={1.15} castShadow shadow-mapSize={[1024, 1024]} />
     <directionalLight position={[-2, 2, -1]} intensity={.25} />
     <TableAndBucky />
-    <PatientModel />
-    <InternalAnatomy />
+    {/* Skin, fat, muscle and organs share one patient rig. The atlas skeleton retains its
+        own identical placement transform until its loader is migrated to the rig. */}
+    <PatientRig>
+      <PatientModel />
+      <InternalAnatomy />
+    </PatientRig>
     <DetailedSkeletalOverlay />
     <AnatomyControls />
     <XraySourceAssembly />
