@@ -24,14 +24,15 @@ function regionFor(name: string): BoneRegion {
   return "axial";
 }
 function sideFor(bounds: [number[], number[]]): -1 | 1 { return ((bounds[0][0] + bounds[1][0]) * 0.5) < 0 ? -1 : 1; }
-function pivotFor(region: BoneRegion, side: -1 | 1, center: THREE.Vector3, H: number) {
-  const shoulderY = 0.79 * H; const pelvisY = 0.47 * H; const kneeY = 0.245 * H;
-  if (region === "scapula" || region === "clavicle" || region === "upperArm") return new THREE.Vector3(side * Math.max(0.10, Math.abs(center.x)), shoulderY, center.z);
-  if (region === "forearm") return new THREE.Vector3(side * Math.max(0.09, Math.abs(center.x)), shoulderY - 0.16 * (H / ATLAS_HEIGHT_M), center.z);
-  if (region === "hand") return new THREE.Vector3(side * Math.max(0.07, Math.abs(center.x)), shoulderY - 0.31 * (H / ATLAS_HEIGHT_M), center.z);
-  if (region === "thigh") return new THREE.Vector3(side * Math.max(0.08, Math.abs(center.x)), pelvisY, center.z);
-  if (region === "lowerLeg") return new THREE.Vector3(side * Math.max(0.08, Math.abs(center.x)), kneeY, center.z);
-  if (region === "foot") return new THREE.Vector3(side * Math.max(0.08, Math.abs(center.x)), 0.055 * H, center.z);
+function pivotFor(region: BoneRegion, side: -1 | 1, center: THREE.Vector3, _H: number) {
+  // Use fixed anatomical joint centres rather than the mesh centre. This keeps a bone rigid
+  // around the same shoulder/elbow/hip/knee joint as its neighbouring bones.
+  if (region === "scapula" || region === "clavicle" || region === "upperArm") return new THREE.Vector3(side * 0.19, 0.79, center.z);
+  if (region === "forearm") return new THREE.Vector3(side * 0.31, 0.63, center.z);
+  if (region === "hand") return new THREE.Vector3(side * 0.45, 0.48, center.z);
+  if (region === "thigh") return new THREE.Vector3(side * 0.16, 0.47, center.z);
+  if (region === "lowerLeg") return new THREE.Vector3(side * 0.16, 0.245, center.z);
+  if (region === "foot") return new THREE.Vector3(side * 0.16, 0.055, center.z);
   return new THREE.Vector3(0, 0, 0);
 }
 
@@ -92,7 +93,6 @@ function articulate(root: THREE.Group, pose: { shoulderRoll: number; armRaise: n
     const region = object.userData.atlasRegion as BoneRegion; const side = object.userData.atlasSide as -1 | 1; const pivot = object.userData.atlasPivot as THREE.Vector3;
     object.rotation.set(0, 0, 0); object.position.copy(pivot);
     if (region === "axial" || region === "pelvis") return;
-
     if (region === "scapula") {
       const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, -side * shoulderAngle * 0.75, 0, "XYZ"));
       object.quaternion.copy(q); object.position.z = pivot.z + 0.035 * (shoulderAngle / THREE.MathUtils.degToRad(28)); object.position.x = pivot.x + side * 0.018 * (shoulderAngle / THREE.MathUtils.degToRad(28));
@@ -102,25 +102,28 @@ function articulate(root: THREE.Group, pose: { shoulderRoll: number; armRaise: n
       object.rotation.z = -side * shoulderAngle * 0.35; object.position.z = pivot.z + 0.018 * (shoulderAngle / THREE.MathUtils.degToRad(28));
       return;
     }
-
     const shoulderQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(-shoulderAngle * 0.65, 0, -side * raiseAngle, "XYZ"));
-    const shoulderPivot = new THREE.Vector3(pivot.x, 0.79 * (ATLAS_HEIGHT_M), pivot.z);
-    const elbowPivot = new THREE.Vector3(side * Math.max(0.09, Math.abs(pivot.x)), 0.63 * ATLAS_HEIGHT_M, pivot.z);
+    const shoulderPivot = new THREE.Vector3(side * 0.19, 0.79, pivot.z);
+    const elbowPivot = new THREE.Vector3(side * 0.31, 0.63, pivot.z);
+    const wristPivot = new THREE.Vector3(side * 0.45, 0.48, pivot.z);
     const elbowQ = new THREE.Quaternion().setFromAxisAngle(zAxis, -side * elbowAngle);
-
     if (region === "upperArm") {
       object.quaternion.copy(shoulderQ); object.position.copy(pivot); transformPoint(object.position, shoulderPivot, shoulderQ); return;
     }
-    if (region === "forearm" || region === "hand") {
-      const chainQ = shoulderQ.clone().multiply(elbowQ);
-      const chainPivot = elbowPivot.clone(); transformPoint(chainPivot, shoulderPivot, shoulderQ);
-      object.quaternion.copy(chainQ); object.position.copy(pivot); transformPoint(object.position, shoulderPivot, shoulderQ); transformPoint(object.position, chainPivot, elbowQ); return;
+    if (region === "forearm") {
+      const chainQ = shoulderQ.clone().multiply(elbowQ); const transformedElbow = elbowPivot.clone(); transformPoint(transformedElbow, shoulderPivot, shoulderQ);
+      object.quaternion.copy(chainQ); object.position.copy(pivot); transformPoint(object.position, shoulderPivot, shoulderQ); transformPoint(object.position, transformedElbow, elbowQ); return;
+    }
+    if (region === "hand") {
+      const chainQ = shoulderQ.clone().multiply(elbowQ); const transformedWrist = wristPivot.clone(); const transformedElbow = elbowPivot.clone();
+      transformPoint(transformedElbow, shoulderPivot, shoulderQ); transformPoint(transformedWrist, shoulderPivot, shoulderQ); transformPoint(transformedWrist, transformedElbow, elbowQ);
+      object.quaternion.copy(chainQ); object.position.copy(pivot); transformPoint(object.position, shoulderPivot, shoulderQ); transformPoint(object.position, transformedElbow, elbowQ); return;
     }
     if (region === "thigh" || region === "lowerLeg" || region === "foot") {
       const hipQ = new THREE.Quaternion().setFromAxisAngle(zAxis, side * hipAngle * 0.55);
-      const hipPivot = new THREE.Vector3(pivot.x, 0.47 * ATLAS_HEIGHT_M, pivot.z);
+      const hipPivot = new THREE.Vector3(side * 0.16, 0.47, pivot.z);
       if (region === "thigh") { object.quaternion.copy(hipQ); transformPoint(object.position, hipPivot, hipQ); return; }
-      const kneePivot = new THREE.Vector3(pivot.x, 0.245 * ATLAS_HEIGHT_M, pivot.z); transformPoint(kneePivot, hipPivot, hipQ);
+      const kneePivot = new THREE.Vector3(side * 0.16, 0.245, pivot.z); transformPoint(kneePivot, hipPivot, hipQ);
       const kneeQ = new THREE.Quaternion().setFromAxisAngle(xAxis, -kneeAngle);
       object.quaternion.copy(hipQ.clone().multiply(kneeQ)); transformPoint(object.position, hipPivot, hipQ); transformPoint(object.position, kneePivot, kneeQ);
     }
