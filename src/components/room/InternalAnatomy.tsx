@@ -4,6 +4,7 @@ import { useSim } from "@/lib/sim/store";
 import { patientById } from "@/lib/sim/patients";
 import { SHARED_ORGANS, scaleAnatomyCm } from "@/lib/sim/anatomy-structures";
 import { HeartMesh, KidneyMesh, LiverMesh, LungMesh, StomachMesh } from "./AnatomicalMeshes";
+import { SegmentedMuscles } from "./SegmentedMuscles";
 import { patientKinematics, type V3 } from "@/lib/sim/patient-kinematics";
 
 function TissueMaterial({ color, opacity, roughness = .7 }: { color: string; opacity: number; roughness?: number }) {
@@ -17,28 +18,20 @@ function Sleeve({ a, b, radius, color, opacity }: { a: V3; b: V3; radius: number
   return <mesh position={position} quaternion={quaternion} renderOrder={3}><capsuleGeometry args={[radius, Math.max(.01, length - radius * 1.55), 12, 20]} /><TissueMaterial color={color} opacity={opacity} /></mesh>;
 }
 
-function AttachedSoftTissue({ H, s, torsoWidth, torsoDepth, shoulder, hip, limb, pose, placement, buckyTilt, projectionId, showFat, showMuscle, exposing }: {
+function AttachedSoftTissue({ H, s, torsoWidth, torsoDepth, shoulder, hip, limb, pose, placement, buckyTilt, projectionId, showFat, exposing }: {
   H: number; s: number; torsoWidth: number; torsoDepth: number; shoulder: number; hip: number; limb: number;
   pose: { elbowFlex: number; hipInternal: number; armRaise: number; shoulderRoll: number; kneeFlex: number };
   placement: "standing" | "seated" | "upright-bucky" | "table"; buckyTilt: number; projectionId: string;
-  showFat: boolean; showMuscle: boolean; exposing: boolean;
+  showFat: boolean; exposing: boolean;
 }) {
   const k = patientKinematics({ H, s, shoulder, hip, limb, elbowFlex: pose.elbowFlex, hipInternal: pose.hipInternal, armRaise: pose.armRaise, shoulderRoll: pose.shoulderRoll, kneeFlex: pose.kneeFlex, projectionId, placement, buckyTilt });
   const limbR = .043 * limb * s;
-  const fatOpacity = exposing ? .18 : .055, muscleOpacity = exposing ? .20 : .06;
+  const fatOpacity = exposing ? .18 : .055;
   const fatTorso = { pelvis: [.48 * hip * s, .17 * H, .48 * torsoDepth] as V3, waist: [.54 * torsoWidth, .16 * H, .52 * torsoDepth] as V3, chest: [.56 * torsoWidth, .205 * H, .54 * torsoDepth] as V3 };
-  const muscleTorso = { pelvis: [.42 * hip * s, .145 * H, .41 * torsoDepth] as V3, waist: [.46 * torsoWidth, .14 * H, .44 * torsoDepth] as V3, chest: [.48 * torsoWidth, .175 * H, .46 * torsoDepth] as V3 };
   return <group renderOrder={3}>
     {showFat && <><Ellipsoid position={[0, k.Y.pelvis, 0]} scale={fatTorso.pelvis} color="#c18c68" opacity={fatOpacity} /><Ellipsoid position={[0, k.Y.waist, 0]} scale={fatTorso.waist} color="#c18c68" opacity={fatOpacity} /><Ellipsoid position={[0, .70 * H, 0]} scale={fatTorso.chest} color="#c18c68" opacity={fatOpacity} /></>}
-    {showMuscle && <><Ellipsoid position={[0, k.Y.pelvis + .008 * s, -.004 * s]} scale={muscleTorso.pelvis} color="#a85f56" opacity={muscleOpacity} /><Ellipsoid position={[0, .59 * H, -.004 * s]} scale={muscleTorso.waist} color="#a85f56" opacity={muscleOpacity} /><Ellipsoid position={[0, .70 * H, -.005 * s]} scale={muscleTorso.chest} color="#a85f56" opacity={muscleOpacity} /></>}
-    {k.arms.map((a, i) => <group key={`arm-tissue-${i}`}>
-      {showFat && <><Sleeve a={a.shoulder} b={a.upper} radius={limbR * 1.52} color="#c18c68" opacity={fatOpacity} /><Sleeve a={a.upper} b={a.elbow} radius={limbR * 1.24} color="#c18c68" opacity={fatOpacity} /><Sleeve a={a.elbow} b={a.wrist} radius={limbR * 1.08} color="#c18c68" opacity={fatOpacity} /></>}
-      {showMuscle && <><Sleeve a={a.shoulder} b={a.upper} radius={limbR * 1.28} color="#a85f56" opacity={muscleOpacity} /><Sleeve a={a.upper} b={a.elbow} radius={limbR} color="#a85f56" opacity={muscleOpacity} /><Sleeve a={a.elbow} b={a.wrist} radius={limbR * .86} color="#a85f56" opacity={muscleOpacity} /></>}
-    </group>)}
-    {k.legs.map((l, i) => <group key={`leg-tissue-${i}`}>
-      {showFat && <><Sleeve a={l.hip} b={l.thigh} radius={limbR * 1.72} color="#c18c68" opacity={fatOpacity} /><Sleeve a={l.thigh} b={l.knee} radius={limbR * 1.42} color="#c18c68" opacity={fatOpacity} /><Sleeve a={l.knee} b={l.calf} radius={limbR * 1.22} color="#c18c68" opacity={fatOpacity} /><Sleeve a={l.calf} b={l.ankle} radius={limbR} color="#c18c68" opacity={fatOpacity} /></>}
-      {showMuscle && <><Sleeve a={l.hip} b={l.thigh} radius={limbR * 1.48} color="#a85f56" opacity={muscleOpacity} /><Sleeve a={l.thigh} b={l.knee} radius={limbR * 1.20} color="#a85f56" opacity={muscleOpacity} /><Sleeve a={l.knee} b={l.calf} radius={limbR * 1.02} color="#a85f56" opacity={muscleOpacity} /></>}
-    </group>)}
+    {k.arms.map((a, i) => <group key={`arm-fat-${i}`}>{showFat && <><Sleeve a={a.shoulder} b={a.upper} radius={limbR * 1.52} color="#c18c68" opacity={fatOpacity} /><Sleeve a={a.upper} b={a.elbow} radius={limbR * 1.24} color="#c18c68" opacity={fatOpacity} /><Sleeve a={a.elbow} b={a.wrist} radius={limbR * 1.08} color="#c18c68" opacity={fatOpacity} /></>}</group>)}
+    {k.legs.map((l, i) => <group key={`leg-fat-${i}`}>{showFat && <><Sleeve a={l.hip} b={l.thigh} radius={limbR * 1.72} color="#c18c68" opacity={fatOpacity} /><Sleeve a={l.thigh} b={l.knee} radius={limbR * 1.42} color="#c18c68" opacity={fatOpacity} /><Sleeve a={l.knee} b={l.calf} radius={limbR * 1.22} color="#c18c68" opacity={fatOpacity} /><Sleeve a={l.calf} b={l.ankle} radius={limbR} color="#c18c68" opacity={fatOpacity} /></>}</group>)}
   </group>;
 }
 
@@ -56,7 +49,8 @@ export function InternalAnatomy() {
   const heart = organs.heart!, liver = organs.liver!, stomach = organs.stomach!, rightKidney = organs["kidney-right"]!, leftKidney = organs["kidney-left"]!;
   const sharedPose = { elbowFlex: pose.elbowFlex, hipInternal: pose.hipInternal, armRaise: pose.armRaise, shoulderRoll: pose.shoulderRoll, kneeFlex: pose.kneeFlex };
   return <>
-    <AttachedSoftTissue H={H} s={s} torsoWidth={torsoW} torsoDepth={torsoD} shoulder={patient.morph.shoulder} hip={patient.morph.hip} limb={patient.morph.limb} pose={sharedPose} placement={equipment.placement} buckyTilt={equipment.buckyTilt} projectionId={projectionId} showFat={vis.fat} showMuscle={vis.muscle} exposing={exposing} />
+    <AttachedSoftTissue H={H} s={s} torsoWidth={torsoW} torsoDepth={torsoD} shoulder={patient.morph.shoulder} hip={patient.morph.hip} limb={patient.morph.limb} pose={sharedPose} placement={equipment.placement} buckyTilt={equipment.buckyTilt} projectionId={projectionId} showFat={vis.fat} exposing={exposing} />
+    {vis.muscle && <SegmentedMuscles />}
     {vis.organs && <>
       <LungMesh position={[organScale(-7.2) * patient.morph.torsoWidth, lungY, lungZ]} scale={[lungWidth, lungHeight, lungDepth]} color="#709daa" opacity={anatomyOpacity * .70} />
       <LungMesh position={[organScale(7) * patient.morph.torsoWidth, lungY + .002 * s, lungZ]} scale={[organScale(9.1) * .5, organScale(23) * .5, organScale(8) * .5]} color="#709daa" opacity={anatomyOpacity * .70} />
