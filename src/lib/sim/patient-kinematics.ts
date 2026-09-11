@@ -40,15 +40,17 @@ export interface LegChain {
 /** One source of truth for visible skin, soft tissue and skeleton joint centres. */
 export function patientKinematics(input: PatientKinematicsInput) {
   const { H, s, shoulder, hip, limb, projectionId, placement, buckyTilt } = input;
+  // Calibrated to the actual BodyParts3D envelope rather than the previous
+  // generic landmarks. These are joint centres, not surface landmarks.
   const Y = {
-    shoulder: 0.79 * H,
+    shoulder: 0.75 * H,
     waist: 0.59 * H,
     pelvis: 0.47 * H,
     knee: 0.245 * H,
     ankle: 0.055 * H,
   };
 
-  const shoulderWidth = 0.205 * shoulder * s;
+  const shoulderWidth = 0.195 * shoulder * s;
   const hipGap = 0.085 * hip * s;
   const elbow = input.elbowFlex * Math.PI / 180;
   const hipInternal = input.hipInternal * Math.PI / 180;
@@ -70,10 +72,10 @@ export function patientKinematics(input: PatientKinematicsInput) {
       wrist = [side * 0.075 * s, Y.shoulder + 0.31 * H * raise, 0.04 * s];
     } else if (projectionId === "pa-chest" && input.shoulderRoll > 0.55) {
       upper = [side * (shoulderWidth + 0.02 * s), Y.shoulder - 0.045 * s, 0];
-      elbowPoint = [side * (shoulderWidth + 0.015 * s), Y.shoulder - 0.12 * s, 0.055 * s];
-      wrist = [side * 0.1664 * s, Y.pelvis + 0.02 * s, 0.07 * s];
+      elbowPoint = [side * (shoulderWidth + 0.015 * s), Y.shoulder - 0.12 * s, 0.035 * s];
+      wrist = [side * 0.145 * s, Y.pelvis + 0.02 * s, 0.05 * s];
     } else {
-      upper = [side * (shoulderWidth + 0.055 * limb * s), Y.shoulder + 0.08 * H * raise, 0];
+      upper = [side * (shoulderWidth + 0.05 * limb * s), Y.shoulder + 0.08 * H * raise, 0];
       elbowPoint = [upper[0] + side * 0.005 * s, upper[1] - 0.16 * s * Math.cos(elbow), 0.02 * s * Math.sin(elbow)];
       wrist = [elbowPoint[0] + side * 0.012 * s, elbowPoint[1] - 0.16 * s * Math.cos(elbow), 0.04 * s * Math.sin(elbow)];
     }
@@ -107,7 +109,9 @@ export function patientKinematics(input: PatientKinematicsInput) {
       calf[1] - 0.02 * H * Math.cos(kneeFlex),
       calf[2] + side * 0.02 * H * Math.sin(kneeFlex),
     ];
-    const foot: V3 = [ankle[0], ankle[1] - 0.012 * s, ankle[2] + 0.11 * s];
+    // The foot is close to the ankle. The old 0.11 m anterior offset made
+    // the entire foot visibly project outside the skin envelope.
+    const foot: V3 = [ankle[0], ankle[1] - 0.012 * s, ankle[2] + 0.045 * s];
 
     return { hip: hipPoint, thigh, knee, calf, ankle, foot };
   });
