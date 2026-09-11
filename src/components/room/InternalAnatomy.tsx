@@ -19,9 +19,30 @@ function AttachedSoftTissue({ H, s, torsoWidth, torsoDepth, shoulder, hip, limb,
   const k = patientKinematics({ H, s, shoulder, hip, limb, elbowFlex: pose.elbowFlex, hipInternal: pose.hipInternal, armRaise: pose.armRaise, shoulderRoll: pose.shoulderRoll, kneeFlex: pose.kneeFlex, projectionId, placement, buckyTilt });
   const limbR = .043 * limb * s;
   const fatOpacity = exposing ? .18 : .055, muscleOpacity = exposing ? .20 : .06;
+  // torsoWidth/torsoDepth are already world-space dimensions. The previous implementation
+  // multiplied them by s again, leaving the fat/muscle shells much too small and visibly
+  // detached from the Atlas body. These envelopes deliberately intersect the body surface.
+  const fatTorso = {
+    pelvis: [.48 * hip * s, .17 * H, .48 * torsoDepth] as V3,
+    waist: [.54 * torsoWidth, .16 * H, .52 * torsoDepth] as V3,
+    chest: [.56 * torsoWidth, .205 * H, .54 * torsoDepth] as V3,
+  };
+  const muscleTorso = {
+    pelvis: [.42 * hip * s, .145 * H, .41 * torsoDepth] as V3,
+    waist: [.46 * torsoWidth, .14 * H, .44 * torsoDepth] as V3,
+    chest: [.48 * torsoWidth, .175 * H, .46 * torsoDepth] as V3,
+  };
   return <group renderOrder={3}>
-    {showFat && <><Ellipsoid position={[0, k.Y.pelvis, 0]} scale={[.128 * hip * s, .102 * torsoWidth * s / .32, .116 * torsoDepth * s / .24]} color="#c18c68" opacity={fatOpacity} /><Ellipsoid position={[0, k.Y.waist, 0]} scale={[.151 * torsoWidth * s, .157 * torsoWidth * s, .108 * torsoDepth * s]} color="#c18c68" opacity={fatOpacity} /><Ellipsoid position={[0, .70 * H, 0]} scale={[.158 * torsoWidth * s, .218 * s, .116 * torsoDepth * s]} color="#c18c68" opacity={fatOpacity} /></>}
-    {showMuscle && <><Ellipsoid position={[0, k.Y.pelvis + .008 * s, -.004 * s]} scale={[.124 * hip * s, .097 * torsoWidth * s / .32, .108 * torsoDepth * s / .24]} color="#a85f56" opacity={muscleOpacity} /><Ellipsoid position={[0, .59 * H, -.004 * s]} scale={[.143 * torsoWidth * s, .148 * torsoWidth * s, .098 * torsoDepth * s]} color="#a85f56" opacity={muscleOpacity} /><Ellipsoid position={[0, .70 * H, -.005 * s]} scale={[.149 * torsoWidth * s, .205 * s, .105 * torsoDepth * s]} color="#a85f56" opacity={muscleOpacity} /></>}
+    {showFat && <>
+      <Ellipsoid position={[0, k.Y.pelvis, 0]} scale={fatTorso.pelvis} color="#c18c68" opacity={fatOpacity} />
+      <Ellipsoid position={[0, k.Y.waist, 0]} scale={fatTorso.waist} color="#c18c68" opacity={fatOpacity} />
+      <Ellipsoid position={[0, .70 * H, 0]} scale={fatTorso.chest} color="#c18c68" opacity={fatOpacity} />
+    </>}
+    {showMuscle && <>
+      <Ellipsoid position={[0, k.Y.pelvis + .008 * s, -.004 * s]} scale={muscleTorso.pelvis} color="#a85f56" opacity={muscleOpacity} />
+      <Ellipsoid position={[0, .59 * H, -.004 * s]} scale={muscleTorso.waist} color="#a85f56" opacity={muscleOpacity} />
+      <Ellipsoid position={[0, .70 * H, -.005 * s]} scale={muscleTorso.chest} color="#a85f56" opacity={muscleOpacity} />
+    </>}
     {k.arms.map((a, i) => <group key={`arm-tissue-${i}`}>
       {showFat && <><Sleeve a={a.shoulder} b={a.upper} radius={limbR * 1.52} color="#c18c68" opacity={fatOpacity} /><Sleeve a={a.upper} b={a.elbow} radius={limbR * 1.24} color="#c18c68" opacity={fatOpacity} /><Sleeve a={a.elbow} b={a.wrist} radius={limbR * 1.08} color="#c18c68" opacity={fatOpacity} /></>}
       {showMuscle && <><Sleeve a={a.shoulder} b={a.upper} radius={limbR * 1.28} color="#a85f56" opacity={muscleOpacity} /><Sleeve a={a.upper} b={a.elbow} radius={limbR} color="#a85f56" opacity={muscleOpacity} /><Sleeve a={a.elbow} b={a.wrist} radius={limbR * .86} color="#a85f56" opacity={muscleOpacity} /></>}
