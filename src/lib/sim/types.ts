@@ -17,8 +17,11 @@ export interface Projection { id:string; name:string; shortName:string; region:R
 export interface SimPose { recumbency:Recumbency; rotationY:number; oblique:number; chinUp:number; shoulderRoll:number; armRaise:number; elbowFlex:number; kneeFlex:number; hipInternal:number; breath:Breath; }
 export interface TubeState { crY:number; crX:number; sid:number; angle:number; collimationW:number; collimationH:number; lockedToDetector:boolean; }
 export interface RoomEquipment { patientX:number; patientY:number; patientZ:number; tableHeight:number; tableX:number; tableZ:number; buckyHeight:number; buckyTilt:number; placement:PlacementMode; }
-/** The focal spot is a fixed tube specification. It is deliberately not a learner control. */
 export interface ExposureState { kvp:number; mas:number; grid:boolean; focalSpot:FocalSpot; marker:Marker; }
 export interface CriterionScore { id:string; label:string; grade:Grade; detail:string; weight:number; }
 export interface ExposureMetrics { ei:number; eiStatus:"under"|"optimal"|"over"; noise:number; contrast:number; saturation:number; dap:number; entranceDose:number; predictedEI:number; transmission:number; scatterFraction:number; attenuationIndex:number; superimpositionIndex:number; }
 export interface RadiographResult { metrics:ExposureMetrics; scores:CriterionScore[]; overall:number; overallGrade:Grade; width:number; height:number; dataUrl:string; }
+export type PlatecaannKey = "P"|"L"|"A-area"|"T"|"E-contrast"|"E-density"|"E-sharpness"|"C"|"A-artifact"|"A-abnormality"|"N-repeat"|"N-further";
+export type PlatecaannDecision = "pass"|"concern"|"fail";
+export interface PlatecaannItem { key:PlatecaannKey; label:string; decision:PlatecaannDecision; note:string; }
+export interface PACSReport { clinicalHistory:string; technique:string; findings:string; impression:string; }
