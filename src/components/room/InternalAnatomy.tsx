@@ -4,7 +4,6 @@ import { useSim } from "@/lib/sim/store";
 import { patientById } from "@/lib/sim/patients";
 import { SHARED_ORGANS, scaleAnatomyCm } from "@/lib/sim/anatomy-structures";
 import { HeartMesh, KidneyMesh, LiverMesh, LungMesh, StomachMesh } from "./AnatomicalMeshes";
-import { BoneJointLayer } from "./BoneJointLayer";
 import { patientKinematics, type V3 } from "@/lib/sim/patient-kinematics";
 
 function TissueMaterial({ color, opacity, roughness = .7 }: { color: string; opacity: number; roughness?: number }) { return <meshPhysicalMaterial color={color} transparent opacity={opacity} roughness={roughness} metalness={0} depthWrite={false} depthTest={false} side={THREE.DoubleSide} />; }
@@ -52,7 +51,6 @@ export function InternalAnatomy() {
   const sharedPose = { elbowFlex: pose.elbowFlex, hipInternal: pose.hipInternal, armRaise: pose.armRaise, shoulderRoll: pose.shoulderRoll, kneeFlex: pose.kneeFlex };
   return <group position={groupPos} rotation={groupRot}><group rotation={[kyphosis, oblique, 0]}>
     <AttachedSoftTissue H={H} s={s} torsoWidth={torsoW} torsoDepth={torsoD} shoulder={patient.morph.shoulder} hip={patient.morph.hip} limb={patient.morph.limb} pose={sharedPose} placement={equipment.placement} buckyTilt={equipment.buckyTilt} projectionId={projectionId} showFat={vis.fat} showMuscle={vis.muscle} showSkin={vis.skin} skin={patient.skin} exposing={exposing} />
-    {vis.skeleton && <BoneJointLayer H={H} s={s} torsoWidth={patient.morph.torsoWidth} torsoDepth={patient.morph.torsoDepth} shoulder={patient.morph.shoulder} hip={patient.morph.hip} patientMorph={{ limb: patient.morph.limb }} pose={sharedPose} projectionId={projectionId} placement={equipment.placement} buckyTilt={equipment.buckyTilt} opacity={anatomyOpacity} />}
     {vis.organs && <>
       <LungMesh position={[organScale(-7.2) * patient.morph.torsoWidth, lungY, lungZ]} scale={[lungWidth, lungHeight, lungDepth]} color="#709daa" opacity={anatomyOpacity * .70} />
       <LungMesh position={[organScale(7) * patient.morph.torsoWidth, lungY + .002 * s, lungZ]} scale={[organScale(9.1) * .5, organScale(23) * .5, organScale(8) * .5]} color="#709daa" opacity={anatomyOpacity * .70} />
