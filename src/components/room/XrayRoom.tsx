@@ -3,16 +3,19 @@ import { useFrame } from "@react-three/fiber";
 import { ContactShadows, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import { useSim } from "@/lib/sim/store";
-import { projectionById } from "@/lib/sim/projections";
 import { PatientModel } from "./PatientModel";
 
 function LightField() {
   const tube = useSim((s) => s.tube);
   const show = useSim((s) => s.showLightField);
-  const projectionId = useSim((s) => s.projectionId);
+  const equipment = useSim((s) => s.equipment);
   const exposing = useSim((s) => s.exposing);
   const preparing = useSim((s) => s.preparing);
-  const projection = projectionById(projectionId);
+  const wall =
+    equipment.placement === "upright-bucky" ||
+    equipment.placement === "standing" ||
+    equipment.placement === "seated";
+
   const tex = useMemo(() => {
     const c = document.createElement("canvas");
     c.width = 256;
@@ -36,17 +39,20 @@ function LightField() {
   }, []);
 
   const mag = tube.sid / Math.max(80, tube.sid - 14);
-  const w = (tube.collimationW / 100) / mag;
-  const hgt = (tube.collimationH / 100) / mag;
-  const erect = projection.recumbency === "erect" && projection.setup === "wall";
-  const crY = tube.crY / 100;
-  const patientH = 1.7;
-  const y = erect ? patientH - crY : 0.95;
-  const z = erect ? -0.42 : 0;
-  const x = tube.crX / 100;
-  const rot: [number, number, number] = erect ? [0, 0, 0] : [-Math.PI / 2, 0, 0];
-  const pos: [number, number, number] = erect ? [x, y, z] : [x, y, -(crY - 0.85)];
+  const w = tube.collimationW / 100 / mag;
+  const hgt = tube.collimationH / 100 / mag;
   const intensity = preparing || exposing ? 1 : 0.65;
+
+  let pos: [number, number, number];
+  let rot: [number, number, number];
+  if (wall) {
+    const tilt = (equipment.buckyTilt * Math.PI) / 180;
+    pos = [tube.crX / 100, equipment.buckyHeight, -0.42];
+    rot = [tilt, 0, 0];
+  } else {
+    pos = [equipment.tableX + tube.crX / 100, equipment.tableHeight + 0.04, equipment.tableZ];
+    rot = [-Math.PI / 2, 0, 0];
+  }
 
   if (!show) return null;
   return (
@@ -66,13 +72,15 @@ function LightField() {
 
 function TubeHead() {
   const tube = useSim((s) => s.tube);
-  const projectionId = useSim((s) => s.projectionId);
+  const equipment = useSim((s) => s.equipment);
   const preparing = useSim((s) => s.preparing);
   const exposing = useSim((s) => s.exposing);
   const spin = useRef(0);
   const anode = useRef<THREE.Mesh>(null);
-  const projection = projectionById(projectionId);
-  const erect = projection.recumbency === "erect" && projection.setup === "wall";
+  const wall =
+    equipment.placement === "upright-bucky" ||
+    equipment.placement === "standing" ||
+    equipment.placement === "seated";
 
   useFrame((_, dt) => {
     const d = Math.min(dt, 0.1);
@@ -81,18 +89,21 @@ function TubeHead() {
   });
 
   const sidM = tube.sid / 100;
-  const crY = tube.crY / 100;
-  const x = tube.crX / 100;
   const angle = (tube.angle * Math.PI) / 180;
+  const lock = tube.lockedToDetector;
 
   let pos: [number, number, number];
   let rot: [number, number, number];
-  if (erect) {
-    const y = 1.7 - crY;
-    pos = [x, y, -0.55 + sidM];
+  if (wall) {
+    const detY = lock ? equipment.buckyHeight : equipment.buckyHeight + (tube.crY / 100 - 1.0) * 0.15;
+    const detX = lock ? 0 : tube.crX / 100;
+    pos = [detX, detY, -0.55 + sidM];
     rot = [0, Math.PI, -angle];
   } else {
-    pos = [x, 0.95 + sidM, -(crY - 0.85)];
+    const detY = equipment.tableHeight + 0.05 + sidM;
+    const detX = equipment.tableX + (lock ? 0 : tube.crX / 100);
+    const detZ = equipment.tableZ + (lock ? 0 : -(tube.crY / 100 - 0.85) * 0.2);
+    pos = [detX, detY, detZ];
     rot = [Math.PI / 2 - angle, 0, 0];
   }
 
@@ -117,15 +128,24 @@ function TubeHead() {
         <boxGeometry args={[0.04, 0.4, 0.04]} />
         <meshStandardMaterial color="#4a5560" />
       </mesh>
+      {lock ? (
+        <mesh position={[0.12, 0.1, 0.05]}>
+          <boxGeometry args={[0.03, 0.03, 0.03]} />
+          <meshStandardMaterial color="#3ecf8e" emissive="#3ecf8e" emissiveIntensity={0.4} />
+        </mesh>
+      ) : null}
     </group>
   );
 }
 
 function TableAndBucky() {
-  const projectionId = useSim((s) => s.projectionId);
-  const projection = projectionById(projectionId);
-  const wall = projection.setup === "wall";
-  const tabletop = projection.setup === "tabletop";
+  const equipment = useSim((s) => s.equipment);
+  const wall =
+    equipment.placement === "upright-bucky" ||
+    equipment.placement === "standing" ||
+    equipment.placement === "seated";
+  const tabletop = equipment.placement === "table";
+  const tilt = (equipment.buckyTilt * Math.PI) / 180;
 
   return (
     <>
@@ -135,51 +155,41 @@ function TableAndBucky() {
       </mesh>
       <gridHelper args={[8, 16, "#2a3338", "#1a2026"]} position={[0, 0.01, 0]} />
 
-      {!wall ? (
-        <group>
-          <mesh position={[0, 0.45, 0]} receiveShadow>
-            <boxGeometry args={[0.72, 0.08, 2.2]} />
+      {tabletop ? (
+        <group position={[equipment.tableX, 0, equipment.tableZ]}>
+          <mesh position={[0, equipment.tableHeight * 0.5, 0]} receiveShadow>
+            <boxGeometry args={[0.72, equipment.tableHeight, 2.2]} />
             <meshStandardMaterial color="#8b9096" metalness={0.2} roughness={0.5} />
           </mesh>
-          <mesh position={[0, 0.9, 0]} receiveShadow>
+          <mesh position={[0, equipment.tableHeight + 0.03, 0]} receiveShadow>
             <boxGeometry args={[0.7, 0.06, 2.18]} />
             <meshStandardMaterial color="#6a5f58" roughness={0.8} />
           </mesh>
-          {[-0.9, 0.9].map((z) =>
-            [-0.28, 0.28].map((x) => (
-              <mesh key={`${x}-${z}`} position={[x, 0.45, z]}>
-                <cylinderGeometry args={[0.03, 0.03, 0.9, 10]} />
-                <meshStandardMaterial color="#3a4148" metalness={0.5} roughness={0.4} />
-              </mesh>
-            )),
-          )}
-          <mesh position={[0, 0.82, 0]}>
+          <mesh position={[0, equipment.tableHeight - 0.08, 0]}>
             <boxGeometry args={[0.5, 0.04, 0.43]} />
             <meshStandardMaterial color="#1a1e22" />
           </mesh>
-          {tabletop ? (
-            <mesh position={[0.28, 0.96, 0.35]} rotation={[-0.05, 0, 0]}>
-              <boxGeometry args={[0.24, 0.012, 0.3]} />
-              <meshStandardMaterial color="#2a3038" />
-            </mesh>
-          ) : null}
         </group>
-      ) : (
+      ) : null}
+
+      {wall ? (
         <group position={[0, 0, -0.72]}>
           <mesh position={[0, 1.05, 0]}>
             <boxGeometry args={[0.08, 2.1, 0.08]} />
             <meshStandardMaterial color="#3a4148" metalness={0.4} roughness={0.4} />
           </mesh>
-          <mesh position={[0, 1.1, 0.06]}>
-            <boxGeometry args={[0.43, 0.52, 0.04]} />
-            <meshStandardMaterial color="#1a1e22" />
-          </mesh>
-          <mesh position={[0, 1.1, 0.09]}>
-            <boxGeometry args={[0.35, 0.43, 0.01]} />
-            <meshStandardMaterial color="#0d1013" />
-          </mesh>
+          <group position={[0, equipment.buckyHeight, 0.06]} rotation={[tilt, 0, 0]}>
+            <mesh>
+              <boxGeometry args={[0.43, 0.52, 0.04]} />
+              <meshStandardMaterial color="#1a1e22" />
+            </mesh>
+            <mesh position={[0, 0, 0.03]}>
+              <boxGeometry args={[0.35, 0.43, 0.01]} />
+              <meshStandardMaterial color="#0d1013" />
+            </mesh>
+          </group>
         </group>
-      )}
+      ) : null}
 
       <mesh position={[0, 1.6, 3.4]}>
         <boxGeometry args={[6, 3.2, 0.08]} />
