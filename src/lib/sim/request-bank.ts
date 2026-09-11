@@ -1,66 +1,36 @@
-import type { ImagingRequest, PathologyId } from "./requests";
-import { PATIENTS } from "./patients";
+import type { ImagingRequest } from "./requests";
+import { CASE_BANK } from "./case-bank";
 
-const projectionTemplates: Array<{
-  projection: string;
-  region: ImagingRequest["region"];
-  title: string;
-  history: string[];
-  pathology: PathologyId;
-  laterality?: "left" | "right";
-  paired?: string[];
-}> = [
-  { projection: "pa-chest", region: "Thorax", title: "Chest – respiratory symptoms", history: ["shortness of breath", "pleuritic pain", "persistent cough", "fever and productive cough", "pre-operative assessment"], pathology: "consolidation", paired: ["pa-chest", "lat-chest"] },
-  { projection: "lat-chest", region: "Thorax", title: "Chest – lateral view", history: ["follow-up of focal opacity", "pacemaker lead check", "localisation of retrocardiac opacity", "persistent cough", "pre-operative assessment"], pathology: "none", paired: ["pa-chest", "lat-chest"] },
-  { projection: "ap-abdomen", region: "Abdomen", title: "Abdomen – acute pain", history: ["abdominal distension", "colicky pain and vomiting", "reduced bowel motions", "suspected obstruction", "post-operative abdominal pain"], pathology: "none" },
-  { projection: "ap-pelvis", region: "Pelvis & hips", title: "Pelvis – trauma", history: ["fall onto the hip", "low-speed road traffic collision", "pelvic pain after a fall", "difficulty weight-bearing", "post-operative comparison"], pathology: "femoral-neck-fracture" },
-  { projection: "ap-hip", region: "Pelvis & hips", title: "Hip – trauma", history: ["fall with groin pain", "shortened externally rotated limb", "new inability to weight-bear", "persistent hip pain", "post-operative follow-up"], pathology: "femoral-neck-fracture", laterality: "left" },
-  { projection: "lat-cspine", region: "Spine", title: "Cervical spine – trauma", history: ["midline neck tenderness after RTA", "fall with cervical pain", "persistent neck pain", "whiplash injury", "trauma with collar in situ"], pathology: "none" },
-  { projection: "ap-cspine", region: "Spine", title: "Cervical spine – AP", history: ["cervical trauma", "neck pain", "follow-up of degenerative change", "post-traumatic assessment", "persistent cervical symptoms"], pathology: "none" },
-  { projection: "ap-lumbar", region: "Spine", title: "Lumbar spine – pain", history: ["acute low back pain", "pain after lifting", "fall with lumbar tenderness", "persistent mechanical back pain", "follow-up of known degenerative change"], pathology: "none", paired: ["ap-lumbar", "lat-lumbar"] },
-  { projection: "lat-lumbar", region: "Spine", title: "Lumbar spine – lateral", history: ["assessment of lumbar alignment", "acute low back pain", "trauma with lumbar tenderness", "follow-up imaging", "persistent radicular symptoms"], pathology: "none", paired: ["ap-lumbar", "lat-lumbar"] },
-  { projection: "pa-hand", region: "Upper limb", title: "Hand – trauma", history: ["punch injury", "fall onto the hand", "crush injury", "pain over the metacarpals", "swelling after sport"], pathology: "foreign-body", laterality: "right" },
-  { projection: "pa-wrist", region: "Upper limb", title: "Wrist – trauma", history: ["FOOSH injury", "dinner-fork deformity", "snuffbox tenderness", "wrist swelling after a fall", "persistent wrist pain"], pathology: "distal-radius-fracture", laterality: "right" },
-  { projection: "ap-elbow", region: "Upper limb", title: "Elbow – trauma", history: ["FOOSH with elbow pain", "direct blow to elbow", "swelling and reduced movement", "fall during sport", "posterior elbow tenderness"], pathology: "olecranon-fracture", laterality: "left" },
-  { projection: "ap-shoulder", region: "Upper limb", title: "Shoulder – trauma", history: ["fall onto shoulder", "suspected dislocation", "direct blow during sport", "painful restricted movement", "post-reduction check"], pathology: "humeral-shaft-fracture", laterality: "left" },
-  { projection: "ap-knee", region: "Lower limb", title: "Knee – trauma", history: ["fall onto knee", "twisting injury", "sporting injury", "anterior knee pain", "inability to weight-bear"], pathology: "patella-fracture", laterality: "left" },
-  { projection: "lat-knee", region: "Lower limb", title: "Knee – lateral", history: ["trauma with suspected patellar injury", "follow-up of knee effusion", "pain after a fall", "sporting injury", "assessment of joint alignment"], pathology: "patella-fracture", laterality: "left" },
-  { projection: "dp-foot", region: "Lower limb", title: "Foot – trauma", history: ["dropped object onto foot", "twisting injury", "midfoot pain", "pain at the fifth metatarsal", "sporting injury"], pathology: "foreign-body", laterality: "right" },
-  { projection: "ap-ankle", region: "Lower limb", title: "Ankle – trauma", history: ["inversion injury", "lateral malleolar tenderness", "fall from a step", "sporting injury", "persistent ankle swelling"], pathology: "ankle-fracture", laterality: "right" },
-  { projection: "lat-skull", region: "Skull", title: "Skull – trauma", history: ["head injury", "assault with facial impact", "fall with head strike", "persistent headache after trauma", "foreign-body localisation"], pathology: "foreign-body" },
+const chestCases: ImagingRequest[] = CASE_BANK.map((c) => ({
+  id: c.id,
+  title: c.title,
+  clinicalHistory: c.clinicalHistory,
+  requestedProjections: c.projections,
+  requestedViewsLabel: c.projections.map((p) => p === "pa-chest" ? "PA chest" : p === "lat-chest" ? "left lateral chest" : p).join(" + "),
+  requestedLaterality: null,
+  correctLaterality: null,
+  patientId: c.patientId,
+  isValid: true,
+  pathologyId: c.pathologyId,
+  region: "Thorax",
+  urgency: c.id === "chest-post-line" ? "urgent" : "routine",
+}));
+
+const additionalRequests: ImagingRequest[] = [
+  { id: "wrist-foosh", title: "Wrist — FOOSH", clinicalHistory: "Fall onto the outstretched right hand with swelling and snuffbox tenderness.", requestedProjections: ["pa-wrist"], requestedViewsLabel: "Right wrist examination", requestedLaterality: "right", correctLaterality: "right", patientId: "elise", isValid: true, pathologyId: "distal-radius-fracture", region: "Upper limb", urgency: "urgent" },
+  { id: "hip-fall", title: "Hip — suspected neck of femur fracture", clinicalHistory: "79-year-old with a fall, shortened externally rotated left leg and inability to weight-bear.", requestedProjections: ["ap-pelvis", "ap-hip"], requestedViewsLabel: "AP pelvis + left hip", requestedLaterality: "left", correctLaterality: "left", patientId: "ruth", isValid: true, pathologyId: "femoral-neck-fracture", region: "Pelvis & hips", urgency: "stat" },
+  { id: "knee-trauma", title: "Knee — trauma", clinicalHistory: "Fall onto the left knee with pain and inability to straight-leg raise.", requestedProjections: ["ap-knee", "lat-knee"], requestedViewsLabel: "Left knee AP + lateral", requestedLaterality: "left", correctLaterality: "left", patientId: "gordon", isValid: true, pathologyId: "patella-fracture", region: "Lower limb", urgency: "urgent" },
+  { id: "ankle-trauma", title: "Ankle — inversion injury", clinicalHistory: "Right ankle inversion injury with lateral malleolar tenderness and swelling.", requestedProjections: ["ap-ankle"], requestedViewsLabel: "Right ankle examination", requestedLaterality: "right", correctLaterality: "right", patientId: "amara", isValid: true, pathologyId: "ankle-fracture", region: "Lower limb", urgency: "urgent" },
+  { id: "elbow-trauma", title: "Elbow — FOOSH", clinicalHistory: "Fall onto the left hand with elbow pain, swelling and restricted movement.", requestedProjections: ["ap-elbow"], requestedViewsLabel: "Left elbow examination", requestedLaterality: "left", correctLaterality: "left", patientId: "elise", isValid: true, pathologyId: "olecranon-fracture", region: "Upper limb", urgency: "urgent" },
+  { id: "shoulder-trauma", title: "Shoulder — trauma", clinicalHistory: "Fall onto the right shoulder with painful restricted movement and suspected fracture.", requestedProjections: ["ap-shoulder"], requestedViewsLabel: "Right shoulder examination", requestedLaterality: "right", correctLaterality: "right", patientId: "tomas", isValid: true, pathologyId: "humeral-shaft-fracture", region: "Upper limb", urgency: "urgent" },
+  { id: "lumbar-pain", title: "Lumbar spine — pain", clinicalHistory: "Persistent low back pain with focal lumbar tenderness. Examination requested after clinical assessment.", requestedProjections: ["ap-lumbar", "lat-lumbar"], requestedViewsLabel: "Lumbar spine AP + lateral", requestedLaterality: null, correctLaterality: null, patientId: "gordon", isValid: true, pathologyId: "none", region: "Spine", urgency: "routine" },
+  { id: "cspine-trauma", title: "Cervical spine — trauma", clinicalHistory: "High-speed road traffic collision with midline cervical tenderness. Hard collar in situ.", requestedProjections: ["lat-cspine"], requestedViewsLabel: "Horizontal-beam lateral cervical spine", requestedLaterality: null, correctLaterality: null, patientId: "tomas", isValid: true, pathologyId: "none", region: "Spine", urgency: "stat" },
+  { id: "hand-trauma", title: "Hand — trauma", clinicalHistory: "Punched a wall with the right hand. Pain and swelling over the 5th metacarpal.", requestedProjections: ["pa-hand"], requestedViewsLabel: "Right hand examination", requestedLaterality: "right", correctLaterality: "right", patientId: "malik", isValid: true, pathologyId: "foreign-body", region: "Upper limb", urgency: "urgent" },
+  { id: "abdomen-acute", title: "Abdomen — acute pain", clinicalHistory: "Abdominal distension, colicky pain and vomiting. Clinical concern for obstruction.", requestedProjections: ["ap-abdomen"], requestedViewsLabel: "AP abdomen", requestedLaterality: null, correctLaterality: null, patientId: "tomas", isValid: true, pathologyId: "none", region: "Abdomen", urgency: "urgent" },
+  { id: "pelvis-trauma", title: "Pelvis — trauma", clinicalHistory: "Fall with pelvic pain and difficulty weight-bearing.", requestedProjections: ["ap-pelvis"], requestedViewsLabel: "AP pelvis", requestedLaterality: null, correctLaterality: null, patientId: "ruth", isValid: true, pathologyId: "femoral-neck-fracture", region: "Pelvis & hips", urgency: "urgent" },
+  { id: "wrong-side-wrist", title: "Wrist — query laterality", clinicalHistory: "History states right wrist injury, but the request specifies the left wrist. Query before exposure.", requestedProjections: ["pa-wrist"], requestedViewsLabel: "Left wrist", requestedLaterality: "left", correctLaterality: "right", patientId: "amara", isValid: false, rejectionReason: "The clinical history identifies the right wrist. The request should be amended before exposure.", pathologyId: "distal-radius-fracture", region: "Upper limb", urgency: "urgent" },
 ];
 
-const variants = [
-  "Emergency department referral", "Urgent trauma referral", "Same-day assessment", "Outpatient referral", "Minor injuries review", "Follow-up examination", "Orthopaedic review", "Medical ward request", "Pre-operative work-up", "Post-operative comparison",
-];
-
-function sideLabel(side?: "left" | "right") { return side ? `${side[0].toUpperCase()}${side.slice(1)} ` : ""; }
-
-export const REQUEST_BANK: ImagingRequest[] = Array.from({ length: 180 }, (_, index) => {
-  const template = projectionTemplates[index % projectionTemplates.length]!;
-  const patient = PATIENTS[index % PATIENTS.length]!;
-  const variant = variants[Math.floor(index / projectionTemplates.length) % variants.length]!;
-  const deliberatelyWrong = index % 19 === 0;
-  const side = template.laterality;
-  const requestedSide = deliberatelyWrong && side ? (side === "left" ? "right" : "left") : side;
-  const projections = template.paired && index % 3 !== 1 ? template.paired : [template.projection];
-  const viewLabel = `${sideLabel(requestedSide)}${template.title.replace(" – trauma", "").replace(" – lateral", "")} ${projections.map((p) => p.replaceAll("-", " ")).join(" + ")}`;
-  const id = `req-${String(index + 1).padStart(3, "0")}`;
-  return {
-    id,
-    title: `${template.title} · ${variant}`,
-    clinicalHistory: `${patient.age}-year-old ${patient.sex} patient. ${template.history[index % template.history.length]}. ${variant}.`,
-    requestedProjections: projections,
-    requestedViewsLabel: viewLabel,
-    requestedLaterality: requestedSide ?? null,
-    correctLaterality: side ?? null,
-    patientId: patient.id,
-    isValid: !deliberatelyWrong,
-    rejectionReason: deliberatelyWrong && side ? `The clinical history and laterality indicate the ${side} side, but the request specifies the ${requestedSide} side. Correct the request before exposure.` : undefined,
-    pathologyId: template.pathology,
-    region: template.region,
-    urgency: index % 7 === 0 ? "stat" : index % 3 === 0 ? "urgent" : "routine",
-  };
-});
+export const REQUEST_BANK: ImagingRequest[] = [...chestCases, ...additionalRequests];
 
 export function requestFromBank(id: string) { return REQUEST_BANK.find((request) => request.id === id); }
