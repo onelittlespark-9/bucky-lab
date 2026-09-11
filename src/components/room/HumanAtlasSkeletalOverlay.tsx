@@ -28,12 +28,12 @@ function regionFor(name: string): BoneRegion {
 function sideFor(bounds: [number[], number[]]): -1 | 1 { return ((bounds[0][0] + bounds[1][0]) * 0.5) < 0 ? -1 : 1; }
 
 function atlasPivotFor(region: BoneRegion, side: -1 | 1, center: THREE.Vector3) {
-  if (region === "scapula" || region === "clavicle" || region === "upperArm") return new THREE.Vector3(side * 0.19, 0.79, center.z);
-  if (region === "forearm") return new THREE.Vector3(side * 0.31, 0.63, center.z);
-  if (region === "hand") return new THREE.Vector3(side * 0.45, 0.48, center.z);
-  if (region === "thigh") return new THREE.Vector3(side * 0.16, 0.47, center.z);
-  if (region === "lowerLeg") return new THREE.Vector3(side * 0.16, 0.245, center.z);
-  if (region === "foot") return new THREE.Vector3(side * 0.16, 0.055, center.z);
+  if (region === "scapula" || region === "clavicle" || region === "upperArm") return new THREE.Vector3(side * 0.18, 0.75, center.z);
+  if (region === "forearm") return new THREE.Vector3(side * 0.29, 0.60, center.z);
+  if (region === "hand") return new THREE.Vector3(side * 0.43, 0.45, center.z);
+  if (region === "thigh") return new THREE.Vector3(side * 0.15, 0.47, center.z);
+  if (region === "lowerLeg") return new THREE.Vector3(side * 0.15, 0.245, center.z);
+  if (region === "foot") return new THREE.Vector3(side * 0.15, 0.055, center.z);
   return new THREE.Vector3(0, 0, 0);
 }
 
@@ -41,20 +41,21 @@ function createAnatomicalRibs() {
   const root = new THREE.Group();
   root.name = "Bucky-Lab-natural-rib-cage";
   const material = new THREE.MeshStandardMaterial({ color: "#ded8c4", roughness: 0.78, metalness: 0.02, transparent: true, opacity: 0.32, side: THREE.DoubleSide, depthWrite: true });
-  // Keep the cage inside the thoracic envelope. The old cage was too wide/tall.
+  // Compact thoracic cage: ribs must remain comfortably inside the skin
+  // envelope at the shoulder, lateral chest and sternum.
   for (let level = 1; level <= 12; level += 1) {
-    const y = 1.24 - (level - 1) * 0.038;
+    const y = 1.22 - (level - 1) * 0.035;
     const sidePoints = (side: -1 | 1): V3[] => {
-      const posterior = [side * 0.040, y, -0.050] as V3;
-      const lateral = [side * (0.112 + (level <= 6 ? 0.008 : 0)), y - 0.003 - level * 0.0008, 0.006] as V3;
-      const anterolateral = [side * (0.160 - Math.max(0, level - 7) * 0.009), y - 0.014, 0.050] as V3;
-      if (level <= 7) return [posterior, lateral, anterolateral, [side * 0.090, y - 0.028, 0.080], [side * 0.024, y - 0.038, 0.090]];
-      if (level <= 10) return [posterior, lateral, anterolateral, [side * 0.066, y - 0.025, 0.078]];
-      return [posterior, [side * 0.095, y - 0.006, 0.006], [side * 0.135, y - 0.014, 0.034], [side * 0.112, y - 0.024, 0.056]];
+      const posterior = [side * 0.030, y, -0.025] as V3;
+      const lateral = [side * (0.095 + (level <= 6 ? 0.006 : 0)), y - 0.002 - level * 0.0006, 0.004] as V3;
+      const anterolateral = [side * (0.135 - Math.max(0, level - 7) * 0.007), y - 0.010, 0.030] as V3;
+      if (level <= 7) return [posterior, lateral, anterolateral, [side * 0.078, y - 0.022, 0.048], [side * 0.020, y - 0.030, 0.055]];
+      if (level <= 10) return [posterior, lateral, anterolateral, [side * 0.055, y - 0.020, 0.047]];
+      return [posterior, [side * 0.078, y - 0.005, 0.004], [side * 0.112, y - 0.010, 0.022], [side * 0.092, y - 0.019, 0.038]];
     };
     ([-1, 1] as const).forEach(side => {
       const curve = new THREE.CatmullRomCurve3(sidePoints(side).map(p => new THREE.Vector3(...p)), false, "centripetal", 0.5);
-      const geometry = new THREE.TubeGeometry(curve, 24, level <= 10 ? 0.0048 : 0.0044, 8, false);
+      const geometry = new THREE.TubeGeometry(curve, 24, level <= 10 ? 0.0042 : 0.0039, 8, false);
       const mesh = new THREE.Mesh(geometry, material);
       mesh.name = `Bucky Lab rib ${level}${side < 0 ? " left" : " right"}`;
       mesh.userData.atlasRegion = "rib";
@@ -114,21 +115,7 @@ function PatientTransform({ children }: { children: ReactNode }) {
 function articulate(root: THREE.Group, pose: { shoulderRoll: number; armRaise: number; elbowFlex: number; hipInternal: number; kneeFlex: number }, patient: ReturnType<typeof patientById>, placement: PlacementMode) {
   const H = patient.heightCm / 100;
   const scale = H / ATLAS_HEIGHT_M;
-  const kin = patientKinematics({
-    H,
-    s: 1,
-    shoulder: patient.morph.shoulder,
-    hip: patient.morph.hip,
-    limb: patient.morph.limb,
-    elbowFlex: pose.elbowFlex,
-    hipInternal: pose.hipInternal,
-    armRaise: pose.armRaise,
-    shoulderRoll: pose.shoulderRoll,
-    kneeFlex: pose.kneeFlex,
-    projectionId: "pa-chest",
-    placement,
-    buckyTilt: 0,
-  });
+  const kin = patientKinematics({ H, s: 1, shoulder: patient.morph.shoulder, hip: patient.morph.hip, limb: patient.morph.limb, elbowFlex: pose.elbowFlex, hipInternal: pose.hipInternal, armRaise: pose.armRaise, shoulderRoll: pose.shoulderRoll, kneeFlex: pose.kneeFlex, projectionId: "pa-chest", placement, buckyTilt: 0 });
   const shoulderAngle = THREE.MathUtils.clamp(pose.shoulderRoll, 0, 1) * THREE.MathUtils.degToRad(28);
   const raiseAngle = THREE.MathUtils.clamp(pose.armRaise, 0, 1) * THREE.MathUtils.degToRad(65);
   const hipAngle = THREE.MathUtils.clamp(pose.hipInternal, -45, 45) * Math.PI / 180;
