@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { useSim } from "@/lib/sim/store";
@@ -58,14 +58,8 @@ async function loadAtlas(): Promise<THREE.Group> {
       try {
         for (const part of parts) {
           const geometry = new THREE.BufferGeometry();
-          geometry.setAttribute(
-            "position",
-            new THREE.BufferAttribute(new Float32Array(buffer, part.positions, part.vertexCount * 3), 3),
-          );
-          geometry.setAttribute(
-            "normal",
-            new THREE.BufferAttribute(new Int16Array(buffer, part.normals, part.vertexCount * 3), 3, true),
-          );
+          geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(buffer, part.positions, part.vertexCount * 3), 3));
+          geometry.setAttribute("normal", new THREE.BufferAttribute(new Int16Array(buffer, part.normals, part.vertexCount * 3), 3, true));
           geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(buffer, part.indices, part.indexCount), 1));
           geometries.push(geometry);
         }
@@ -78,7 +72,7 @@ async function loadAtlas(): Promise<THREE.Group> {
           roughness: 0.78,
           metalness: 0.02,
           transparent: true,
-          opacity: 0.96,
+          opacity: 0.32,
           side: THREE.DoubleSide,
           depthWrite: true,
         });
@@ -96,11 +90,10 @@ async function loadAtlas(): Promise<THREE.Group> {
   return root;
 }
 
-function PatientTransform({ children }: { children: React.ReactNode }) {
+function PatientTransform({ children }: { children: ReactNode }) {
   const patientId = useSim(s => s.patientId);
   const pose = useSim(s => s.pose);
   const equipment = useSim(s => s.equipment);
-  const exposing = useSim(s => s.exposing);
   const patient = patientById(patientId);
   const H = patient.heightCm / 100;
   const scale = H / ATLAS_HEIGHT_M;
@@ -126,22 +119,12 @@ function PatientTransform({ children }: { children: React.ReactNode }) {
     groupRot = [-Math.PI / 2, 0, yaw];
   }
 
-  return (
-    <group position={groupPos} rotation={groupRot}>
-      <group rotation={[kyphosis, oblique, 0]} scale={scale}>
-        <AtlasSceneRoot opacity={exposing ? 0.96 : 0.32}>{children}</AtlasSceneRoot>
-      </group>
-    </group>
-  );
-}
-
-function AtlasSceneRoot({ children, opacity }: { children: React.ReactNode; opacity: number }) {
-  const group = children as React.ReactElement<{ opacity?: number }>;
-  return <>{group}</>;
+  return <group position={groupPos} rotation={groupRot}><group rotation={[kyphosis, oblique, 0]} scale={scale}>{children}</group></group>;
 }
 
 export function HumanAtlasSkeletalOverlay() {
   const visible = useSim(s => s.anatomyVisibility.skeleton);
+  const exposing = useSim(s => s.exposing);
   const [atlas, setAtlas] = useState<THREE.Group | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -165,6 +148,19 @@ export function HumanAtlasSkeletalOverlay() {
     return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => {
+    if (!atlas) return;
+    atlas.traverse(object => {
+      if (!(object instanceof THREE.Mesh)) return;
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      for (const material of materials) {
+        material.transparent = true;
+        material.opacity = exposing ? 0.96 : 0.32;
+        material.needsUpdate = true;
+      }
+    });
+  }, [atlas, exposing]);
+
   useEffect(() => () => {
     atlas?.traverse(object => {
       if (object instanceof THREE.Mesh) {
@@ -175,11 +171,6 @@ export function HumanAtlasSkeletalOverlay() {
     });
   }, [atlas]);
 
-  const content = useMemo(() => {
-    if (!atlas) return null;
-    return <primitive object={atlas} />;
-  }, [atlas]);
-
-  if (!visible || error || !content) return null;
-  return <PatientTransform>{content}</PatientTransform>;
+  if (!visible || error || !atlas) return null;
+  return <PatientTransform><primitive object={atlas} /></PatientTransform>;
 }
