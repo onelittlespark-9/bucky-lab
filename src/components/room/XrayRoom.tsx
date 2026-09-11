@@ -1,30 +1,55 @@
-import { useMemo, useRef } from "react";
-import { useFrame } from "@react-three/fiber";
 import { ContactShadows, OrbitControls, Html } from "@react-three/drei";
 import * as THREE from "three";
 import { useSim } from "@/lib/sim/store";
-import { patientById } from "@/lib/sim/patients";
-import { projectionById } from "@/lib/sim/projections";
 import { PatientModel } from "./PatientModel";
 import { InternalAnatomy } from "./InternalAnatomy";
-import { SegmentedMuscles } from "./SegmentedMuscles";
+import { DetailedSkeletalOverlay } from "./DetailedSkeletalOverlay";
+import { XraySourceAssembly } from "./XraySourceAssembly";
 import type { AnatomyLayer } from "@/lib/sim/muscle-segmentation";
 
-function tableTargetZ(tubeCrY: number, patientId: string, tableZ: number, patientZ: number, projectionId: string) {
-  const patient = patientById(patientId); const projection = projectionById(projectionId); const h = patient.heightCm / 100; let localY: number;
-  switch (projection.anatomy) { case "foot-dp": localY=.04*h; break; case "ankle-ap": localY=.1*h; break; case "knee-ap": case "knee-lat": localY=.23*h; break; case "hand-pa": case "wrist-pa": localY=.4*h; break; case "elbow-ap": localY=.57*h; break; case "shoulder-ap": localY=.73*h; break; case "skull-lat": localY=.91*h; break; default: localY=(1-tubeCrY/patient.heightCm)*h; } return tableZ+patientZ+h*.5-localY;
+function TableAndBucky() {
+  const equipment = useSim(s => s.equipment);
+  const wall = equipment.placement === "upright-bucky" || equipment.placement === "standing" || equipment.placement === "seated";
+  const onTable = equipment.placement === "table";
+  const tilt = equipment.buckyTilt * Math.PI / 180;
+  const th = equipment.tableHeight;
+  return <>
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow><planeGeometry args={[10, 10]} /><meshStandardMaterial color="#12161a" /></mesh>
+    <gridHelper args={[10, 20, "#2a3338", "#1a2026"]} position={[0, .01, 0]} />
+    {onTable && <group position={[equipment.tableX, 0, equipment.tableZ]}>
+      {([-0.28, .28] as const).map(x => ([-.9, .9] as const).map(z => <mesh key={`leg-${x}-${z}`} position={[x, th * .5, z]}><boxGeometry args={[.06, th, .06]} /><meshStandardMaterial color="#3a4148" metalness={.5} roughness={.4} /></mesh>))}
+      <mesh position={[0, th, 0]} receiveShadow><boxGeometry args={[.78, .05, 2.3]} /><meshStandardMaterial color="#6a5f58" roughness={.85} /></mesh>
+      <mesh position={[0, th - .04, 0]}><boxGeometry args={[.76, .03, 2.27]} /><meshStandardMaterial color="#8b9096" metalness={.3} roughness={.45} /></mesh>
+    </group>}
+    {wall && <group position={[0, 0, -.78]}>
+      <mesh position={[0, 1.15, 0]}><boxGeometry args={[.12, 2.3, .12]} /><meshStandardMaterial color="#3a4148" metalness={.45} roughness={.4} /></mesh>
+      <group position={[0, equipment.buckyHeight, .1]} rotation={[tilt, 0, 0]}><mesh><boxGeometry args={[.55, .62, .08]} /><meshStandardMaterial color="#1c2228" metalness={.3} roughness={.4} /></mesh><mesh position={[0, 0, .05]}><boxGeometry args={[.43, .48, .02]} /><meshStandardMaterial color="#050608" roughness={.95} /></mesh></group>
+    </group>}
+    <mesh position={[0, 1.6, 4]}><boxGeometry args={[8, 3.2, .08]} /><meshStandardMaterial color="#1a2026" /></mesh>
+    <mesh position={[-3.8, 1.6, 0]}><boxGeometry args={[.08, 3.2, 8]} /><meshStandardMaterial color="#161c22" /></mesh>
+  </>;
 }
 
-function LightField() {
-  const tube=useSim(s=>s.tube),show=useSim(s=>s.showLightField),equipment=useSim(s=>s.equipment),patientId=useSim(s=>s.patientId),projectionId=useSim(s=>s.projectionId),exposing=useSim(s=>s.exposing),preparing=useSim(s=>s.preparing); const wall=equipment.placement==="upright-bucky"||equipment.placement==="standing"||equipment.placement==="seated"; const mag=tube.sid/Math.max(80,tube.sid-14),fieldW=tube.collimationW/100/mag,fieldH=tube.collimationH/100/mag,sidM=tube.sid/100,angle=tube.angle*Math.PI/180,lock=tube.lockedToDetector,bright=preparing||exposing,targetZ=tableTargetZ(tube.crY,patientId,equipment.tableZ,equipment.patientZ,projectionId); let fieldPos:[number,number,number],fieldRot:[number,number,number],tubePos:[number,number,number]; if(wall){const tilt=equipment.buckyTilt*Math.PI/180;fieldPos=[tube.crX/100,equipment.buckyHeight,-.68];fieldRot=[tilt,0,0];tubePos=[lock?0:tube.crX/100,equipment.buckyHeight,-.55+sidM];}else{fieldPos=[equipment.tableX+tube.crX/100,equipment.tableHeight+.08,targetZ];fieldRot=[-Math.PI/2,0,0];tubePos=[equipment.tableX+(lock?0:tube.crX/100),equipment.tableHeight+.08+sidM,targetZ];}
-  const coneGeo=useMemo(()=>{const hw0=.02,hh0=.02,hw1=fieldW/2,hh1=fieldH/2,depth=Math.max(.3,sidM-.15),positions=new Float32Array([-hw0,-hh0,0,hw0,-hh0,0,hw0,hh0,0,-hw0,hh0,0,-hw1,-hh1,-depth,hw1,-hh1,-depth,hw1,hh1,-depth,-hw1,hh1,-depth]),indices=[0,1,5,0,5,4,1,2,6,1,6,5,2,3,7,2,7,6,3,0,4,3,4,7,4,5,6,4,6,7],geometry=new THREE.BufferGeometry();geometry.setAttribute("position",new THREE.BufferAttribute(positions,3));geometry.setIndex(indices);geometry.computeVertexNormals();return geometry;},[fieldW,fieldH,sidM]);
-  if(!show)return null; const mid:[number,number,number]=[(tubePos[0]+fieldPos[0])/2,(tubePos[1]+fieldPos[1])/2,(tubePos[2]+fieldPos[2])/2]; return <group><mesh geometry={coneGeo} position={tubePos} rotation={wall?[0,0,-angle]:[-Math.PI/2-angle,0,0]} renderOrder={1}><meshBasicMaterial color={bright?"#ffe566":"#e2c35a"} transparent opacity={bright?.28:.16} depthWrite={false} side={THREE.DoubleSide}/></mesh><mesh position={fieldPos} rotation={fieldRot} renderOrder={2}><planeGeometry args={[fieldW,fieldH]}/><meshBasicMaterial color={bright?"#fff6a0":"#f0d060"} transparent opacity={bright?.55:.35} depthWrite={false} side={THREE.DoubleSide}/></mesh><mesh position={fieldPos} rotation={fieldRot} renderOrder={3}><planeGeometry args={[fieldW,fieldH]}/><meshBasicMaterial color="#e2c35a" transparent opacity={.9} depthWrite={false} side={THREE.DoubleSide} wireframe/></mesh><pointLight position={mid} color="#ffe08a" intensity={bright?2.2:.9} distance={Math.max(1.2,sidM)} decay={2}/></group>;
+function AnatomyControls() {
+  const visibility = useSim(s => s.anatomyVisibility);
+  const setLayer = useSim(s => s.setAnatomyLayer);
+  const labels: [AnatomyLayer, string][] = [["skin", "Skin"], ["fat", "Fat"], ["muscle", "Muscle"], ["organs", "Organs"], ["skeleton", "Skeleton"]];
+  return <Html position={[1.25, 1.8, 0]} transform={false} style={{ pointerEvents: "auto" }}><div style={{ background: "rgba(10,14,18,.9)", padding: 12, borderRadius: 10, color: "white", fontFamily: "system-ui", fontSize: 12, width: 150 }}><strong>ANATOMY LAYERS</strong>{labels.map(([id, label]) => <label key={id} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 7, cursor: "pointer" }}><input type="checkbox" checked={visibility[id]} onChange={e => setLayer(id, e.target.checked)} />{label}</label>)}</div></Html>;
 }
 
-function TubeHead(){const tube=useSim(s=>s.tube),equipment=useSim(s=>s.equipment),patientId=useSim(s=>s.patientId),projectionId=useSim(s=>s.projectionId),preparing=useSim(s=>s.preparing),exposing=useSim(s=>s.exposing),spin=useRef(0),anode=useRef<THREE.Mesh>(null),wall=equipment.placement==="upright-bucky"||equipment.placement==="standing"||equipment.placement==="seated";useFrame((_,dt)=>{const d=Math.min(dt,.1);if(preparing||exposing)spin.current+=d*18;if(anode.current)anode.current.rotation.z=spin.current;});const sidM=tube.sid/100,angle=tube.angle*Math.PI/180,lock=tube.lockedToDetector;let pos:[number,number,number],rot:[number,number,number];if(wall){const detY=lock?equipment.buckyHeight:equipment.buckyHeight+(tube.crY/100-1)*.15;pos=[lock?0:tube.crX/100,detY,-.55+sidM];rot=[0,0,-angle];}else{const detY=equipment.tableHeight+.08+sidM,detX=equipment.tableX+(lock?0:tube.crX/100),detZ=tableTargetZ(tube.crY,patientId,equipment.tableZ,equipment.patientZ,projectionId);pos=[detX,detY,detZ];rot=[Math.PI/2+angle,0,0];}return <group position={pos} rotation={rot}><mesh position={[0,0,.12]}><boxGeometry args={[.22,.16,.28]}/><meshStandardMaterial color="#3a4148" metalness={.4} roughness={.4}/></mesh><mesh position={[0,0,-.08]} ref={anode}><cylinderGeometry args={[.07,.09,.12,16]}/><meshStandardMaterial color="#1c2228" metalness={.6} roughness={.3}/></mesh><mesh position={[0,0,-.18]}><boxGeometry args={[.18,.14,.08]}/><meshStandardMaterial color="#2a3036"/></mesh>{(preparing||exposing)&&<pointLight color={exposing?"#fff7e0":"#e2c35a"} intensity={exposing?8:2.4} distance={3}/>}<mesh position={[0,.28,.1]}><boxGeometry args={[.04,.4,.04]}/><meshStandardMaterial color="#4a5560"/></mesh>{lock?<mesh position={[.12,.1,.05]}><boxGeometry args={[.03,.03,.03]}/><meshStandardMaterial color="#3ecf8e" emissive="#3ecf8e" emissiveIntensity={.4}/></mesh>:null}</group>;}
-
-function TableAndBucky(){const equipment=useSim(s=>s.equipment),wall=equipment.placement==="upright-bucky"||equipment.placement==="standing"||equipment.placement==="seated",onTable=equipment.placement==="table",tilt=equipment.buckyTilt*Math.PI/180,th=equipment.tableHeight;return <><mesh rotation={[-Math.PI/2,0,0]} position={[0,0,0]} receiveShadow><planeGeometry args={[10,10]}/><meshStandardMaterial color="#12161a"/></mesh><gridHelper args={[10,20,"#2a3338","#1a2026"]} position={[0,.01,0]}/>{onTable?<group position={[equipment.tableX,0,equipment.tableZ]}>{([-0.28,.28] as const).map(x=>([-.9,.9] as const).map(z=><mesh key={`leg-${x}-${z}`} position={[x,th*.5,z]}><boxGeometry args={[.06,th,.06]}/><meshStandardMaterial color="#3a4148" metalness={.5} roughness={.4}/></mesh>))}<mesh position={[0,th,0]} receiveShadow><boxGeometry args={[.78,.05,2.3]}/><meshStandardMaterial color="#6a5f58" roughness={.85}/></mesh><mesh position={[0,th-.04,0]}><boxGeometry args={[.76,.03,2.27]}/><meshStandardMaterial color="#8b9096" metalness={.3} roughness={.45}/></mesh></group>:null}{wall?<group position={[0,0,-.78]}><mesh position={[0,1.15,0]}><boxGeometry args={[.12,2.3,.12]}/><meshStandardMaterial color="#3a4148" metalness={.45} roughness={.4}/></mesh><group position={[0,equipment.buckyHeight,.1]} rotation={[tilt,0,0]}><mesh><boxGeometry args={[.55,.62,.08]}/><meshStandardMaterial color="#1c2228" metalness={.3} roughness={.4}/></mesh><mesh position={[0,0,.05]}><boxGeometry args={[.43,.48,.02]}/><meshStandardMaterial color="#050608" roughness={.95}/></mesh></group></group>:null}<mesh position={[0,1.6,4]}><boxGeometry args={[8,3.2,.08]}/><meshStandardMaterial color="#1a2026"/></mesh><mesh position={[-3.8,1.6,0]}><boxGeometry args={[.08,3.2,8]}/><meshStandardMaterial color="#161c22"/></mesh></>;}
-
-function AnatomyControls(){const visibility=useSim(s=>s.anatomyVisibility),setLayer=useSim(s=>s.setAnatomyLayer);const labels:[AnatomyLayer,string][]=[["skin","Skin"],["fat","Fat"],["muscle","Muscle"],["organs","Organs"],["skeleton","Skeleton"]];return <Html position={[1.25,1.8,0]} transform={false} style={{pointerEvents:"auto"}}><div style={{background:"rgba(10,14,18,.9)",padding:12,borderRadius:10,color:"white",fontFamily:"system-ui",fontSize:12,width:150}}><strong>ANATOMY LAYERS</strong>{labels.map(([id,label])=><label key={id} style={{display:"flex",gap:8,alignItems:"center",marginTop:7,cursor:"pointer"}}><input type="checkbox" checked={visibility[id]} onChange={e=>setLayer(id,e.target.checked)}/>{label}</label>)}</div></Html>;}
-
-export function XrayRoom(){return <><color attach="background" args={["#0a0c0e"]}/><hemisphereLight args={["#c8d0d4","#1a1814",.55]}/><directionalLight position={[2.5,4,2]} intensity={1.15} castShadow shadow-mapSize={[1024,1024]}/><directionalLight position={[-2,2,-1]} intensity={.25}/><TableAndBucky/><PatientModel/><SegmentedMuscles/><InternalAnatomy/><AnatomyControls/><TubeHead/><LightField/><ContactShadows opacity={.35} scale={8} blur={2.2} far={5}/><OrbitControls enablePan minPolarAngle={.2} maxPolarAngle={Math.PI/2.05} minDistance={1.2} maxDistance={6} target={[0,.9,0]}/></>;}
+export function XrayRoom() {
+  return <>
+    <color attach="background" args={["#0a0c0e"]} />
+    <hemisphereLight args={["#c8d0d4", "#1a1814", .55]} />
+    <directionalLight position={[2.5, 4, 2]} intensity={1.15} castShadow shadow-mapSize={[1024, 1024]} />
+    <directionalLight position={[-2, 2, -1]} intensity={.25} />
+    <TableAndBucky />
+    <PatientModel />
+    <InternalAnatomy />
+    <DetailedSkeletalOverlay />
+    <AnatomyControls />
+    <XraySourceAssembly />
+    <ContactShadows opacity={.35} scale={8} blur={2.2} far={5} />
+    <OrbitControls enablePan minPolarAngle={.2} maxPolarAngle={Math.PI / 2.05} minDistance={1.2} maxDistance={6} target={[0, .9, 0]} />
+  </>;
+}

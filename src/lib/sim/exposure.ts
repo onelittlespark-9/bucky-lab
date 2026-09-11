@@ -76,11 +76,46 @@ export function classifyEI(ei: number): ExposureMetrics["eiStatus"] {
   return "optimal";
 }
 
-export function predictEI(patient: Patient, projection: Projection, exposure: ExposureState, tube: TubeState): number {
+/**
+ * First-order beam attenuation for the representative part thickness.
+ * The actual radiograph renderer performs the same exponential attenuation
+ * per pixel from its sampled tissue paths; this function supplies the global
+ * technique/EI model and keeps the two responses on the same physical curve.
+ */
+export function representativeTransmission(patient: Patient, projection: Projection, kvp: number): number {
   const t = partThickness(patient, projection);
-  const mu = muEffective("soft", exposure.kvp) * 0.55 + muEffective("bone", exposure.kvp) * 0.08;
-  const T = Math.exp(-mu * t);
+  const muSoft = muEffective("soft", kvp);
+  const muBone = muEffective("bone", kvp);
+  const muLung = muEffective("lung", kvp);
+  const isChest = projection.region === "Thorax";
+  const effectiveMu = isChest
+    ? muSoft * 0.52 + muLung * 0.32 + muBone * 0.10
+    : muSoft * 0.72 + muBone * 0.20;
+  return Math.exp(-effectiveMu * t);
+}
+
+/**
+ * Superimposition is not a cosmetic overlay: attenuation from every structure
+ * crossed by the beam is accumulated in the renderer. This index describes the
+ * expected burden of overlapping tissue for feedback and assessment.
+ */
+export function superimpositionIndex(patient: Patient, projection: Projection): number {
+  const t = partThickness(patient, projection);
+  const thicknessBurden = Math.min(1, t / 35);
+  const projectionBurden = projection.anatomy === "torso-lat"
+    ? 0.78
+    : projection.anatomy === "torso-ap"
+      ? 0.58
+      : projection.anatomy === "skull-lat" || projection.anatomy === "cspine-lat"
+        ? 0.72
+        : 0.30;
+  return Math.min(1, projectionBurden * 0.68 + thicknessBurden * 0.32);
+}
+
+export function predictEI(patient: Patient, projection: Projection, exposure: ExposureState, tube: TubeState): number {
+  const T = representativeTransmission(patient, projection, exposure.kvp);
   const I0 = incidentFluence(exposure.kvp, exposure.mas, tube.sid, exposure.grid && projection.setup !== "tabletop");
+  const t = partThickness(patient, projection);
   const scatter = fieldScatter(tube.collimationW, tube.collimationH, t, exposure.grid);
   return exposureIndex(I0 * T + I0 * scatter * 0.15);
 }
@@ -94,9 +129,25 @@ export function buildMetrics(meanSignal: number, noise: number, contrast: number
   const receptorAttenuation = exposure.grid ? 1.28 : 1.0;
   const kVFactor = Math.pow(exposure.kvp / 75, 0.35);
   const distanceFactor = Math.pow(100 / Math.max(60, tube.sid), 2);
-  // Educational simulation value: technique × field area × patient build × receptor attenuation.
-  // It is deliberately labelled DAP, not a clinical patient-dose estimate.
   const entranceDose = I0 * 0.012 * distanceFactor * patientSizeFactor * receptorAttenuation / Math.max(0.7, kVFactor);
   const dap = entranceDose * fieldAreaCm2;
-  return { ei, eiStatus: classifyEI(ei), noise, contrast, saturation, dap, entranceDose, predictedEI: predictEI(patient, projection, exposure, tube) };
+  const transmission = representativeTransmission(patient, projection, exposure.kvp);
+  const scatter = fieldScatter(tube.collimationW, tube.collimationH, t, exposure.grid);
+  const scatterFraction = Math.min(1, scatter / Math.max(1e-6, transmission + scatter));
+  const attenuationIndex = Math.min(1, -Math.log(Math.max(1e-6, transmission)) / 5);
+  const superimposition = superimpositionIndex(patient, projection);
+  return {
+    ei,
+    eiStatus: classifyEI(ei),
+    noise,
+    contrast,
+    saturation,
+    dap,
+    entranceDose,
+    predictedEI: predictEI(patient, projection, exposure, tube),
+    transmission,
+    scatterFraction,
+    attenuationIndex,
+    superimpositionIndex: superimposition,
+  };
 }

@@ -19,10 +19,10 @@ function requiredAnatomyRange(projection: Projection, patient: Patient): { top: 
   return { top: Math.max(0, cy - 10), bottom: cy + 10, halfWidth: 10 };
 }
 
-function fieldCoverage(projection: Projection, patient: Patient, tube: TubeState) {
-  const mag = tube.sid / Math.max(80, tube.sid - 14);
-  const halfH = (tube.collimationH / mag) / 2;
-  const halfW = (tube.collimationW / mag) / 2;
+function fieldCoverage(projection: Projection, patient: Patient, tube: TubeState, pose: SimPose) {
+  const geometry = projectionGeometry(projection, tube, pose);
+  const halfH = (tube.collimationH / geometry.magnification) / 2;
+  const halfW = (tube.collimationW / geometry.magnification) / 2;
   const range = requiredAnatomyRange(projection, patient);
   const top = tube.crY - halfH;
   const bottom = tube.crY + halfH;
@@ -39,7 +39,7 @@ export function scoreExposure(args: { patient: Patient; projection: Projection; 
   const dy = Math.abs(tube.crY - targetY), dx = Math.abs(tube.crX - targetX), dist = Math.hypot(dx, dy);
   scores.push({ id: "centring", label: "Centring", weight: 1.25, grade: gradeFromError(dist, 1.6, 3.5), detail: dist < 1.6 ? `CR within ${dist.toFixed(1)} cm of ${projection.centring}` : `CR is ${dist.toFixed(1)} cm from the handbook point (${projection.centring})` });
 
-  const coverage = fieldCoverage(projection, patient, tube);
+  const coverage = fieldCoverage(projection, patient, tube, pose);
   const anatomyGrade: Grade = coverage.vertical >= 0.96 && coverage.horizontal >= 0.95 ? "excellent" : coverage.vertical >= 0.82 && coverage.horizontal >= 0.85 ? "acceptable" : "repeat";
   let anatomyDetail = `The exposed field covers ${Math.round(coverage.vertical * 100)}% of the required anatomy.`;
   if (coverage.vertical < 0.82) {
@@ -64,32 +64,14 @@ export function scoreExposure(args: { patient: Patient; projection: Projection; 
 
   const geometry = projectionGeometry(projection, tube, pose);
   const magGrade = geometry.magnification <= 1.04 ? "excellent" : geometry.magnification <= 1.08 ? "acceptable" : "repeat";
-  scores.push({
-    id: "magnification",
-    label: "Magnification / OID",
-    weight: 0.9,
-    grade: magGrade,
-    detail: `Estimated OID ${geometry.oidCm.toFixed(1)} cm; magnification ${geometry.magnification.toFixed(3)}×. Keep the anatomy close to the IR when accurate size matters.`,
-  });
+  scores.push({ id: "magnification", label: "Magnification / OID", weight: 0.9, grade: magGrade, detail: `OID ${geometry.oidCm.toFixed(1)} cm; SOD ${geometry.sodCm.toFixed(1)} cm; magnification ${geometry.magnification.toFixed(3)}×. Keep anatomy close to the IR when accurate size matters.` });
 
   const blurGrade = geometry.geometricUnsharpnessMm <= 0.05 ? "excellent" : geometry.geometricUnsharpnessMm <= 0.12 ? "acceptable" : "repeat";
-  scores.push({
-    id: "geometric-unsharpness",
-    label: "Geometric sharpness",
-    weight: 0.7,
-    grade: blurGrade,
-    detail: `Estimated geometric unsharpness ${geometry.geometricUnsharpnessMm.toFixed(2)} mm from focal-spot/OID/SOD geometry.`,
-  });
+  scores.push({ id: "geometric-unsharpness", label: "Geometric sharpness", weight: 0.7, grade: blurGrade, detail: `Estimated geometric unsharpness ${geometry.geometricUnsharpnessMm.toFixed(2)} mm using the fixed 1.0 mm focal spot.` });
 
   const projectionError = geometry.projectedOffsetCm;
   const beamProjectionGrade = projectionError <= 0.5 ? "excellent" : projectionError <= 1.5 ? "acceptable" : "repeat";
-  scores.push({
-    id: "projection-geometry",
-    label: "Beam geometry",
-    weight: 0.8,
-    grade: beamProjectionGrade,
-    detail: projectionError <= 0.5 ? "Central ray is close to perpendicular to the anatomy/IR relationship." : `Angulation and/or OID produces an estimated ${projectionError.toFixed(1)} cm projected offset. Expect shape distortion.`,
-  });
+  scores.push({ id: "projection-geometry", label: "Beam geometry", weight: 0.8, grade: beamProjectionGrade, detail: projectionError <= 0.5 ? "Central ray is close to perpendicular to the anatomy/IR relationship." : `Angulation and/or patient orientation produces an estimated ${projectionError.toFixed(1)} cm projected offset. Expect shape distortion.` });
 
   const rot = Math.abs(pose.rotationY), needLateral = projection.anatomy.includes("lat");
   let rotGrade: Grade = "excellent", rotDetail = `Rotation ${pose.rotationY.toFixed(0)}°.`;
