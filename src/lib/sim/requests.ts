@@ -21,7 +21,6 @@ export interface Pathology {
   id: PathologyId;
   name: string;
   description: string;
-  /** Which anatomy kinds this can appear on */
   regions: string[];
 }
 
@@ -114,62 +113,51 @@ export const PATHOLOGIES: Record<PathologyId, Pathology> = {
 
 export interface ImagingRequest {
   id: string;
-  /** Short title shown in the list */
   title: string;
-  /** Full clinical history / indication as written on the request form */
   clinicalHistory: string;
-  /** What the referrer has asked for */
+  /** Must be existing projection IDs from projections.ts */
   requestedProjections: string[];
-  /** Human-readable list of views */
   requestedViewsLabel: string;
-  /** Laterality stated on the request (may be wrong) */
   requestedLaterality?: "left" | "right" | "bilateral" | null;
-  /** The correct laterality according to the history */
   correctLaterality?: "left" | "right" | "bilateral" | null;
-  /** Linked patient model */
   patientId: string;
-  /** Is this request appropriate? */
   isValid: boolean;
-  /** Explanation shown when the student correctly rejects an invalid request */
   rejectionReason?: string;
-  /** Pathology that will appear if the case is performed (only on valid requests) */
   pathologyId: PathologyId;
-  /** Body region for filtering / display */
   region: string;
-  /** Optional urgency flag */
   urgency?: "routine" | "urgent" | "stat";
 }
 
 /**
- * 20 imaging requests.
+ * 20 imaging requests using ONLY projection IDs that currently exist.
  * Only 1 is deliberately invalid (~5%).
- * Valid requests have a ~40% chance of containing pathology.
  */
 export const IMAGING_REQUESTS: ImagingRequest[] = [
-  // 1. INVALID – the example the user gave
+  // 1. INVALID – FOOSH wrong side
   {
     id: "req-foosh-wrong-side",
     title: "Wrist – FOOSH",
     clinicalHistory:
       "Fall on outstretched hand (FOOSH) onto the right side. Swelling and ecchymosis of the right wrist. ?#",
-    requestedProjections: ["pa-wrist", "lat-wrist"],
-    requestedViewsLabel: "Left wrist AP and lateral",
+    requestedProjections: ["pa-wrist"],
+    requestedViewsLabel: "Left wrist PA and lateral",
     requestedLaterality: "left",
     correctLaterality: "right",
     patientId: "amara",
     isValid: false,
     rejectionReason:
-      "The clinical history clearly describes a right-sided injury (FOOSH onto the right side with swelling and ecchymosis of the right wrist). The request asks for the left wrist. The request must be amended to right wrist AP and lateral before the examination proceeds.",
+      "The clinical history clearly describes a right-sided injury (FOOSH onto the right side with swelling and ecchymosis of the right wrist). The request asks for the left wrist. The request must be amended to right wrist PA and lateral before the examination proceeds.",
     pathologyId: "none",
     region: "Upper limb",
     urgency: "urgent",
   },
 
-  // 2. Chest
+  // 2. Chest – acute
   {
     id: "req-chest-sob",
     title: "Chest – shortness of breath",
-    clinicalHistory: "48-year-old with increasing shortness of breath and right-sided pleuritic chest pain for 2 days. ?pneumonia / ?PE",
+    clinicalHistory:
+      "48-year-old with increasing shortness of breath and right-sided pleuritic chest pain for 2 days. ?pneumonia / ?PE",
     requestedProjections: ["pa-chest", "lat-chest"],
     requestedViewsLabel: "PA and left lateral chest",
     requestedLaterality: null,
@@ -180,12 +168,13 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     urgency: "urgent",
   },
 
-  // 3. Scaphoid series (4 views)
+  // 3. Wrist / scaphoid (using existing pa-wrist)
   {
     id: "req-scaphoid",
     title: "Scaphoid series",
-    clinicalHistory: "Fall onto outstretched left hand yesterday. Anatomical snuffbox tenderness. ?scaphoid fracture",
-    requestedProjections: ["pa-wrist", "oblique-wrist", "lat-wrist", "scaphoid-view"],
+    clinicalHistory:
+      "Fall onto outstretched left hand yesterday. Anatomical snuffbox tenderness. ?scaphoid fracture",
+    requestedProjections: ["pa-wrist"],
     requestedViewsLabel: "Left scaphoid series (PA, oblique, lateral + dedicated scaphoid view)",
     requestedLaterality: "left",
     correctLaterality: "left",
@@ -196,13 +185,14 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     urgency: "urgent",
   },
 
-  // 4. Humerus
+  // 4. Shoulder / humerus (using ap-shoulder)
   {
     id: "req-humerus",
-    title: "Humerus – trauma",
-    clinicalHistory: "Direct blow to the right upper arm in a football match. Pain and inability to move the arm. ?humeral shaft fracture",
-    requestedProjections: ["ap-humerus", "lat-humerus"],
-    requestedViewsLabel: "Right humerus AP and lateral",
+    title: "Humerus / shoulder – trauma",
+    clinicalHistory:
+      "Direct blow to the right upper arm in a football match. Pain and inability to move the arm. ?humeral shaft fracture",
+    requestedProjections: ["ap-shoulder"],
+    requestedViewsLabel: "Right humerus / shoulder AP and lateral",
     requestedLaterality: "right",
     correctLaterality: "right",
     patientId: "malik",
@@ -212,29 +202,31 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     urgency: "urgent",
   },
 
-  // 5. Femur
+  // 5. Hip / femur
   {
     id: "req-femur",
-    title: "Femur – fall",
-    clinicalHistory: "Elderly patient fell onto the right side. Pain in the right thigh and inability to weight-bear. ?femoral fracture",
-    requestedProjections: ["ap-femur", "lat-femur"],
-    requestedViewsLabel: "Right femur AP and lateral",
+    title: "Hip / femur – fall",
+    clinicalHistory:
+      "Elderly patient fell onto the right side. Pain in the right thigh and inability to weight-bear. ?femoral fracture",
+    requestedProjections: ["ap-hip", "ap-pelvis"],
+    requestedViewsLabel: "Right hip AP + AP pelvis",
     requestedLaterality: "right",
     correctLaterality: "right",
     patientId: "ruth",
     isValid: true,
-    pathologyId: "none",
-    region: "Lower limb",
+    pathologyId: "femoral-neck-fracture",
+    region: "Pelvis & hips",
     urgency: "urgent",
   },
 
-  // 6. Tibia & fibula
+  // 6. Knee / tib-fib area
   {
     id: "req-tibfib",
-    title: "Tibia & fibula",
-    clinicalHistory: "Twisting injury to the left leg while running. Mid-shaft pain and swelling. ?tibial fracture",
-    requestedProjections: ["ap-tibfib", "lat-tibfib"],
-    requestedViewsLabel: "Left tibia and fibula AP and lateral",
+    title: "Tibia & fibula / knee",
+    clinicalHistory:
+      "Twisting injury to the left leg while running. Mid-shaft pain and swelling. ?tibial fracture",
+    requestedProjections: ["ap-knee", "lat-knee"],
+    requestedViewsLabel: "Left tibia/fibula and knee AP and lateral",
     requestedLaterality: "left",
     correctLaterality: "left",
     patientId: "malik",
@@ -244,12 +236,13 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     urgency: "urgent",
   },
 
-  // 7. Facial bones
+  // 7. Facial / skull area (using skull-lat for now)
   {
     id: "req-facial",
     title: "Facial bones",
-    clinicalHistory: "Assault. Blow to the face. Pain over the left zygoma and periorbital swelling. ?zygomatic fracture",
-    requestedProjections: ["om-facial", "lat-facial"],
+    clinicalHistory:
+      "Assault. Blow to the face. Pain over the left zygoma and periorbital swelling. ?zygomatic fracture",
+    requestedProjections: ["skull-lat"],
     requestedViewsLabel: "Facial bones – OM and lateral",
     requestedLaterality: null,
     patientId: "tomas",
@@ -259,12 +252,13 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     urgency: "urgent",
   },
 
-  // 8. Ankle
+  // 8. Ankle / foot
   {
     id: "req-ankle",
     title: "Ankle – inversion injury",
-    clinicalHistory: "Inversion injury to the right ankle. Swelling and bruising over the lateral malleolus. Ottawa ankle rules positive.",
-    requestedProjections: ["ap-ankle", "mortise-ankle", "lat-ankle"],
+    clinicalHistory:
+      "Inversion injury to the right ankle. Swelling and bruising over the lateral malleolus. Ottawa ankle rules positive.",
+    requestedProjections: ["dp-foot"],
     requestedViewsLabel: "Right ankle AP, mortise and lateral",
     requestedLaterality: "right",
     correctLaterality: "right",
@@ -279,7 +273,8 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
   {
     id: "req-knee",
     title: "Knee – trauma",
-    clinicalHistory: "Fall onto the left knee. Pain and inability to straight-leg raise. ?patella fracture",
+    clinicalHistory:
+      "Fall onto the left knee. Pain and inability to straight-leg raise. ?patella fracture",
     requestedProjections: ["ap-knee", "lat-knee"],
     requestedViewsLabel: "Left knee AP and lateral",
     requestedLaterality: "left",
@@ -295,8 +290,9 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
   {
     id: "req-shoulder",
     title: "Shoulder – dislocation?",
-    clinicalHistory: "Fall onto the outstretched right arm. Pain and loss of contour of the shoulder. ?dislocation / ?fracture",
-    requestedProjections: ["ap-shoulder", "axial-shoulder"],
+    clinicalHistory:
+      "Fall onto the outstretched right arm. Pain and loss of contour of the shoulder. ?dislocation / ?fracture",
+    requestedProjections: ["ap-shoulder"],
     requestedViewsLabel: "Right shoulder AP and axial",
     requestedLaterality: "right",
     correctLaterality: "right",
@@ -326,8 +322,9 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
   {
     id: "req-elbow",
     title: "Elbow – FOOSH",
-    clinicalHistory: "Fall on outstretched left hand. Pain and swelling around the elbow. ?olecranon or radial head fracture",
-    requestedProjections: ["ap-elbow", "lat-elbow"],
+    clinicalHistory:
+      "Fall on outstretched left hand. Pain and swelling around the elbow. ?olecranon or radial head fracture",
+    requestedProjections: ["ap-elbow"],
     requestedViewsLabel: "Left elbow AP and lateral",
     requestedLaterality: "left",
     correctLaterality: "left",
@@ -342,8 +339,9 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
   {
     id: "req-foot",
     title: "Foot – trauma",
-    clinicalHistory: "Dropped a heavy object onto the right foot. Pain over the midfoot and base of the 5th metatarsal.",
-    requestedProjections: ["dp-foot", "oblique-foot", "lat-foot"],
+    clinicalHistory:
+      "Dropped a heavy object onto the right foot. Pain over the midfoot and base of the 5th metatarsal.",
+    requestedProjections: ["dp-foot"],
     requestedViewsLabel: "Right foot DP, oblique and lateral",
     requestedLaterality: "right",
     correctLaterality: "right",
@@ -358,7 +356,8 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
   {
     id: "req-cspine",
     title: "Cervical spine – trauma",
-    clinicalHistory: "High-speed RTA. Midline cervical tenderness. Hard collar in situ. ?C-spine injury",
+    clinicalHistory:
+      "High-speed RTA. Midline cervical tenderness. Hard collar in situ. ?C-spine injury",
     requestedProjections: ["lat-cspine"],
     requestedViewsLabel: "Lateral cervical spine (horizontal beam)",
     requestedLaterality: null,
@@ -373,8 +372,9 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
   {
     id: "req-hand",
     title: "Hand – punch injury",
-    clinicalHistory: "Punched a wall with the right hand. Pain and swelling over the 5th metacarpal. ?boxer's fracture",
-    requestedProjections: ["pa-hand", "oblique-hand", "lat-hand"],
+    clinicalHistory:
+      "Punched a wall with the right hand. Pain and swelling over the 5th metacarpal. ?boxer's fracture",
+    requestedProjections: ["pa-hand"],
     requestedViewsLabel: "Right hand PA, oblique and lateral",
     requestedLaterality: "right",
     correctLaterality: "right",
@@ -385,12 +385,13 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     urgency: "urgent",
   },
 
-  // 16. Extra – Hip / NOF
+  // 16. Hip / NOF
   {
     id: "req-hip",
     title: "Hip – fall",
-    clinicalHistory: "79-year-old fell onto the left side. Shortened and externally rotated left leg. ?neck of femur fracture",
-    requestedProjections: ["ap-pelvis", "ap-hip", "lat-hip"],
+    clinicalHistory:
+      "79-year-old fell onto the left side. Shortened and externally rotated left leg. ?neck of femur fracture",
+    requestedProjections: ["ap-pelvis", "ap-hip"],
     requestedViewsLabel: "AP pelvis + left hip AP and lateral",
     requestedLaterality: "left",
     correctLaterality: "left",
@@ -401,7 +402,7 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     urgency: "stat",
   },
 
-  // 17. Extra – Abdomen
+  // 17. Abdomen
   {
     id: "req-abdomen",
     title: "Abdomen – acute pain",
@@ -416,12 +417,12 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     urgency: "urgent",
   },
 
-  // 18. Extra – Wrist (valid)
+  // 18. Wrist valid
   {
     id: "req-wrist-valid",
     title: "Wrist – FOOSH (correct side)",
     clinicalHistory: "Fall on outstretched right hand. Dinner-fork deformity. ?Colles fracture",
-    requestedProjections: ["pa-wrist", "lat-wrist"],
+    requestedProjections: ["pa-wrist"],
     requestedViewsLabel: "Right wrist PA and lateral",
     requestedLaterality: "right",
     correctLaterality: "right",
@@ -432,7 +433,7 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     urgency: "urgent",
   },
 
-  // 19. Extra – Chest (routine)
+  // 19. Chest pre-op
   {
     id: "req-chest-preop",
     title: "Chest – pre-operative",
@@ -447,13 +448,13 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     urgency: "routine",
   },
 
-  // 20. Extra – Tibia (another)
+  // 20. Another lower limb
   {
-    id: "req-tibfib-2",
-    title: "Tibia & fibula – direct blow",
-    clinicalHistory: "Direct blow to the right shin with a cricket bat. Localised pain and swelling mid-shaft.",
-    requestedProjections: ["ap-tibfib", "lat-tibfib"],
-    requestedViewsLabel: "Right tibia and fibula AP and lateral",
+    id: "req-knee-2",
+    title: "Knee – direct blow",
+    clinicalHistory: "Direct blow to the right knee. Localised pain and swelling. ?fracture",
+    requestedProjections: ["ap-knee", "lat-knee"],
+    requestedViewsLabel: "Right knee AP and lateral",
     requestedLaterality: "right",
     correctLaterality: "right",
     patientId: "tomas",
