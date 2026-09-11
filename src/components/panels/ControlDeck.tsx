@@ -1,7 +1,7 @@
 import { useSim } from "@/lib/sim/store";
 import { patientById } from "@/lib/sim/patients";
-import { LANDMARKS, projectionById, scaleLandmarkY } from "@/lib/sim/projections";
-import { suggestedTechnique, classifyEI } from "@/lib/sim/exposure";
+import { projectionById } from "@/lib/sim/projections";
+import { classifyEI } from "@/lib/sim/exposure";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -53,7 +53,6 @@ export function ControlDeck() {
   const exposing = useSim((s) => s.exposing);
   const prepare = useSim((s) => s.prepare);
   const expose = useSim((s) => s.expose);
-  const setLandmarkCR = useSim((s) => s.setLandmarkCR);
 
   const patient = patientById(patientId);
   const projection = projectionById(projectionId);
@@ -80,38 +79,86 @@ export function ControlDeck() {
 
         <div className="min-h-0 flex-1 overflow-y-auto pr-1">
           <TabsContent value="position" className="space-y-4">
+            <p className="text-xs text-muted">
+              Controls shown match this examination. Use Room to place the patient over the detector.
+            </p>
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" onClick={() => patchPose({ recumbency: "erect" })}>
-                Erect
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => patchPose({ recumbency: "supine" })}>
-                Supine
-              </Button>
+              {(projection.setup === "wall" || projection.recumbency === "erect") && (
+                <Button size="sm" variant={pose.recumbency === "erect" ? "default" : "outline"} onClick={() => patchPose({ recumbency: "erect" })}>
+                  Erect
+                </Button>
+              )}
+              {(projection.setup === "table" || projection.setup === "tabletop") && (
+                <Button size="sm" variant={pose.recumbency === "supine" ? "default" : "outline"} onClick={() => patchPose({ recumbency: "supine" })}>
+                  Supine
+                </Button>
+              )}
               <Button size="sm" variant="outline" onClick={() => patchPose({ rotationY: 0 })}>
                 AP/PA
               </Button>
               <Button size="sm" variant="outline" onClick={() => patchPose({ rotationY: 90 })}>
                 Lateral
               </Button>
-              <Button size="sm" variant="outline" onClick={() => patchPose({ rotationY: 45 })}>
-                45° oblique
-              </Button>
+              {(projection.region === "Upper limb" || projection.region === "Lower limb" || projection.region === "Spine") && (
+                <Button size="sm" variant="outline" onClick={() => patchPose({ rotationY: 45 })}>
+                  45° oblique
+                </Button>
+              )}
             </div>
-            <Row label="Rotation" value={`${pose.rotationY.toFixed(0)}°`}>
-              <Slider min={-90} max={90} step={1} value={[pose.rotationY]} onValueChange={([v]) => patchPose({ rotationY: v ?? 0 })} />
-            </Row>
-            <Row label="Chin raise" value={`${(pose.chinUp * 100).toFixed(0)}%`}>
-              <Slider min={0} max={1} step={0.05} value={[pose.chinUp]} onValueChange={([v]) => patchPose({ chinUp: v ?? 0 })} />
-            </Row>
-            <Row label="Shoulder roll" value={`${(pose.shoulderRoll * 100).toFixed(0)}%`}>
-              <Slider min={0} max={1} step={0.05} value={[pose.shoulderRoll]} onValueChange={([v]) => patchPose({ shoulderRoll: v ?? 0 })} />
-            </Row>
-            <Row label="Arm raise" value={`${(pose.armRaise * 100).toFixed(0)}%`}>
-              <Slider min={0} max={1} step={0.05} value={[pose.armRaise]} onValueChange={([v]) => patchPose({ armRaise: v ?? 0 })} />
-            </Row>
-            <Row label="Knee flex" value={`${pose.kneeFlex.toFixed(0)}°`}>
-              <Slider min={0} max={120} step={1} value={[pose.kneeFlex]} onValueChange={([v]) => patchPose({ kneeFlex: v ?? 0 })} />
-            </Row>
+
+            {(projection.region === "Thorax" || projection.region === "Skull" || projection.id.includes("cspine") || projection.id.includes("shoulder")) && (
+              <Row label="Chin raise" value={`${(pose.chinUp * 100).toFixed(0)}%`}>
+                <Slider min={0} max={1} step={0.05} value={[pose.chinUp]} onValueChange={([v]) => patchPose({ chinUp: v ?? 0 })} />
+              </Row>
+            )}
+
+            {(projection.id.includes("chest") || projection.id.includes("shoulder") || projection.id.includes("cspine")) && (
+              <Row label="Shoulder roll" value={`${(pose.shoulderRoll * 100).toFixed(0)}%`}>
+                <Slider min={0} max={1} step={0.05} value={[pose.shoulderRoll]} onValueChange={([v]) => patchPose({ shoulderRoll: v ?? 0 })} />
+              </Row>
+            )}
+
+            {(projection.id.includes("shoulder") || projection.id.includes("humerus") || projection.id.includes("lat-chest")) && (
+              <Row label="Arm raise" value={`${(pose.armRaise * 100).toFixed(0)}%`}>
+                <Slider min={0} max={1} step={0.05} value={[pose.armRaise]} onValueChange={([v]) => patchPose({ armRaise: v ?? 0 })} />
+              </Row>
+            )}
+
+            {(projection.id.includes("elbow") || projection.id.includes("shoulder") || projection.id.includes("wrist") || projection.id.includes("hand")) && (
+              <Row label="Elbow flex" value={`${pose.elbowFlex.toFixed(0)}°`}>
+                <Slider min={0} max={140} step={1} value={[pose.elbowFlex]} onValueChange={([v]) => patchPose({ elbowFlex: v ?? 0 })} />
+              </Row>
+            )}
+
+            {projection.id.includes("shoulder") && (
+              <Button size="sm" variant="outline" onClick={() => patchPose({ hipInternal: 0, armRaise: 0.15, elbowFlex: 0 })}>
+                Palm forward (external rotation)
+              </Button>
+            )}
+
+            {(projection.region === "Lower limb" || projection.region === "Pelvis & hips") && (
+              <Row label="Knee flex" value={`${pose.kneeFlex.toFixed(0)}°`}>
+                <Slider min={0} max={120} step={1} value={[pose.kneeFlex]} onValueChange={([v]) => patchPose({ kneeFlex: v ?? 0 })} />
+              </Row>
+            )}
+
+            {(projection.id.includes("pelvis") || projection.id.includes("hip") || projection.id.includes("femur")) && (
+              <Row label="Hip internal rot." value={`${pose.hipInternal.toFixed(0)}°`}>
+                <Slider min={0} max={30} step={1} value={[pose.hipInternal]} onValueChange={([v]) => patchPose({ hipInternal: v ?? 0 })} />
+              </Row>
+            )}
+
+            {(projection.region === "Thorax" || projection.region === "Abdomen" || projection.id.includes("lumbar")) && (
+              <div className="flex gap-2">
+                <Button size="sm" variant={pose.breath === "inspiration" ? "default" : "outline"} onClick={() => patchPose({ breath: "inspiration" })}>
+                  Inspiration
+                </Button>
+                <Button size="sm" variant={pose.breath === "expiration" ? "default" : "outline"} onClick={() => patchPose({ breath: "expiration" })}>
+                  Expiration
+                </Button>
+              </div>
+            )}
+
             <Button size="sm" variant="outline" className="w-full" onClick={applyHandbook}>
               Reset to standard pose & centring
             </Button>
@@ -119,7 +166,7 @@ export function ControlDeck() {
 
           <TabsContent value="room" className="space-y-4">
             <p className="text-xs text-muted">
-              Placement: <span className="text-fg">{equipment.placement}</span>. Move the patient and equipment so anatomy sits in the primary beam.
+              Placement: <span className="text-fg">{equipment.placement}</span>. Align the patient so the anatomy sits in the yellow beam over the detector.
             </p>
             <Button
               size="sm"
@@ -128,10 +175,7 @@ export function ControlDeck() {
             >
               Tube {tube.lockedToDetector ? "LOCKED to detector" : "FREE"}
             </Button>
-            <p className="text-[11px] text-muted">
-              Locked: tube tracks the detector — move the patient within the light field. Free: move the tube independently on the Beam tab.
-            </p>
-            <p className="text-[11px] uppercase tracking-wider text-muted">Patient in beam</p>
+            <p className="text-[11px] text-muted">Patient in beam</p>
             <Row label="Patient L/R (m)" value={equipment.patientX.toFixed(2)}>
               <Slider min={-0.4} max={0.4} step={0.01} value={[equipment.patientX]} onValueChange={([v]) => patchEquipment({ patientX: v ?? 0 })} />
             </Row>
@@ -155,9 +199,7 @@ export function ControlDeck() {
                 </Row>
               </>
             ) : null}
-            {equipment.placement === "upright-bucky" ||
-            equipment.placement === "standing" ||
-            equipment.placement === "seated" ? (
+            {(equipment.placement === "upright-bucky" || equipment.placement === "standing" || equipment.placement === "seated") && (
               <>
                 <p className="text-[11px] uppercase tracking-wider text-muted">Upright bucky</p>
                 <Row label="Bucky height (m)" value={equipment.buckyHeight.toFixed(2)}>
@@ -167,7 +209,7 @@ export function ControlDeck() {
                   <Slider min={0} max={90} step={1} value={[equipment.buckyTilt]} onValueChange={([v]) => patchEquipment({ buckyTilt: v ?? 0 })} />
                 </Row>
               </>
-            ) : null}
+            )}
           </TabsContent>
 
           <TabsContent value="beam" className="space-y-4">
