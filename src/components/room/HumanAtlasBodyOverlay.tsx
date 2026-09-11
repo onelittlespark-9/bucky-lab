@@ -54,14 +54,7 @@ function PatientTransform({ children }: { children: ReactNode }) {
 }
 
 function smoothstep(edge0: number, edge1: number, x: number) { const t = THREE.MathUtils.clamp((x - edge0) / (edge1 - edge0), 0, 1); return t * t * (3 - 2 * t); }
-
-function rotateAround(point: THREE.Vector3, pivot: THREE.Vector3, quaternion: THREE.Quaternion) {
-  point.sub(pivot).applyQuaternion(quaternion).add(pivot);
-}
-
-function poseQuaternion(raise: number, roll: number) {
-  return new THREE.Quaternion().setFromEuler(new THREE.Euler(roll, 0, raise, "XYZ"));
-}
+function rotateAround(point: THREE.Vector3, pivot: THREE.Vector3, quaternion: THREE.Quaternion) { point.sub(pivot).applyQuaternion(quaternion).add(pivot); }
 
 function deformSkin(root: THREE.Group, H: number, pose: { shoulderRoll: number; armRaise: number; elbowFlex: number; hipInternal: number; kneeFlex: number }) {
   const scale = H / ATLAS_HEIGHT_M;
@@ -74,6 +67,8 @@ function deformSkin(root: THREE.Group, H: number, pose: { shoulderRoll: number; 
   const elbow = THREE.MathUtils.clamp(pose.elbowFlex, 0, 135) * Math.PI / 180;
   const hip = THREE.MathUtils.clamp(pose.hipInternal, -45, 45) * Math.PI / 180;
   const knee = THREE.MathUtils.clamp(pose.kneeFlex, 0, 135) * Math.PI / 180;
+  const shoulderAxis = new THREE.Vector3(0, 0, 1);
+  const kneeAxis = new THREE.Vector3(1, 0, 0);
 
   root.traverse(object => {
     if (!(object instanceof THREE.Mesh)) return;
@@ -82,49 +77,52 @@ function deformSkin(root: THREE.Group, H: number, pose: { shoulderRoll: number; 
     if (!base) return;
     const target = attribute.array as Float32Array;
     for (let i = 0; i < target.length; i += 3) {
-      const p = new THREE.Vector3(base[i], base[i + 1], base[i + 2]);
+      const original = new THREE.Vector3(base[i], base[i + 1], base[i + 2]);
+      const p = original.clone();
       const side: -1 | 1 = p.x < 0 ? -1 : 1;
       const ax = Math.abs(p.x);
-      const shoulderPivot = new THREE.Vector3(side * Math.max(0.105 * scale, ax * 0.62), shoulderY, 0);
-      const elbowPivot = new THREE.Vector3(shoulderPivot.x, elbowY, 0);
-      const shoulderQ = poseQuaternion(-side * raise, -shoulderRoll * 0.65);
-      const elbowQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -side * elbow);
-      const hipPivot = new THREE.Vector3(side * Math.max(0.075 * scale, ax * 0.5), pelvisY, 0);
-      const kneePivot = new THREE.Vector3(hipPivot.x, kneeY, 0);
-      const hipQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), side * hip * 0.55);
-      const kneeQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -knee);
 
-      const upper = smoothstep(0.085 * scale, 0.14 * scale, ax) * smoothstep(0.64 * H, 0.79 * H, p.y) * (1 - smoothstep(0.78 * H, 0.86 * H, p.y));
-      const lower = smoothstep(0.085 * scale, 0.14 * scale, ax) * smoothstep(0.43 * H, 0.64 * H, p.y) * (1 - smoothstep(0.63 * H, 0.71 * H, p.y));
-      const hand = smoothstep(0.085 * scale, 0.14 * scale, ax) * smoothstep(0.35 * H, 0.47 * H, p.y) * (1 - smoothstep(0.46 * H, 0.54 * H, p.y));
-      const armWeight = Math.max(upper, lower, hand);
+      // Fixed joint centres stop each vertex choosing its own pivot. The previous ax-based
+      // pivots made the skin shear into a wave when the shoulder or arm was moved.
+      const shoulderPivot = new THREE.Vector3(side * 0.19, shoulderY, 0);
+      const elbowPivot = new THREE.Vector3(side * 0.31, elbowY, 0);
+      const hipPivot = new THREE.Vector3(side * 0.16, pelvisY, 0);
+      const kneePivot = new THREE.Vector3(side * 0.16, kneeY, 0);
+      const shoulderQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(-shoulderRoll * 0.65, 0, -side * raise, "XYZ"));
+      const elbowQ = new THREE.Quaternion().setFromAxisAngle(shoulderAxis, -side * elbow);
+      const hipQ = new THREE.Quaternion().setFromAxisAngle(shoulderAxis, side * hip * 0.55);
+      const kneeQ = new THREE.Quaternion().setFromAxisAngle(kneeAxis, -knee);
 
-      if (upper > 0.001) {
-        const original = p.clone();
+      // Keep the chest and neck rigid. Only the shoulder envelope blends into the moving arm.
+      const shoulderEnvelope = smoothstep(0.13 * scale, 0.22 * scale, ax) * smoothstep(0.66 * H, 0.73 * H, p.y) * (1 - smoothstep(0.79 * H, 0.84 * H, p.y));
+      const upperArm = smoothstep(0.18 * scale, 0.27 * scale, ax) * smoothstep(0.60 * H, 0.70 * H, p.y) * (1 - smoothstep(0.70 * H, 0.82 * H, p.y));
+      const forearm = smoothstep(0.24 * scale, 0.34 * scale, ax) * smoothstep(0.43 * H, 0.61 * H, p.y) * (1 - smoothstep(0.59 * H, 0.67 * H, p.y));
+
+      if (upperArm > 0.001) {
         rotateAround(p, shoulderPivot, shoulderQ);
-        p.lerp(original, 1 - upper);
-      } else if (lower > 0.001 || hand > 0.001) {
-        const original = p.clone();
+        p.lerp(original, 1 - upperArm);
+      } else if (forearm > 0.001) {
         const transformedElbow = elbowPivot.clone();
         rotateAround(transformedElbow, shoulderPivot, shoulderQ);
         rotateAround(p, shoulderPivot, shoulderQ);
         rotateAround(p, transformedElbow, elbowQ);
-        const weight = Math.max(lower, hand);
-        p.lerp(original, 1 - weight);
+        p.lerp(original, 1 - forearm);
+      } else if (shoulderEnvelope > 0.001) {
+        rotateAround(p, shoulderPivot, shoulderQ);
+        p.lerp(original, 1 - shoulderEnvelope);
       }
 
-      // The shoulder cap and posterior shoulder follow scapular protraction without rotating the thorax.
-      const shoulderCap = smoothstep(0.075 * scale, 0.14 * scale, ax) * smoothstep(0.69 * H, 0.82 * H, p.y) * (1 - smoothstep(0.80 * H, 0.87 * H, p.y));
-      if (shoulderCap > 0.001) p.z += shoulderCap * 0.035 * (shoulderRoll / THREE.MathUtils.degToRad(28));
-
-      const hipEnvelope = smoothstep(0.065 * scale, 0.12 * scale, ax);
-      const thigh = hipEnvelope * smoothstep(0.32 * H, 0.48 * H, p.y) * (1 - smoothstep(0.46 * H, 0.58 * H, p.y));
-      const lowerLeg = hipEnvelope * smoothstep(0.06 * H, 0.26 * H, p.y) * (1 - smoothstep(0.23 * H, 0.34 * H, p.y));
+      const hipEnvelope = smoothstep(0.10 * scale, 0.18 * scale, ax);
+      const thigh = hipEnvelope * smoothstep(0.32 * H, 0.40 * H, p.y) * (1 - smoothstep(0.45 * H, 0.55 * H, p.y));
+      const lowerLeg = hipEnvelope * smoothstep(0.06 * H, 0.20 * H, p.y) * (1 - smoothstep(0.22 * H, 0.31 * H, p.y));
       if (thigh > 0.001) {
-        const original = p.clone(); rotateAround(p, hipPivot, hipQ); p.lerp(original, 1 - thigh);
+        rotateAround(p, hipPivot, hipQ);
+        p.lerp(original, 1 - thigh);
       } else if (lowerLeg > 0.001) {
-        const original = p.clone(); const transformedKnee = kneePivot.clone();
-        rotateAround(transformedKnee, hipPivot, hipQ); rotateAround(p, hipPivot, hipQ); rotateAround(p, transformedKnee, kneeQ);
+        const transformedKnee = kneePivot.clone();
+        rotateAround(transformedKnee, hipPivot, hipQ);
+        rotateAround(p, hipPivot, hipQ);
+        rotateAround(p, transformedKnee, kneeQ);
         p.lerp(original, 1 - lowerLeg);
       }
 
