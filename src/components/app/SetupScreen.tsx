@@ -9,31 +9,31 @@ const OPTIONS: {
   id: PlacementMode;
   title: string;
   detail: string;
-  hint: string;
+  badge: string;
 }[] = [
   {
     id: "standing",
-    title: "Standing (no bucky contact)",
-    detail: "Patient erect, free-standing. Use for quick checks or when no upright bucky is required.",
-    hint: "Erect · free standing",
+    title: "Standing",
+    detail: "Patient erect, free-standing.",
+    badge: "Erect · free standing",
   },
   {
     id: "seated",
     title: "Seated",
-    detail: "Patient sitting on a stool or chair, useful for upper limb and some erect chest work.",
-    hint: "Erect · seated",
+    detail: "Patient sitting on a stool or chair.",
+    badge: "Erect · seated",
   },
   {
     id: "upright-bucky",
     title: "Upright bucky",
-    detail: "Patient against the wall stand. Bucky can be raised/lowered and tilted 0–90°.",
-    hint: "Wall stand · vertical IR",
+    detail: "Patient against the wall stand. Bucky height and tilt are adjustable in the room.",
+    badge: "Wall stand",
   },
   {
     id: "table",
     title: "X-ray table",
-    detail: "Patient on the table (supine or for tabletop extremities). Table height and position are adjustable.",
-    hint: "Table · horizontal IR",
+    detail: "Patient on the table. Table height and position are adjustable in the room.",
+    badge: "Table",
   },
 ];
 
@@ -64,12 +64,11 @@ export function SetupScreen() {
 
       <main className="mx-auto flex w-full max-w-lg flex-1 flex-col gap-4 p-4">
         <p className="text-sm leading-relaxed text-muted">
-          Choose how the patient will be presented in the room before you fine-tune centring and
-          exposure. You can still move the table, bucky, patient and tube once inside the room.
+          Choose how the patient will be presented. You can still move the table, bucky, patient and tube once inside the room.
         </p>
 
         <div className="flex items-center gap-2 text-xs text-muted">
-          <span>Handbook suggests</span>
+          <span>Typical setup for this examination</span>
           <Badge tone="accent">{suggested === "upright-bucky" ? "Upright bucky" : "Table"}</Badge>
         </div>
 
@@ -90,7 +89,7 @@ export function SetupScreen() {
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-medium text-fg">{opt.title}</span>
-                  <span className="text-[11px] text-muted">{opt.hint}</span>
+                  <span className="text-[11px] text-muted">{opt.badge}</span>
                 </div>
                 <p className="mt-1 text-xs leading-relaxed text-muted">{opt.detail}</p>
               </button>

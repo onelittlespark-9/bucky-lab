@@ -47,9 +47,9 @@ function pathsToOD(p: Paths, kvp: number): number {
     muEffective("air", kvp) * p.air +
     muEffective("lung", kvp) * p.lung +
     muEffective("fat", kvp) * p.fat +
-    muEffective("soft", kvp) * p.soft +
-    muEffective("bone", kvp) * p.bone +
-    muEffective("cortical", kvp) * p.cortical +
+    muEffective("soft", kvp) * p.soft * 1.05 +
+    muEffective("bone", kvp) * p.bone * 1.15 +
+    muEffective("cortical", kvp) * p.cortical * 1.35 +
     muEffective("air", kvp) * p.gas * 40 +
     muEffective("metal", kvp) * p.metal
   );
@@ -138,12 +138,12 @@ export async function renderRadiograph(args: {
 }): Promise<RadiographResult> {
   const { patient, projection, pose, tube, exposure } = args;
   const aspect = tube.collimationW / tube.collimationH;
-  const height = args.height ?? 640;
+  const height = args.height ?? 768;
   const width = args.width ?? Math.round(height * aspect);
   const photo = projection.referenceImage ? await loadPhoto(projection.referenceImage) : null;
 
   const kvp = exposure.kvp;
-  const grid = exposure.grid && projection.setup !== "tabletop" ? exposure.grid : exposure.grid;
+  const grid = exposure.grid;
   const I0 = incidentFluence(kvp, exposure.mas, tube.sid, grid);
   const thickness = partThickness(patient, projection);
   const scatterFrac = fieldScatter(tube.collimationW, tube.collimationH, thickness, grid);
@@ -175,7 +175,12 @@ export async function renderRadiograph(args: {
         }
       }
 
-      const trabecula = 1 + (fbm(x * 1.4, y * 1.4, seed) - 0.5) * 0.08 * (paths.bone > 1 ? 1 : 0);
+      const boneMask = paths.bone > 0.3 || paths.cortical > 0.15 ? 1 : 0;
+      const trabFine = (fbm(x * 3.2, y * 3.2, seed) - 0.5) * 0.12;
+      const trabCoarse = (fbm(x * 1.1, y * 1.1, seed + 3) - 0.5) * 0.07;
+      const cortEdge = paths.cortical > 0.4 ? (fbm(x * 6, y * 6, seed + 7) - 0.5) * 0.05 : 0;
+      const softVar = (fbm(x * 0.6, y * 0.6, seed + 11) - 0.5) * 0.04 * (paths.soft > 1 ? 1 : 0);
+      const trabecula = 1 + boneMask * (trabFine + trabCoarse + cortEdge) + softVar;
       const scat = I0 * scatterFrac * (0.5 + 0.5 * (paths.soft + paths.lung > 0 ? 1 : 0.15));
       let s = I0 * T * trabecula + scat;
       if (paths.air > 20 && paths.soft < 0.2 && paths.bone < 0.2) {
@@ -201,13 +206,6 @@ export async function renderRadiograph(args: {
   let contrastAcc = 0;
   let contrastN = 0;
 
-  /**
-   * Display mapping so students can SEE factor changes:
-   * - mAs / SID → brightness (receptor exposure) via mean signal
-   * - low mAs → more quantum noise (grain)
-   * - high kVp → longer grey scale (lower contrast); low kVp → high contrast
-   * - short SID → slightly softer edges (geometric unsharpness proxy)
-   */
   const logMean = Math.log(mean + 1e-5);
   const contrastScale = clamp((kvp - 45) / 80, 0, 1);
   const windowW = 1.55 + contrastScale * 2.4;
@@ -241,7 +239,9 @@ export async function renderRadiograph(args: {
       d = d < 0.5 ? d * 0.85 : 0.5 + (d - 0.5) * 1.15;
       d = clamp(d, 0, 1);
     }
-    const v = Math.round(clamp(d, 0, 1) * 255);
+    let tone = clamp(d, 0, 1);
+    tone = tone * tone * (3 - 2 * tone);
+    const v = Math.round(clamp(tone, 0, 1) * 255);
     const o = i * 4;
     img.data[o] = v;
     img.data[o + 1] = v;
@@ -253,12 +253,10 @@ export async function renderRadiograph(args: {
     }
   }
 
-  const crx = width / 2;
-  const cry = height / 2;
   if (exposure.marker) {
     stampMarker(img, width, height, exposure.marker, 28, height - 48);
   }
-  drawCrosshair(img, width, height, crx, cry);
+  drawCrosshair(img, width, height, width / 2, height / 2);
 
   g.putImageData(img, 0, 0);
   const dataUrl = canvas.toDataURL("image/png");
