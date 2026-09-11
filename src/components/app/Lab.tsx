@@ -4,6 +4,7 @@ import { useSim } from "@/lib/sim/store";
 import { ControlDeck } from "@/components/panels/ControlDeck";
 import { RadiographViewer } from "@/components/viewer/RadiographViewer";
 import { Library } from "./Library";
+import { SetupScreen } from "./SetupScreen";
 import { Button } from "@/components/ui/button";
 import { patientById } from "@/lib/sim/patients";
 import { projectionById } from "@/lib/sim/projections";
@@ -27,6 +28,7 @@ export function Lab() {
   useEffect(() => setMounted(true), []);
 
   if (screen === "library") return <Library />;
+  if (screen === "setup") return <SetupScreen />;
   if (screen === "viewer") {
     return (
       <div className="flex h-dvh min-h-0 flex-col">

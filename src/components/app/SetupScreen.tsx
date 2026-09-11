@@ -1,0 +1,112 @@
+import { useSim } from "@/lib/sim/store";
+import { patientById } from "@/lib/sim/patients";
+import { projectionById } from "@/lib/sim/projections";
+import type { PlacementMode } from "@/lib/sim/types";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+
+const OPTIONS: {
+  id: PlacementMode;
+  title: string;
+  detail: string;
+  hint: string;
+}[] = [
+  {
+    id: "standing",
+    title: "Standing (no bucky contact)",
+    detail: "Patient erect, free-standing. Use for quick checks or when no upright bucky is required.",
+    hint: "Erect · free standing",
+  },
+  {
+    id: "seated",
+    title: "Seated",
+    detail: "Patient sitting on a stool or chair, useful for upper limb and some erect chest work.",
+    hint: "Erect · seated",
+  },
+  {
+    id: "upright-bucky",
+    title: "Upright bucky",
+    detail: "Patient against the wall stand. Bucky can be raised/lowered and tilted 0–90°.",
+    hint: "Wall stand · vertical IR",
+  },
+  {
+    id: "table",
+    title: "X-ray table",
+    detail: "Patient on the table (supine or for tabletop extremities). Table height and position are adjustable.",
+    hint: "Table · horizontal IR",
+  },
+];
+
+export function SetupScreen() {
+  const projectionId = useSim((s) => s.projectionId);
+  const patientId = useSim((s) => s.patientId);
+  const equipment = useSim((s) => s.equipment);
+  const confirmSetup = useSim((s) => s.confirmSetup);
+  const setScreen = useSim((s) => s.setScreen);
+  const patchEquipment = useSim((s) => s.patchEquipment);
+
+  const projection = projectionById(projectionId);
+  const patient = patientById(patientId);
+  const selected = equipment.placement;
+
+  const suggested: PlacementMode =
+    projection.setup === "wall" ? "upright-bucky" : "table";
+
+  return (
+    <div className="flex min-h-dvh flex-col bg-bg">
+      <header className="border-b border-border bg-surface px-4 py-3">
+        <p className="text-xs text-muted">Positioning setup</p>
+        <h1 className="text-lg font-semibold text-fg">{projection.name}</h1>
+        <p className="text-sm text-muted">
+          {patient.name} · {patient.habitus} · {patient.heightCm} cm
+        </p>
+      </header>
+
+      <main className="mx-auto flex w-full max-w-lg flex-1 flex-col gap-4 p-4">
+        <p className="text-sm leading-relaxed text-muted">
+          Choose how the patient will be presented in the room before you fine-tune centring and
+          exposure. You can still move the table, bucky, patient and tube once inside the room.
+        </p>
+
+        <div className="flex items-center gap-2 text-xs text-muted">
+          <span>Handbook suggests</span>
+          <Badge tone="accent">{suggested === "upright-bucky" ? "Upright bucky" : "Table"}</Badge>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          {OPTIONS.map((opt) => {
+            const active = selected === opt.id;
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => patchEquipment({ placement: opt.id })}
+                className={
+                  "rounded-lg border px-4 py-3 text-left transition-colors " +
+                  (active
+                    ? "border-accent bg-accent/10"
+                    : "border-border bg-surface hover:border-muted")
+                }
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-fg">{opt.title}</span>
+                  <span className="text-[11px] text-muted">{opt.hint}</span>
+                </div>
+                <p className="mt-1 text-xs leading-relaxed text-muted">{opt.detail}</p>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="mt-auto flex flex-col gap-2 pt-4">
+          <Button variant="solid" size="lg" className="w-full" onClick={() => confirmSetup(selected)}>
+            Enter room with this setup
+          </Button>
+          <Button variant="ghost" className="w-full" onClick={() => setScreen("library")}>
+            Back to library
+          </Button>
+        </div>
+      </main>
+    </div>
+  );
+}
