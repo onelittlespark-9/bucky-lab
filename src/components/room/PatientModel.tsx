@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import { useSim } from "@/lib/sim/store";
 import { patientById } from "@/lib/sim/patients";
 import { scaleLandmarkY, LANDMARKS } from "@/lib/sim/projections";
+import { InternalAnatomy } from "./InternalAnatomy";
 
 const SKIN_ROUGHNESS = .58;
 type V3 = [number, number, number];
@@ -21,7 +22,6 @@ export function PatientModel() {
  const wall = equipment.placement !== "table";
  const tableTop = equipment.tableHeight + .075, bodyThickness = Math.max(.13 * s, chestDepth * 1.05);
  const Y = { head: .955 * H, neck: .86 * H, shoulder: .79 * H, chest: .70 * H, waist: .59 * H, pelvis: .47 * H, knee: .245 * H, ankle: .055 * H };
- // The model's lowest contact point is the sole of the foot. Keep the group origin at floor level for standing/upright exams.
  const footRadiusY = .045 * s;
  const footSole = Y.ankle - .012 * s - footRadiusY;
  let groupPos: V3, groupRot: V3;
@@ -42,6 +42,7 @@ export function PatientModel() {
  const landmarks = LANDMARKS.filter(l => l.y > 0 && !["3rd-mcp", "midcarpal", "elbow", "patella-apex", "medial-epicondyle-knee", "malleoli", "3rd-mt"].includes(l.id));
  const bodyGeometry = useMemo(() => ({ pelvis: [.13 * m.hip * s, .105 * m.abdomen * s, .12 * m.torsoDepth * s] as V3, abdomen: [.155 * m.torsoWidth * s, .16 * m.abdomen * s, .11 * m.torsoDepth * s] as V3, chest: [bodyWidth, .22 * m.torsoLength * s, chestDepth] as V3 }), [bodyWidth, chestDepth, m.abdomen, m.hip, m.torsoDepth, m.torsoLength, m.torsoWidth, s]);
  return <group position={groupPos} rotation={groupRot}>
+  <InternalAnatomy />
   <group rotation={[kyphosis, oblique, 0]}>
    <Ellipsoid position={[0, Y.pelvis, 0]} scale={bodyGeometry.pelvis} color={skin} /><Ellipsoid position={[0, Y.waist, 0]} scale={bodyGeometry.abdomen} color={skin} /><Ellipsoid position={[0, Y.chest, 0]} scale={bodyGeometry.chest} color={skin} />
    {patient.sex === "female" && <><Ellipsoid position={[-.065 * m.torsoWidth * s, Y.chest + .015 * s, chestDepth * .68]} scale={[.075 * m.breast * s, .09 * m.breast * s, .045 * m.breast * s]} color={skin} /><Ellipsoid position={[.065 * m.torsoWidth * s, Y.chest + .015 * s, chestDepth * .68]} scale={[.075 * m.breast * s, .09 * m.breast * s, .045 * m.breast * s]} color={skin} /></>}
