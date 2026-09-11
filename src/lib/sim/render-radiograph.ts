@@ -2,6 +2,7 @@ import type { Patient, Projection, SimPose, TubeState, ExposureState, Radiograph
 import { sampleAnatomy, hashPatient, type Paths, type SampleCtx } from "./anatomy";
 import { buildMetrics, fieldScatter, incidentFluence, muEffective, partThickness } from "./exposure";
 import { clamp, fbm } from "./geometry";
+import { projectionGeometry } from "./projection-physics";
 import { scoreExposure } from "./scoring";
 import type { PathologyId } from "./requests";
 
@@ -81,18 +82,29 @@ function invDisplay(g: number): number {
 function localCoords(
   projection: Projection,
   patient: Patient,
+  pose: SimPose,
   px: number,
   py: number,
   w: number,
   h: number,
   tube: TubeState,
+  geometry: ReturnType<typeof projectionGeometry>,
 ): { x: number; y: number } {
-  const mag = tube.sid / Math.max(80, tube.sid - 12);
-  const cmX = ((px + 0.5) / w - 0.5) * tube.collimationW / mag;
-  const cmY = ((py + 0.5) / h - 0.5) * tube.collimationH / mag;
+  // Detector coordinates are converted back to the object plane using the
+  // calculated magnification. This makes SID/OID changes alter anatomy scale.
+  const cmX = ((px + 0.5) / w - 0.5) * tube.collimationW / geometry.magnification;
+  const cmY = ((py + 0.5) / h - 0.5) * tube.collimationH / geometry.magnification;
+
+  // Tube angulation moves the projected ray path. Patient rotation/obliquity
+  // are applied as an inverse transform so the anatomy itself appears rotated
+  // and compressed rather than merely changing a score.
   const angle = (tube.angle * Math.PI) / 180;
-  const rx = cmX;
-  const ry = cmY * Math.cos(angle) - Math.sin(angle) * 4;
+  const angleShift = Math.tan(angle) * geometry.oidCm;
+  const rotation = (pose.rotationY * Math.PI) / 180;
+  const oblique = (pose.oblique * Math.PI) / 180;
+  const rx = cmX * Math.cos(rotation) + cmY * Math.sin(rotation) * 0.12;
+  const ry = cmY * Math.cos(oblique) - cmX * Math.sin(oblique) * 0.18 - angleShift;
+
   if (
     projection.anatomy === "torso-ap" ||
     projection.anatomy === "torso-lat" ||
@@ -144,6 +156,7 @@ export async function renderRadiograph(args: {
 
   const kvp = exposure.kvp;
   const grid = exposure.grid;
+  const geometry = projectionGeometry(projection, tube, pose, exposure.focalSpot);
   const I0 = incidentFluence(kvp, exposure.mas, tube.sid, grid);
   const thickness = partThickness(patient, projection);
   const scatterFrac = fieldScatter(tube.collimationW, tube.collimationH, thickness, grid);
@@ -155,7 +168,7 @@ export async function renderRadiograph(args: {
 
   for (let py = 0; py < height; py++) {
     for (let px = 0; px < width; px++) {
-      const { x, y } = localCoords(projection, patient, px, py, width, height, tube);
+      const { x, y } = localCoords(projection, patient, pose, px, py, width, height, tube, geometry);
       const paths = sampleAnatomy(x, y, ctx);
       let od = pathsToOD(paths, kvp);
       od *= 0.55 + thickness / 40;
@@ -210,16 +223,26 @@ export async function renderRadiograph(args: {
   const windowW = 1.55 + contrastScale * 2.4;
   const windowL = logMean + (mean > 100 ? 0.2 : mean < 10 ? -0.35 : 0);
   const noiseGain = 0.35 + 1.8 / Math.sqrt(Math.max(0.25, mean / 40));
-  const sidBlur = clamp((120 - tube.sid) / 80, 0, 1);
+
+  // Geometric unsharpness is represented as a small local PSF. The old
+  // renderer blurred only when SID was short; this uses focal spot + OID + SOD
+  // so increased OID or a broad focal spot visibly softens fine detail.
+  const blurRadius = clamp(Math.round(geometry.geometricUnsharpnessMm * 1.7), 0, 4);
+  const blurWeight = blurRadius > 0 ? Math.min(0.42, geometry.geometricUnsharpnessMm * 0.16) : 0;
 
   for (let i = 0; i < n; i++) {
     let s = signal[i]!;
     const nx = i % width;
     const ny = (i / width) | 0;
-    if (sidBlur > 0.05 && nx > 0 && nx < width - 1) {
-      const left = signal[i - 1]!;
-      const right = signal[i + 1]!;
-      s = s * (1 - 0.22 * sidBlur) + (left + right) * 0.11 * sidBlur;
+    if (blurRadius > 0 && nx > 0 && nx < width - 1) {
+      let neighbour = 0;
+      let count = 0;
+      for (let dx = 1; dx <= blurRadius; dx++) {
+        const falloff = 1 / (dx + 1);
+        neighbour += (signal[i - dx]! + signal[i + dx]!) * falloff;
+        count += 2 * falloff;
+      }
+      if (count > 0) s = s * (1 - blurWeight) + (neighbour / count) * blurWeight;
     }
     const sigma = noiseGain / Math.sqrt(Math.max(0.35, s));
     const nse = (fbm(nx * 0.85, ny * 0.85, seed + 4) - 0.5) * 2 * sigma * 10;
