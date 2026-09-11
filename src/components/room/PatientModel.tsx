@@ -1,26 +1,48 @@
-import * as THREE from "three";
-import { useMemo } from "react";
 import { useSim } from "@/lib/sim/store";
 import { patientById } from "@/lib/sim/patients";
 import { scaleLandmarkY, LANDMARKS } from "@/lib/sim/projections";
-import { patientKinematics } from "@/lib/sim/patient-kinematics";
-import { BodyShell } from "./BodyShell";
-const SKIN_ROUGHNESS=.58; type V3=[number,number,number];
-function Skin({color}:{color:string}){return <meshPhysicalMaterial color={color} roughness={SKIN_ROUGHNESS} metalness={0} clearcoat={.035}/>;}
-function Ellipsoid({position,scale,color,rotation=[0,0,0] as V3,castShadow=true}:{position:V3;scale:V3;color:string;rotation?:V3;castShadow?:boolean}){return <mesh position={position} rotation={rotation} scale={scale} castShadow={castShadow}><sphereGeometry args={[1,24,16]}/><Skin color={color}/></mesh>;}
-function Segment({a,b,radius,color}:{a:V3;b:V3;radius:number;color:string}){const s=new THREE.Vector3(...a),e=new THREE.Vector3(...b),d=e.clone().sub(s),len=d.length(),mid=s.clone().add(e).multiplyScalar(.5),q=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0),d.normalize());return <mesh position={mid} quaternion={q} castShadow><capsuleGeometry args={[radius,Math.max(.02,len-radius*1.55),8,16]}/><Skin color={color}/></mesh>;}
-function Hand({position,side,color,scale}:{position:V3;side:-1|1;color:string;scale:number}){return <group position={position}><Ellipsoid position={[0,0,0]} scale={[.055*scale,.085*scale,.035*scale]} color={color}/>{[0,1,2,3].map(i=><Segment key={i} a={[(-.035+i*.022)*scale,-.01*scale,0]} b={[(-.035+i*.022)*scale+side*.004*scale,-.075*scale,0]} radius={.009*scale} color={color}/>)}<Segment a={[side*.045*scale,.01*scale,0]} b={[side*.075*scale,-.045*scale,0]} radius={.011*scale} color={color}/></group>;}
-function Foot({position,color,scale}:{position:V3;color:string;scale:number}){return <group position={position}><Ellipsoid position={[0,0,0]} scale={[.065*scale,.045*scale,.145*scale]} color={color}/><Ellipsoid position={[0,-.006,.115*scale]} scale={[.062*scale,.04*scale,.075*scale]} color={color}/>{[0,1,2,3,4].map(i=><Ellipsoid key={i} position={[(i-2)*.018*scale,.006,.18*scale]} scale={[.013*scale,.018*scale,.025*scale]} color={color}/>)}</group>;}
-function Head({position,skin,hair,chin,scale}:{position:V3;skin:string;hair:string;chin:number;scale:number}){return <group position={position} rotation={[-chin,0,0]}><Ellipsoid position={[0,0,0]} scale={[.105*scale,.125*scale,.095*scale]} color={skin}/><Ellipsoid position={[0,-.06*scale,.02*scale]} scale={[.068*scale,.058*scale,.074*scale]} color={skin}/><Ellipsoid position={[0,-.055*scale,.085*scale]} scale={[.026*scale,.018*scale,.028*scale]} color={skin}/><Ellipsoid position={[-.054*scale,.02*scale,.09*scale]} scale={[.012*scale,.009*scale,.006*scale]} color="#24303a"/><Ellipsoid position={[.054*scale,.02*scale,.09*scale]} scale={[.012*scale,.009*scale,.006*scale]} color="#24303a"/><Ellipsoid position={[0,-.005*scale,.1*scale]} scale={[.012*scale,.025*scale,.012*scale]} color={skin}/><Ellipsoid position={[0,-.042*scale,.102*scale]} scale={[.025*scale,.008*scale,.006*scale]} color="#9d6262"/><Ellipsoid position={[-.112*scale,.005*scale,0]} scale={[.012*scale,.028*scale,.022*scale]} color={skin}/><Ellipsoid position={[.112*scale,.005*scale,0]} scale={[.012*scale,.028*scale,.022*scale]} color={skin}/><Ellipsoid position={[0,.075*scale,-.005*scale]} scale={[.11*scale,.075*scale,.09*scale]} color={hair} castShadow={false}/><Ellipsoid position={[0,.045*scale,.07*scale]} scale={[.09*scale,.04*scale,.045*scale]} color={hair} castShadow={false}/></group>;}
+import { HumanAtlasBodyOverlay } from "./HumanAtlasBodyOverlay";
 
-export function PatientModel(){
- const patientId=useSim(s=>s.patientId),pose=useSim(s=>s.pose),equipment=useSim(s=>s.equipment),showLandmarks=useSim(s=>s.showLandmarks),setLandmarkCR=useSim(s=>s.setLandmarkCR),skinVisible=useSim(s=>s.anatomyVisibility?.skin??true),projectionId=useSim(s=>s.projectionId);
- const patient=patientById(patientId),H=patient.heightCm/100,s=H/1.7,m=patient.morph,skin=patient.skin;
- const bodyWidth=.16*m.torsoWidth*s,chestDepth=.12*m.torsoDepth*s,shoulderWidth=.205*m.shoulder*s,yaw=pose.rotationY*Math.PI/180,oblique=pose.oblique*Math.PI/180,kyphosis=m.kyphosis*.22,wall=equipment.placement!=="table",tableTop=equipment.tableHeight+.075,bodyThickness=Math.max(.13*s,chestDepth*1.05),Y={head:.955*H,neck:.86*H,shoulder:.79*H,chest:.70*H,waist:.59*H,pelvis:.47*H,knee:.245*H,ankle:.055*H};
- const footRadiusY=.045*s,footSole=Y.ankle-.012*s-footRadiusY; let groupPos:V3,groupRot:V3;
- if(wall){const floorY=equipment.placement==="seated"?.38:0,requestedY=floorY+equipment.patientY,floorLockedY=equipment.placement==="seated"?requestedY:Math.max(floorY-footSole,requestedY);groupPos=[equipment.patientX,floorLockedY,(equipment.placement==="upright-bucky"?-.48:-.32)+equipment.patientZ];groupRot=[0,yaw,0];}else{groupPos=[equipment.tableX+equipment.patientX,tableTop+bodyThickness+equipment.patientY,equipment.tableZ+H*.5+equipment.patientZ];groupRot=[-Math.PI/2,0,yaw];}
- const k=patientKinematics({H,s,shoulder:m.shoulder,hip:m.hip,limb:m.limb,elbowFlex:pose.elbowFlex,hipInternal:pose.hipInternal,armRaise:pose.armRaise,shoulderRoll:pose.shoulderRoll,kneeFlex:pose.kneeFlex,projectionId,placement:equipment.placement,buckyTilt:equipment.buckyTilt});
- const landmarks=LANDMARKS.filter(l=>l.y>0&&!['3rd-mcp','midcarpal','elbow','patella-apex','medial-epicondyle-knee','malleoli','3rd-mt'].includes(l.id));
- const bodyGeometry=useMemo(()=>({pelvis:[.13*m.hip*s,.105*m.abdomen*s,.12*m.torsoDepth*s] as V3,abdomen:[.155*m.torsoWidth*s,.16*m.abdomen*s,.11*m.torsoDepth*s] as V3,chest:[bodyWidth,.22*m.torsoLength*s,chestDepth] as V3}),[bodyWidth,chestDepth,m.abdomen,m.hip,m.torsoDepth,m.torsoLength,m.torsoWidth,s]);
- return <group position={groupPos} rotation={groupRot}>{skinVisible&&<><BodyShell/><group rotation={[kyphosis,oblique,0]}><Ellipsoid position={[0,Y.pelvis,0]} scale={bodyGeometry.pelvis} color={skin}/><Ellipsoid position={[0,Y.waist,0]} scale={bodyGeometry.abdomen} color={skin}/><Ellipsoid position={[0,Y.chest,0]} scale={bodyGeometry.chest} color={skin}/>{patient.sex==="female"&&<><Ellipsoid position={[-.065*m.torsoWidth*s,Y.chest+.015*s,chestDepth*.68]} scale={[.075*m.breast*s,.09*m.breast*s,.045*m.breast*s]} color={skin}/><Ellipsoid position={[.065*m.torsoWidth*s,Y.chest+.015*s,chestDepth*.68]} scale={[.075*m.breast*s,.09*m.breast*s,.045*m.breast*s]} color={skin}/></>}<Ellipsoid position={[0,.67*H,0]} scale={[bodyGeometry.chest[0]*1.035,bodyGeometry.chest[1]*.42,bodyGeometry.chest[2]*1.035]} color={patient.gown} castShadow={false}/><Ellipsoid position={[0,Y.neck,0]} scale={[.055*m.shoulder*s,.075*s,.06*s]} color={skin}/><Head position={[0,Y.head,0]} skin={skin} hair={patient.hair} chin={pose.chinUp*.16} scale={s}/>{k.arms.map((a,i)=><group key={`arm-${i}`}><Ellipsoid position={a.shoulder} scale={[.065*m.shoulder*s,.065*s,.065*s]} color={skin}/><Segment a={a.shoulder} b={a.upper} radius={.043*m.limb*s*1.28} color={skin}/><Ellipsoid position={a.elbow} scale={[.043*m.limb*s*1.28,.043*m.limb*s*1.18,.043*m.limb*s*1.2]} color={skin}/><Segment a={a.upper} b={a.elbow} radius={.043*m.limb*s} color={skin}/><Segment a={a.elbow} b={a.wrist} radius={.043*m.limb*s*.86} color={skin}/><Hand position={a.wrist} side={i===0?-1:1} color={skin} scale={m.limb*s}/></group>)}{k.legs.map((l,i)=><group key={`leg-${i}`}><Ellipsoid position={l.hip} scale={[.043*m.limb*s*1.75,.043*m.limb*s*1.8,.043*m.limb*s*1.7]} color={skin}/><Segment a={l.hip} b={l.thigh} radius={.043*m.limb*s*1.45} color={skin}/><Ellipsoid position={l.knee} scale={[.043*m.limb*s*1.38,.043*m.limb*s*1.28,.043*m.limb*s*1.35]} color={skin}/><Segment a={l.thigh} b={l.knee} radius={.043*m.limb*s*1.12} color={skin}/><Segment a={l.knee} b={l.calf} radius={.043*m.limb*s*.94} color={skin}/><Ellipsoid position={l.ankle} scale={[.043*m.limb*s*.8,.043*m.limb*s*.72,.043*m.limb*s*.82]} color={skin}/><Foot position={l.ankle} color={skin} scale={s*m.limb}/></group>)}</group></>}{showLandmarks&&landmarks.map(lm=>{const yy=H-scaleLandmarkY(lm.y,patient.heightCm)/100,xx=lm.x/100*m.torsoWidth*s;return <mesh key={lm.id} position={[xx,yy,bodyThickness+.01]} onClick={e=>{e.stopPropagation();setLandmarkCR(scaleLandmarkY(lm.y,patient.heightCm),lm.x*m.torsoWidth);}}><sphereGeometry args={[.012*s,10,8]}/><meshBasicMaterial color="#e2c35a"/></mesh>;})}</group>;
+export function PatientModel() {
+  const patientId = useSim(s => s.patientId);
+  const showLandmarks = useSim(s => s.showLandmarks);
+  const setLandmarkCR = useSim(s => s.setLandmarkCR);
+  const patient = patientById(patientId);
+  const H = patient.heightCm / 100;
+
+  const landmarks = LANDMARKS.filter(l =>
+    l.y > 0 &&
+    ![
+      "3rd-mcp",
+      "midcarpal",
+      "elbow",
+      "patella-apex",
+      "medial-epicondyle-knee",
+      "malleoli",
+      "3rd-mt",
+    ].includes(l.id),
+  );
+
+  return (
+    <>
+      <HumanAtlasBodyOverlay />
+      {showLandmarks && landmarks.map(lm => {
+        const yy = H - scaleLandmarkY(lm.y, patient.heightCm) / 100;
+        const xx = lm.x / 100 * patient.morph.torsoWidth;
+        return (
+          <mesh
+            key={lm.id}
+            position={[xx, yy, patient.morph.torsoDepth + 0.01]}
+            onClick={event => {
+              event.stopPropagation();
+              setLandmarkCR(scaleLandmarkY(lm.y, patient.heightCm), lm.x * patient.morph.torsoWidth);
+            }}
+          >
+            <sphereGeometry args={[0.012 * H / 1.7, 10, 8]} />
+            <meshBasicMaterial color="#e2c35a" />
+          </mesh>
+        );
+      })}
+    </>
+  );
 }
