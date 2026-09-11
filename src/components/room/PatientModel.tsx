@@ -54,17 +54,19 @@ export function PatientModel() {
   const ox = equipment.patientX;
   const oy = equipment.patientY;
   const oz = equipment.patientZ;
+  const halfDepth = 0.08 * m.torsoDepth;
 
   let groupPos: [number, number, number];
   let groupRot: [number, number, number];
   if (wall) {
-    const baseZ = place === "upright-bucky" ? -0.55 : -0.35;
-    const baseY = place === "seated" ? -0.15 : 0;
-    groupPos = [ox, baseY + oy, baseZ + oz];
+    const standY = place === "seated" ? 0.45 : 0.02;
+    const standZ = place === "upright-bucky" ? -0.5 : -0.32;
+    groupPos = [ox, standY + oy, standZ + oz];
     groupRot = [0, yaw, 0];
   } else {
-    groupPos = [equipment.tableX + ox, equipment.tableHeight + 0.06 + oy, equipment.tableZ + oz];
-    groupRot = [-Math.PI / 2, yaw, 0];
+    const top = equipment.tableHeight + 0.06;
+    groupPos = [equipment.tableX + ox, top + halfDepth + oy, equipment.tableZ + oz];
+    groupRot = [-Math.PI / 2, 0, yaw];
   }
 
   const shoulder = 0.22 * m.shoulder;
