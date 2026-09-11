@@ -1,6 +1,8 @@
 import { useSim } from "@/lib/sim/store";
 import { patientById } from "@/lib/sim/patients";
 import { projectionById } from "@/lib/sim/projections";
+import { requestFromBank } from "@/lib/sim/request-bank";
+import { requestSpecificity } from "@/lib/sim/request-specificity";
 import type { PlacementMode } from "@/lib/sim/types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,12 +22,15 @@ const OPTIONS: {
 export function SetupScreen() {
   const projectionId = useSim((s) => s.projectionId);
   const patientId = useSim((s) => s.patientId);
+  const requestId = useSim((s) => s.requestId);
   const equipment = useSim((s) => s.equipment);
   const confirmSetup = useSim((s) => s.confirmSetup);
   const setScreen = useSim((s) => s.setScreen);
   const patchEquipment = useSim((s) => s.patchEquipment);
   const projection = projectionById(projectionId);
   const patient = patientById(patientId);
+  const request = requestId ? requestFromBank(requestId) : null;
+  const specificity = request ? requestSpecificity(request) : null;
   const selected = equipment.placement;
   const suggested: PlacementMode = projection.setup === "wall" ? "upright-bucky" : "table";
 
@@ -37,6 +42,16 @@ export function SetupScreen() {
         <p className="text-sm text-muted">{patient.name} · {patient.habitus} · {patient.heightCm} cm</p>
       </header>
       <main className="mx-auto flex w-full max-w-lg flex-1 flex-col gap-4 p-4">
+        {specificity && <div className="rounded-lg border border-accent/30 bg-accent/5 p-3 text-xs leading-relaxed">
+          <p className="font-semibold text-fg">Confirm the area of interest before positioning</p>
+          <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-muted">
+            <span>Side: <strong className="text-fg">{specificity.laterality}</strong></span>
+            <span>Extent: <strong className="text-fg">{specificity.extent}</strong></span>
+            <span>Anatomy: <strong className="text-fg">{specificity.anatomy}</strong></span>
+            <span>Surface: <strong className="text-fg">{specificity.surface}</strong></span>
+          </div>
+          <p className="mt-2 text-muted">{specificity.confirmationPrompt}</p>
+        </div>}
         <p className="text-sm leading-relaxed text-muted">Choose how the patient will be presented. The suggested setup is a starting point, not a restriction — extremities and joints can be adapted to the room equipment.</p>
         <div className="flex items-center gap-2 text-xs text-muted"><span>Typical setup</span><Badge tone="accent">{suggested === "upright-bucky" ? "Upright bucky" : "Table"}</Badge></div>
         <div className="flex flex-col gap-2">
