@@ -1,4 +1,5 @@
-import { Html, useFrame, useThree } from "@react-three/fiber";
+import { Html } from "@react-three/drei";
+import { useFrame, useThree } from "@react-three/fiber";
 import { useRef, useState } from "react";
 import * as THREE from "three";
 import { XraySourceAssembly } from "./XraySourceAssembly";
