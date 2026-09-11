@@ -38,7 +38,7 @@ export function Library() {
 
     // For now start the first requested projection (full multi-view support later)
     const firstProjection = req.requestedProjections[0] ?? "pa-chest";
-    startExam(firstProjection, req.patientId);
+    startExam(firstProjection, req.patientId, req.id);
   }
 
   function handleReject(req: ImagingRequest) {
