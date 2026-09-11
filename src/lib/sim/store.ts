@@ -5,8 +5,10 @@ import type {
   FocalSpot,
   Marker,
   Mode,
+  PlacementMode,
   RadiographResult,
   Recumbency,
+  RoomEquipment,
   Screen,
   SimPose,
   TubeState,
@@ -20,6 +22,53 @@ import { requestById } from "./requests";
 
 preloadRadiographAssets(PROJECTIONS);
 
+function defaultEquipment(placement: PlacementMode = "table"): RoomEquipment {
+  if (placement === "upright-bucky" || placement === "standing") {
+    return {
+      patientX: 0,
+      patientY: 0,
+      patientZ: 0,
+      tableHeight: 0.9,
+      tableX: 0,
+      tableZ: 0,
+      buckyHeight: 1.1,
+      buckyTilt: 0,
+      placement,
+    };
+  }
+  if (placement === "seated") {
+    return {
+      patientX: 0,
+      patientY: -0.35,
+      patientZ: 0,
+      tableHeight: 0.9,
+      tableX: 0,
+      tableZ: 0,
+      buckyHeight: 0.95,
+      buckyTilt: 0,
+      placement,
+    };
+  }
+  return {
+    patientX: 0,
+    patientY: 0,
+    patientZ: 0,
+    tableHeight: 0.9,
+    tableX: 0,
+    tableZ: 0,
+    buckyHeight: 1.1,
+    buckyTilt: 0,
+    placement: "table",
+  };
+}
+
+function placementFromProjection(projectionId: string): PlacementMode {
+  const p = projectionById(projectionId);
+  if (p.setup === "wall") return "upright-bucky";
+  if (p.setup === "tabletop") return "table";
+  return "table";
+}
+
 export interface SimStore {
   screen: Screen;
   mode: Mode;
@@ -30,6 +79,7 @@ export interface SimStore {
   pose: SimPose;
   tube: TubeState;
   exposure: ExposureState;
+  equipment: RoomEquipment;
   showLandmarks: boolean;
   showLightField: boolean;
   setShowLandmarks: (v: boolean) => void;
@@ -43,9 +93,11 @@ export interface SimStore {
   setPatient: (id: string) => void;
   setProjection: (id: string) => void;
   startExam: (projectionId: string, patientId?: string, requestId?: string) => void;
+  confirmSetup: (placement: PlacementMode) => void;
   patchPose: (p: Partial<SimPose>) => void;
   patchTube: (t: Partial<TubeState>) => void;
   patchExposure: (e: Partial<ExposureState>) => void;
+  patchEquipment: (e: Partial<RoomEquipment>) => void;
   applyHandbook: () => void;
   applySuggestedFactors: () => void;
   setLandmarkCR: (landmarkY: number, landmarkX: number) => void;
@@ -60,17 +112,19 @@ function safeProjectionId(id: string): string {
   return exists ? id : "pa-chest";
 }
 
-function presentedPose(projectionId: string): SimPose {
+function presentedPose(projectionId: string, placement?: PlacementMode): SimPose {
   const p = projectionById(projectionId);
+  const place = placement ?? placementFromProjection(projectionId);
+  const erect = place === "standing" || place === "upright-bucky" || place === "seated";
   return {
-    recumbency: p.setup === "wall" ? "erect" : "supine",
+    recumbency: erect ? "erect" : "supine",
     rotationY: 0,
     oblique: 0,
     chinUp: 0.15,
     shoulderRoll: 0.1,
     armRaise: 0,
     elbowFlex: 8,
-    kneeFlex: 0,
+    kneeFlex: place === "seated" ? 90 : 0,
     hipInternal: 0,
     breath: "expiration",
   };
@@ -88,6 +142,7 @@ function presentedTube(projectionId: string, patientId: string, mode: Mode): Tub
     angle: 0,
     collimationW: p.irW,
     collimationH: p.irH,
+    lockedToDetector: true,
   };
 }
 
@@ -168,6 +223,7 @@ function handbookTube(projectionId: string, patientId: string): TubeState {
     angle: p.tubeAngle,
     collimationW: p.collimationW,
     collimationH: p.collimationH,
+    lockedToDetector: true,
   };
 }
 
@@ -181,6 +237,7 @@ export const useSim = create<SimStore>((set, get) => ({
   pose: presentedPose("pa-chest"),
   tube: presentedTube("pa-chest", "amara", "practice"),
   exposure: defaultExposure("pa-chest", "amara"),
+  equipment: defaultEquipment("upright-bucky"),
   showLandmarks: true,
   showLightField: true,
   preparing: false,
@@ -201,6 +258,7 @@ export const useSim = create<SimStore>((set, get) => ({
       pose: presentedPose(pid),
       tube: presentedTube(pid, patientId, mode),
       exposure: defaultExposure(pid, patientId),
+      equipment: defaultEquipment(placementFromProjection(pid)),
       result: null,
     });
   },
@@ -209,24 +267,35 @@ export const useSim = create<SimStore>((set, get) => ({
     const { mode } = get();
     const safeId = safeProjectionId(projectionId);
     const req = requestId ? requestById(requestId) : null;
+    const place = placementFromProjection(safeId);
     set({
       projectionId: safeId,
       patientId: pid,
       requestId: requestId ?? null,
       pathologyId: req?.pathologyId ?? "none",
-      pose: presentedPose(safeId),
+      pose: presentedPose(safeId, place),
       tube: presentedTube(safeId, pid, mode),
       exposure: defaultExposure(safeId, pid),
+      equipment: defaultEquipment(place),
       result: null,
       error: null,
-      screen: "room",
+      screen: "setup",
       preparing: false,
       showLandmarks: mode === "practice",
+    });
+  },
+  confirmSetup: (placement) => {
+    const { projectionId } = get();
+    set({
+      equipment: defaultEquipment(placement),
+      pose: presentedPose(projectionId, placement),
+      screen: "room",
     });
   },
   patchPose: (p) => set({ pose: { ...get().pose, ...p } }),
   patchTube: (t) => set({ tube: { ...get().tube, ...t } }),
   patchExposure: (e) => set({ exposure: { ...get().exposure, ...e } }),
+  patchEquipment: (e) => set({ equipment: { ...get().equipment, ...e } }),
   applyHandbook: () => {
     const { projectionId, patientId } = get();
     set({
