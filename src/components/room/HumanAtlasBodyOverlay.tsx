@@ -48,7 +48,15 @@ async function loadBodySurface(): Promise<THREE.Group> {
       const merged = mergeGeometries(geometries, false);
       if (!merged) throw new Error(`Human Atlas chunk ${chunkIndex} could not be merged.`);
       merged.computeVertexNormals();
-      const material = new THREE.MeshPhysicalMaterial({ color: "#b88970", roughness: 0.66, metalness: 0, clearcoat: 0.03, side: THREE.FrontSide });
+      merged.computeBoundingSphere();
+      const material = new THREE.MeshPhysicalMaterial({
+        color: "#b88970",
+        roughness: 0.66,
+        metalness: 0,
+        clearcoat: 0.03,
+        side: THREE.DoubleSide,
+        depthWrite: true,
+      });
       const mesh = new THREE.Mesh(merged, material);
       mesh.name = `Human Atlas body surface chunk ${chunkIndex}`;
       mesh.castShadow = true;
