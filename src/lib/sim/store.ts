@@ -89,11 +89,21 @@ function presentedTube(projectionId: string, patientId: string, mode: Mode): Tub
   };
 }
 
-function defaultExposure(projectionId: string): ExposureState {
+function defaultExposure(projectionId: string, patientId: string): ExposureState {
   const p = projectionById(projectionId);
+  const patient = patientById(patientId);
+  let kvp = p.kvp;
+  let mas = p.mas;
+  try {
+    const sug = suggestedTechnique(patient, p);
+    kvp = sug.kvp;
+    mas = sug.mas;
+  } catch {
+    /* keep handbook defaults */
+  }
   return {
-    kvp: p.kvp,
-    mas: p.mas,
+    kvp,
+    mas,
     grid: p.grid,
     focalSpot: p.setup === "tabletop" ? "fine" : "broad",
     marker: null,
@@ -168,7 +178,7 @@ export const useSim = create<SimStore>((set, get) => ({
   pathologyId: "none",
   pose: presentedPose("pa-chest"),
   tube: presentedTube("pa-chest", "amara", "practice"),
-  exposure: defaultExposure("pa-chest"),
+  exposure: defaultExposure("pa-chest", "amara"),
   showLandmarks: true,
   showLightField: true,
   preparing: false,
@@ -186,7 +196,7 @@ export const useSim = create<SimStore>((set, get) => ({
       projectionId: pid,
       pose: presentedPose(pid),
       tube: presentedTube(pid, patientId, mode),
-      exposure: defaultExposure(pid),
+      exposure: defaultExposure(pid, patientId),
       result: null,
     });
   },
@@ -202,7 +212,7 @@ export const useSim = create<SimStore>((set, get) => ({
       pathologyId: req?.pathologyId ?? "none",
       pose: presentedPose(safeId),
       tube: presentedTube(safeId, pid, mode),
-      exposure: defaultExposure(safeId),
+      exposure: defaultExposure(safeId, pid),
       result: null,
       error: null,
       screen: "room",
