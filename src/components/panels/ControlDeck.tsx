@@ -1,6 +1,13 @@
 import { useSim } from "@/lib/sim/store";
 import { patientById } from "@/lib/sim/patients";
 import { LANDMARKS, projectionById, scaleLandmarkY } from "@/lib/sim/projections";
+import { suggestedTechnique, classifyEI } from "@/lib/sim/exposure";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { Slider } from "@/components/ui/slider";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { ReactNode } from "react";
 
 function Row({
@@ -100,58 +107,67 @@ export function ControlDeck() {
                 onValueChange={([v]) => patchPose({ rotationY: v ?? 0 })}
               />
             </Row>
-            <Row label="Chin raise" value={`${Math.round(pose.chinUp * 100)}%`}>
+            <Row label="Oblique" value={`${pose.oblique.toFixed(0)}°`}>
+              <Slider
+                min={-45}
+                max={45}
+                step={1}
+                value={[pose.oblique]}
+                onValueChange={([v]) => patchPose({ oblique: v ?? 0 })}
+              />
+            </Row>
+            <Row label="Chin raise" value={`${(pose.chinUp * 100).toFixed(0)}%`}>
               <Slider
                 min={0}
                 max={1}
-                step={0.01}
+                step={0.05}
                 value={[pose.chinUp]}
                 onValueChange={([v]) => patchPose({ chinUp: v ?? 0 })}
               />
             </Row>
-            <Row label="Shoulder roll" value={`${Math.round(pose.shoulderRoll * 100)}%`}>
+            <Row label="Shoulder roll" value={`${(pose.shoulderRoll * 100).toFixed(0)}%`}>
               <Slider
                 min={0}
                 max={1}
-                step={0.01}
+                step={0.05}
                 value={[pose.shoulderRoll]}
                 onValueChange={([v]) => patchPose({ shoulderRoll: v ?? 0 })}
               />
             </Row>
-            <Row label="Arm raise" value={`${Math.round(pose.armRaise * 100)}%`}>
+            <Row label="Arm raise" value={`${(pose.armRaise * 100).toFixed(0)}%`}>
               <Slider
                 min={0}
                 max={1}
-                step={0.01}
+                step={0.05}
                 value={[pose.armRaise]}
                 onValueChange={([v]) => patchPose({ armRaise: v ?? 0 })}
               />
             </Row>
-            <Row label="Knee flexion" value={`${pose.kneeFlex.toFixed(0)}°`}>
-              <Slider
-                min={0}
-                max={90}
-                step={1}
-                value={[pose.kneeFlex]}
-                onValueChange={([v]) => patchPose({ kneeFlex: v ?? 0 })}
-              />
-            </Row>
-            <Row label="Hip internal rotation" value={`${pose.hipInternal.toFixed(0)}°`}>
-              <Slider
-                min={0}
-                max={25}
-                step={1}
-                value={[pose.hipInternal]}
-                onValueChange={([v]) => patchPose({ hipInternal: v ?? 0 })}
-              />
-            </Row>
-            <Row label="Elbow flexion" value={`${pose.elbowFlex.toFixed(0)}°`}>
+            <Row label="Elbow flex" value={`${pose.elbowFlex.toFixed(0)}°`}>
               <Slider
                 min={0}
                 max={140}
                 step={1}
                 value={[pose.elbowFlex]}
                 onValueChange={([v]) => patchPose({ elbowFlex: v ?? 0 })}
+              />
+            </Row>
+            <Row label="Knee flex" value={`${pose.kneeFlex.toFixed(0)}°`}>
+              <Slider
+                min={0}
+                max={120}
+                step={1}
+                value={[pose.kneeFlex]}
+                onValueChange={([v]) => patchPose({ kneeFlex: v ?? 0 })}
+              />
+            </Row>
+            <Row label="Hip internal rot." value={`${pose.hipInternal.toFixed(0)}°`}>
+              <Slider
+                min={0}
+                max={30}
+                step={1}
+                value={[pose.hipInternal]}
+                onValueChange={([v]) => patchPose({ hipInternal: v ?? 0 })}
               />
             </Row>
             <div className="flex gap-2">
@@ -172,25 +188,25 @@ export function ControlDeck() {
             </div>
             {mode === "practice" ? (
               <Button size="sm" variant="outline" className="w-full" onClick={applyHandbook}>
-                Snap to handbook position
+                Apply handbook pose & centring
               </Button>
             ) : null}
           </TabsContent>
 
           <TabsContent value="beam" className="space-y-4">
             {mode === "practice" ? (
-              <p className="text-xs leading-relaxed text-muted">{projection.beam} {projection.collimation}</p>
+              <p className="text-xs leading-relaxed text-muted">{projection.centring}</p>
             ) : null}
-            <Row label="Longitudinal (vertex → feet)" value={`${tube.crY.toFixed(1)} cm`}>
+            <Row label="CR height (cm from vertex)" value={tube.crY.toFixed(1)}>
               <Slider
                 min={0}
                 max={patient.heightCm}
                 step={0.5}
                 value={[tube.crY]}
-                onValueChange={([v]) => patchTube({ crY: v ?? 0 })}
+                onValueChange={([v]) => patchTube({ crY: v ?? 40 })}
               />
             </Row>
-            <Row label="Transverse (MSP)" value={`${tube.crX.toFixed(1)} cm`}>
+            <Row label="CR lateral (cm)" value={tube.crX.toFixed(1)}>
               <Slider
                 min={-20}
                 max={20}
@@ -199,54 +215,51 @@ export function ControlDeck() {
                 onValueChange={([v]) => patchTube({ crX: v ?? 0 })}
               />
             </Row>
-            <Row label="SID / FFD" value={`${tube.sid.toFixed(0)} cm`}>
+            <Row label="SID (cm)" value={`${tube.sid.toFixed(0)}`}>
               <Slider
-                min={90}
+                min={80}
                 max={200}
                 step={1}
                 value={[tube.sid]}
                 onValueChange={([v]) => patchTube({ sid: v ?? 100 })}
               />
             </Row>
-            <Row label="Tube angle (cranial +)" value={`${tube.angle.toFixed(0)}°`}>
+            <Row label="Tube angle" value={`${tube.angle.toFixed(0)}°`}>
               <Slider
                 min={-30}
-                max={40}
+                max={30}
                 step={1}
                 value={[tube.angle]}
                 onValueChange={([v]) => patchTube({ angle: v ?? 0 })}
               />
             </Row>
-            <Separator />
-            <p className="text-[11px] font-medium uppercase tracking-wider text-muted">Collimation at IR</p>
-            <Row label="Width" value={`${tube.collimationW.toFixed(0)} cm`}>
+            <Row label="Collimation W (cm)" value={tube.collimationW.toFixed(1)}>
               <Slider
-                min={6}
-                max={43}
-                step={1}
+                min={5}
+                max={45}
+                step={0.5}
                 value={[tube.collimationW]}
-                onValueChange={([v]) => patchTube({ collimationW: v ?? 10 })}
+                onValueChange={([v]) => patchTube({ collimationW: v ?? 20 })}
               />
             </Row>
-            <Row label="Height" value={`${tube.collimationH.toFixed(0)} cm`}>
+            <Row label="Collimation H (cm)" value={tube.collimationH.toFixed(1)}>
               <Slider
-                min={6}
-                max={43}
-                step={1}
+                min={5}
+                max={45}
+                step={0.5}
                 value={[tube.collimationH]}
-                onValueChange={([v]) => patchTube({ collimationH: v ?? 10 })}
+                onValueChange={([v]) => patchTube({ collimationH: v ?? 20 })}
               />
             </Row>
             {mode === "practice" ? (
               <div className="space-y-2">
-                <Label>Centre on landmark</Label>
+                <p className="text-[11px] uppercase tracking-wider text-muted">Landmarks</p>
                 <div className="flex flex-wrap gap-1.5">
-                  {LANDMARKS.filter((l) => l.y > 0).slice(0, 12).map((lm) => (
+                  {LANDMARKS.filter((l) => l.y > 0).map((lm) => (
                     <Button
                       key={lm.id}
                       size="sm"
-                      variant="ghost"
-                      className="h-7 text-[11px]"
+                      variant="outline"
                       onClick={() =>
                         setLandmarkCR(scaleLandmarkY(lm.y, patient.heightCm), lm.x * patient.morph.torsoWidth)
                       }
@@ -257,42 +270,17 @@ export function ControlDeck() {
                 </div>
               </div>
             ) : null}
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                variant={showLandmarks ? "default" : "outline"}
-                onClick={() => useSim.setState({ showLandmarks: !showLandmarks })}
-              >
-                Landmarks
-              </Button>
-              <Button
-                size="sm"
-                variant={showLightField ? "default" : "outline"}
-                onClick={() => useSim.setState({ showLightField: !showLightField })}
-              >
-                Light field
-              </Button>
-            </div>
           </TabsContent>
 
           <TabsContent value="expose" className="space-y-4">
-            <div className="rounded-md border border-border bg-elevated p-3">
-              <div className="flex items-baseline justify-between">
-                <Label>Predicted EI</Label>
-                <span className="font-mono text-lg tabular-nums text-fg">{ei.toFixed(0)}</span>
-              </div>
-              <Badge
-                tone={eiStatus === "optimal" ? "ok" : eiStatus === "under" ? "warn" : "danger"}
-                className="mt-2"
-              >
-                {eiStatus === "optimal"
-                  ? "Target window"
-                  : eiStatus === "under"
-                    ? "Likely underexposed"
-                    : "Likely overexposed"}
-              </Badge>
-              <p className="mt-2 text-[11px] leading-relaxed text-muted">
-                {patient.name} · {patient.habitus} · part ~{projection.region === "Thorax" ? patient.thickness.chest : projection.region === "Abdomen" ? patient.thickness.abdomen : projection.setup === "tabletop" ? patient.thickness.extremity : patient.thickness.pelvis} cm. Chart for this model: {sug.kvp} kVp / {sug.mas} mAs.
+            <div className="rounded-md border border-border bg-elevated p-3 text-xs">
+              <p className="text-muted">Predicted EI</p>
+              <p className="mt-1 font-mono text-lg tabular-nums text-fg">{ei.toFixed(0)}</p>
+              <p className="mt-1 text-muted">
+                Status: <span className="text-fg">{eiStatus}</span>
+                {mode === "practice" ? (
+                  <span className="text-muted"> · chart suggests {sug.kvp} kVp / {sug.mas} mAs</span>
+                ) : null}
               </p>
             </div>
             <Row label="kVp" value={`${exposure.kvp}`}>
@@ -307,7 +295,7 @@ export function ControlDeck() {
             <Row label="mAs" value={exposure.mas < 10 ? exposure.mas.toFixed(1) : exposure.mas.toFixed(0)}>
               <Slider
                 min={0.5}
-                max={80}
+                max={100}
                 step={0.5}
                 value={[exposure.mas]}
                 onValueChange={([v]) => patchExposure({ mas: v ?? 2 })}
