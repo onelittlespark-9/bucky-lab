@@ -57,7 +57,6 @@ export function ControlDeck() {
 
   const patient = patientById(patientId);
   const projection = projectionById(projectionId);
-  const sug = suggestedTechnique(patient, projection);
   const ei = predictedEI();
   const eiStatus = classifyEI(ei);
 
@@ -81,11 +80,6 @@ export function ControlDeck() {
 
         <div className="min-h-0 flex-1 overflow-y-auto pr-1">
           <TabsContent value="position" className="space-y-4">
-            {mode === "practice" ? (
-              <p className="text-xs leading-relaxed text-muted">{projection.position}</p>
-            ) : (
-              <p className="text-xs text-muted">Assessment — handbook prompts hidden.</p>
-            )}
             <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="outline" onClick={() => patchPose({ recumbency: "erect" })}>
                 Erect
@@ -118,30 +112,25 @@ export function ControlDeck() {
             <Row label="Knee flex" value={`${pose.kneeFlex.toFixed(0)}°`}>
               <Slider min={0} max={120} step={1} value={[pose.kneeFlex]} onValueChange={([v]) => patchPose({ kneeFlex: v ?? 0 })} />
             </Row>
-            {mode === "practice" ? (
-              <Button size="sm" variant="outline" className="w-full" onClick={applyHandbook}>
-                Apply handbook pose & centring
-              </Button>
-            ) : null}
+            <Button size="sm" variant="outline" className="w-full" onClick={applyHandbook}>
+              Reset to standard pose & centring
+            </Button>
           </TabsContent>
 
           <TabsContent value="room" className="space-y-4">
             <p className="text-xs text-muted">
-              Placement: <span className="text-fg">{equipment.placement}</span>. Move furniture and the patient so anatomy sits in the primary beam.
+              Placement: <span className="text-fg">{equipment.placement}</span>. Move the patient and equipment so anatomy sits in the primary beam.
             </p>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                variant={tube.lockedToDetector ? "default" : "outline"}
-                onClick={() => patchTube({ lockedToDetector: !tube.lockedToDetector })}
-              >
-                Tube {tube.lockedToDetector ? "LOCKED to detector" : "FREE"}
-              </Button>
-            </div>
+            <Button
+              size="sm"
+              variant={tube.lockedToDetector ? "default" : "outline"}
+              onClick={() => patchTube({ lockedToDetector: !tube.lockedToDetector })}
+            >
+              Tube {tube.lockedToDetector ? "LOCKED to detector" : "FREE"}
+            </Button>
             <p className="text-[11px] text-muted">
-              Locked: tube tracks the bucky/table IR — slide the patient within the light field. Free: move tube independently via Beam tab CR controls.
+              Locked: tube tracks the detector — move the patient within the light field. Free: move the tube independently on the Beam tab.
             </p>
-
             <p className="text-[11px] uppercase tracking-wider text-muted">Patient in beam</p>
             <Row label="Patient L/R (m)" value={equipment.patientX.toFixed(2)}>
               <Slider min={-0.4} max={0.4} step={0.01} value={[equipment.patientX]} onValueChange={([v]) => patchEquipment({ patientX: v ?? 0 })} />
@@ -152,7 +141,6 @@ export function ControlDeck() {
             <Row label="Patient in/out (m)" value={equipment.patientZ.toFixed(2)}>
               <Slider min={-0.4} max={0.4} step={0.01} value={[equipment.patientZ]} onValueChange={([v]) => patchEquipment({ patientZ: v ?? 0 })} />
             </Row>
-
             {equipment.placement === "table" ? (
               <>
                 <p className="text-[11px] uppercase tracking-wider text-muted">Table</p>
@@ -167,7 +155,6 @@ export function ControlDeck() {
                 </Row>
               </>
             ) : null}
-
             {equipment.placement === "upright-bucky" ||
             equipment.placement === "standing" ||
             equipment.placement === "seated" ? (
@@ -186,17 +173,12 @@ export function ControlDeck() {
           <TabsContent value="beam" className="space-y-4">
             <div className="flex flex-wrap gap-2">
               <Button size="sm" variant={showLightField ? "default" : "outline"} onClick={() => setShowLightField(!showLightField)}>
-                Primary beam / collimation light: {showLightField ? "ON" : "OFF"}
+                Primary beam: {showLightField ? "ON" : "OFF"}
               </Button>
-              {mode === "practice" ? (
-                <Button size="sm" variant={showLandmarks ? "default" : "outline"} onClick={() => setShowLandmarks(!showLandmarks)}>
-                  Landmarks: {showLandmarks ? "ON" : "OFF"}
-                </Button>
-              ) : null}
+              <Button size="sm" variant={showLandmarks ? "default" : "outline"} onClick={() => setShowLandmarks(!showLandmarks)}>
+                Landmarks: {showLandmarks ? "ON" : "OFF"}
+              </Button>
             </div>
-            {mode === "practice" ? (
-              <p className="text-xs leading-relaxed text-muted">{projection.centring}</p>
-            ) : null}
             <Row label="CR height (cm from vertex)" value={tube.crY.toFixed(1)}>
               <Slider min={0} max={patient.heightCm} step={0.5} value={[tube.crY]} onValueChange={([v]) => patchTube({ crY: v ?? 40 })} />
             </Row>
@@ -223,9 +205,6 @@ export function ControlDeck() {
               <p className="mt-1 font-mono text-lg tabular-nums text-fg">{ei.toFixed(0)}</p>
               <p className="mt-1 text-muted">
                 Status: <span className="text-fg">{eiStatus}</span>
-                {mode === "practice" ? (
-                  <span className="text-muted"> · chart suggests {sug.kvp} kVp / {sug.mas} mAs</span>
-                ) : null}
               </p>
             </div>
             <Row label="kVp" value={`${exposure.kvp}`}>
@@ -252,11 +231,9 @@ export function ControlDeck() {
                 R
               </Button>
             </div>
-            {mode === "practice" ? (
-              <Button size="sm" variant="outline" className="w-full" onClick={applySuggestedFactors}>
-                Load chart factors for this habitus
-              </Button>
-            ) : null}
+            <Button size="sm" variant="outline" className="w-full" onClick={applySuggestedFactors}>
+              Load standard exposure factors
+            </Button>
             <Separator />
             <div className="grid grid-cols-2 gap-2">
               <Button variant="outline" size="lg" onClick={prepare} disabled={preparing || exposing}>
