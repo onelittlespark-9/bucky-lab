@@ -104,7 +104,7 @@ export function RibMesh({ points, radius, color, opacity }: { points: V3[]; radi
 export function VertebraMesh({ position, scale, color, opacity }: { position: V3; scale: V3; color: string; opacity: number }) {
   return <group position={position} scale={scale} renderOrder={7}>
     <mesh><sphereGeometry args={[1, 16, 10]} /><meshPhysicalMaterial color={color} transparent opacity={opacity} roughness={.8} depthWrite={false} depthTest={false} /></mesh>
-    <mesh position={[0, 0, -.95]} scale={[.48, .38, .8]}><coneGeometry args={[1, 1, 6]} rotation={0} /><meshPhysicalMaterial color={color} transparent opacity={opacity} roughness={.8} depthWrite={false} depthTest={false} /></mesh>
+    <mesh position={[0, 0, -.95]} scale={[.48, .38, .8]}><coneGeometry args={[1, 1, 6]} /><meshPhysicalMaterial color={color} transparent opacity={opacity} roughness={.8} depthWrite={false} depthTest={false} /></mesh>
   </group>;
 }
 
