@@ -24,6 +24,16 @@ function regionFor(name: string): BoneRegion {
   return "axial";
 }
 function sideFor(bounds: [number[], number[]]): -1 | 1 { return ((bounds[0][0] + bounds[1][0]) * 0.5) < 0 ? -1 : 1; }
+function pivotFor(region: BoneRegion, side: -1 | 1, center: THREE.Vector3, H: number) {
+  const shoulderY = 0.79 * H; const pelvisY = 0.47 * H; const kneeY = 0.245 * H;
+  if (region === "scapula" || region === "clavicle" || region === "upperArm") return new THREE.Vector3(side * Math.max(0.10, Math.abs(center.x)), shoulderY, center.z);
+  if (region === "forearm") return new THREE.Vector3(side * Math.max(0.09, Math.abs(center.x)), shoulderY - 0.16 * (H / ATLAS_HEIGHT_M), center.z);
+  if (region === "hand") return new THREE.Vector3(side * Math.max(0.07, Math.abs(center.x)), shoulderY - 0.31 * (H / ATLAS_HEIGHT_M), center.z);
+  if (region === "thigh") return new THREE.Vector3(side * Math.max(0.08, Math.abs(center.x)), pelvisY, center.z);
+  if (region === "lowerLeg") return new THREE.Vector3(side * Math.max(0.08, Math.abs(center.x)), kneeY, center.z);
+  if (region === "foot") return new THREE.Vector3(side * Math.max(0.08, Math.abs(center.x)), 0.055 * H, center.z);
+  return new THREE.Vector3(0, 0, 0);
+}
 
 async function loadAtlas(): Promise<THREE.Group> {
   const response = await fetch(`${MODEL_ROOT}atlas.json`, { cache: "force-cache" });
@@ -50,14 +60,18 @@ async function loadAtlas(): Promise<THREE.Group> {
     geometry.setAttribute("normal", new THREE.BufferAttribute(new Int16Array(buffer, part.normals, part.vertexCount * 3), 3, true));
     geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(buffer, part.indices, part.indexCount), 1));
     geometry.computeBoundingSphere();
+    const region = regionFor(part.name); const side = sideFor(part.bounds);
+    const center = new THREE.Vector3((part.bounds[0][0] + part.bounds[1][0]) / 2, (part.bounds[0][1] + part.bounds[1][1]) / 2, (part.bounds[0][2] + part.bounds[1][2]) / 2);
+    const pivot = pivotFor(region, side, center, ATLAS_HEIGHT_M);
+    if (region !== "axial" && region !== "pelvis") geometry.translate(-pivot.x, -pivot.y, -pivot.z);
     const material = new THREE.MeshStandardMaterial({ color: "#ded8c4", roughness: 0.78, metalness: 0.02, transparent: true, opacity: 0.32, side: THREE.DoubleSide, depthWrite: true });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.name = `Human Atlas bone ${part.name}`;
-    mesh.userData.atlasRegion = regionFor(part.name);
-    mesh.userData.atlasSide = sideFor(part.bounds);
-    mesh.userData.atlasBounds = part.bounds;
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
+    mesh.userData.atlasRegion = region;
+    mesh.userData.atlasSide = side;
+    mesh.userData.atlasPivot = pivot;
+    mesh.position.copy(pivot);
+    mesh.castShadow = true; mesh.receiveShadow = true;
     root.add(mesh);
   }
   return root;
@@ -74,8 +88,7 @@ function PatientTransform({ children }: { children: ReactNode }) {
   return <group position={groupPos} rotation={groupRot}><group rotation={[kyphosis, oblique, 0]} scale={scale}>{children}</group></group>;
 }
 
-function articulate(root: THREE.Group, H: number, pose: { shoulderRoll: number; armRaise: number; elbowFlex: number; hipInternal: number; kneeFlex: number }) {
-  const shoulderY = 0.79 * H; const pelvisY = 0.47 * H; const kneeY = 0.245 * H;
+function articulate(root: THREE.Group, pose: { shoulderRoll: number; armRaise: number; elbowFlex: number; hipInternal: number; kneeFlex: number }) {
   const shoulderAngle = THREE.MathUtils.clamp(pose.shoulderRoll, 0, 1) * THREE.MathUtils.degToRad(28);
   const raiseAngle = THREE.MathUtils.clamp(pose.armRaise, 0, 1) * THREE.MathUtils.degToRad(65);
   const elbowAngle = THREE.MathUtils.clamp(pose.elbowFlex, 0, 135) * Math.PI / 180;
@@ -84,21 +97,16 @@ function articulate(root: THREE.Group, H: number, pose: { shoulderRoll: number; 
   root.children.forEach(object => {
     if (!(object instanceof THREE.Mesh)) return;
     const region = object.userData.atlasRegion as BoneRegion; const side = object.userData.atlasSide as -1 | 1;
-    object.position.set(0, 0, 0); object.rotation.set(0, 0, 0);
+    object.rotation.set(0, 0, 0);
     if (region === "axial" || region === "pelvis") return;
-    const bounds = object.userData.atlasBounds as [number[], number[]];
-    const center = new THREE.Vector3((bounds[0][0] + bounds[1][0]) / 2, (bounds[0][1] + bounds[1][1]) / 2, (bounds[0][2] + bounds[1][2]) / 2);
-    const pivot = new THREE.Vector3(side * Math.max(0.10, Math.abs(center.x)), region === "foot" || region === "lowerLeg" || region === "thigh" ? pelvisY : shoulderY, 0);
-    if (region === "scapula") { object.position.set(side * 0.018 * shoulderAngle / THREE.MathUtils.degToRad(28), 0, 0.035 * shoulderAngle / THREE.MathUtils.degToRad(28)); object.rotation.y = -side * shoulderAngle * 0.75; }
-    else if (region === "clavicle") { object.rotation.z = -side * shoulderAngle * 0.35; object.position.z = 0.018 * shoulderAngle / THREE.MathUtils.degToRad(28); }
-    else if (region === "upperArm") { object.rotation.z = -side * raiseAngle; object.rotation.x = -shoulderAngle * 0.65; object.position.z = 0.025 * Math.sin(shoulderAngle); }
-    else if (region === "forearm") { object.rotation.x = -shoulderAngle * 0.65; object.rotation.z = -side * (raiseAngle + elbowAngle * 0.35); }
-    else if (region === "hand") { object.rotation.x = -shoulderAngle * 0.65; object.rotation.z = -side * (raiseAngle + elbowAngle * 0.55); }
+    if (region === "scapula") { object.rotation.y = -side * shoulderAngle * 0.75; object.position.z = object.userData.atlasPivot.z + 0.035 * (shoulderAngle / THREE.MathUtils.degToRad(28)); object.position.x = object.userData.atlasPivot.x + side * 0.018 * (shoulderAngle / THREE.MathUtils.degToRad(28)); }
+    else if (region === "clavicle") { object.rotation.z = -side * shoulderAngle * 0.35; object.position.z = object.userData.atlasPivot.z + 0.018 * (shoulderAngle / THREE.MathUtils.degToRad(28)); }
+    else if (region === "upperArm") { object.rotation.z = -side * raiseAngle; object.rotation.x = -shoulderAngle * 0.65; object.position.z = object.userData.atlasPivot.z + 0.025 * Math.sin(shoulderAngle); }
+    else if (region === "forearm") { object.rotation.x = -shoulderAngle * 0.65; object.rotation.z = -side * (raiseAngle + elbowAngle); }
+    else if (region === "hand") { object.rotation.x = -shoulderAngle * 0.65; object.rotation.z = -side * (raiseAngle + elbowAngle); }
     else if (region === "thigh") { object.rotation.z = side * hipAngle * 0.55; }
     else if (region === "lowerLeg") { object.rotation.z = side * hipAngle * 0.35; object.rotation.x = -kneeAngle; }
     else if (region === "foot") { object.rotation.x = -kneeAngle * 0.25; }
-    object.userData.atlasPivot = pivot;
-    object.userData.atlasCenter = center;
   });
 }
 
@@ -106,7 +114,7 @@ export function HumanAtlasSkeletalOverlay() {
   const visible = useSim(s => s.anatomyVisibility.skeleton); const exposing = useSim(s => s.exposing); const patientId = useSim(s => s.patientId); const pose = useSim(s => s.pose);
   const [atlas, setAtlas] = useState<THREE.Group | null>(null); const [error, setError] = useState<string | null>(null);
   useEffect(() => { let cancelled = false; loadAtlas().then(group => { if (cancelled) { group.traverse(o => { if (o instanceof THREE.Mesh) { o.geometry.dispose(); if (Array.isArray(o.material)) o.material.forEach(m => m.dispose()); else o.material.dispose(); } }); return; } setAtlas(group); }).catch(reason => { if (!cancelled) setError(reason instanceof Error ? reason.message : "Human Atlas could not be loaded."); }); return () => { cancelled = true; }; }, []);
-  useEffect(() => { if (!atlas) return; const patient = patientById(patientId); articulate(atlas, patient.heightCm / 100, pose); atlas.traverse(o => { if (!(o instanceof THREE.Mesh)) return; const materials = Array.isArray(o.material) ? o.material : [o.material]; materials.forEach(m => { m.transparent = true; m.opacity = exposing ? 0.96 : 0.32; m.needsUpdate = true; }); }); }, [atlas, patientId, pose, exposing]);
+  useEffect(() => { if (!atlas) return; articulate(atlas, pose); atlas.traverse(o => { if (!(o instanceof THREE.Mesh)) return; const materials = Array.isArray(o.material) ? o.material : [o.material]; materials.forEach(m => { m.transparent = true; m.opacity = exposing ? 0.96 : 0.32; m.needsUpdate = true; }); }); }, [atlas, pose, exposing]);
   useEffect(() => () => { atlas?.traverse(o => { if (o instanceof THREE.Mesh) { o.geometry.dispose(); if (Array.isArray(o.material)) o.material.forEach(m => m.dispose()); else o.material.dispose(); } }); }, [atlas]);
   if (!visible || error || !atlas) return null;
   return <PatientTransform><primitive object={atlas} /></PatientTransform>;
