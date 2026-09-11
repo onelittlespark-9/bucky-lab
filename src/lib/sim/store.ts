@@ -25,9 +25,7 @@ export interface SimStore {
   mode: Mode;
   patientId: string;
   projectionId: string;
-  /** Current imaging request id (if started from the request list) */
   requestId: string | null;
-  /** Pathology that should appear on the radiograph */
   pathologyId: PathologyId;
   pose: SimPose;
   tube: TubeState;
@@ -53,6 +51,11 @@ export interface SimStore {
   prepare: () => void;
   expose: () => Promise<void>;
   retake: () => void;
+}
+
+function safeProjectionId(id: string): string {
+  const exists = PROJECTIONS.some((p) => p.id === id);
+  return exists ? id : "pa-chest";
 }
 
 function presentedPose(projectionId: string): SimPose {
@@ -178,26 +181,28 @@ export const useSim = create<SimStore>((set, get) => ({
   setPatient: (patientId) => set({ patientId }),
   setProjection: (projectionId) => {
     const { patientId, mode } = get();
+    const pid = safeProjectionId(projectionId);
     set({
-      projectionId,
-      pose: presentedPose(projectionId),
-      tube: presentedTube(projectionId, patientId, mode),
-      exposure: defaultExposure(projectionId),
+      projectionId: pid,
+      pose: presentedPose(pid),
+      tube: presentedTube(pid, patientId, mode),
+      exposure: defaultExposure(pid),
       result: null,
     });
   },
   startExam: (projectionId, patientId, requestId) => {
     const pid = patientId ?? get().patientId;
     const { mode } = get();
+    const safeId = safeProjectionId(projectionId);
     const req = requestId ? requestById(requestId) : null;
     set({
-      projectionId,
+      projectionId: safeId,
       patientId: pid,
       requestId: requestId ?? null,
       pathologyId: req?.pathologyId ?? "none",
-      pose: presentedPose(projectionId),
-      tube: presentedTube(projectionId, pid, mode),
-      exposure: defaultExposure(projectionId),
+      pose: presentedPose(safeId),
+      tube: presentedTube(safeId, pid, mode),
+      exposure: defaultExposure(safeId),
       result: null,
       error: null,
       screen: "room",
@@ -217,15 +222,23 @@ export const useSim = create<SimStore>((set, get) => ({
   },
   applySuggestedFactors: () => {
     const { projectionId, patientId, exposure } = get();
-    const sug = suggestedTechnique(patientById(patientId), projectionById(projectionId));
-    set({ exposure: { ...exposure, ...sug, grid: projectionById(projectionId).grid } });
+    try {
+      const sug = suggestedTechnique(patientById(patientId), projectionById(projectionId));
+      set({ exposure: { ...exposure, ...sug, grid: projectionById(projectionId).grid } });
+    } catch {
+      /* keep current exposure if suggestion fails */
+    }
   },
   setLandmarkCR: (landmarkY, landmarkX) => {
     set({ tube: { ...get().tube, crY: landmarkY, crX: landmarkX } });
   },
   predictedEI: () => {
     const s = get();
-    return predictEI(patientById(s.patientId), projectionById(s.projectionId), s.exposure, s.tube);
+    try {
+      return predictEI(patientById(s.patientId), projectionById(s.projectionId), s.exposure, s.tube);
+    } catch {
+      return 250;
+    }
   },
   prepare: () => {
     playConsoleSound("prep");
