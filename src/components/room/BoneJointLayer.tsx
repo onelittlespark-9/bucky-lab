@@ -10,33 +10,20 @@ function Bone({ a, b, radius, opacity }: { a: V3; b: V3; radius: number; opacity
     const direction = end.clone().sub(start);
     const length = direction.length();
     const position = start.clone().add(end).multiplyScalar(0.5);
-    const quaternion = new THREE.Quaternion().setFromUnitVectors(
-      new THREE.Vector3(0, 1, 0),
-      direction.normalize(),
-    );
+    const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
     return { position, quaternion, length };
   }, [a, b]);
-
-  return (
-    <mesh position={position} quaternion={quaternion} renderOrder={10}>
-      <capsuleGeometry args={[radius, Math.max(0.01, length - radius * 2), 10, 18]} />
-      <meshPhysicalMaterial color="#e8e1cd" transparent opacity={opacity} roughness={0.78} depthWrite={false} depthTest={false} />
-    </mesh>
-  );
+  return <mesh position={position} quaternion={quaternion} renderOrder={10}><capsuleGeometry args={[radius, Math.max(0.01, length - radius * 2), 10, 18]} /><meshPhysicalMaterial color="#e8e1cd" transparent opacity={opacity} roughness={0.78} depthWrite={false} depthTest={false} /></mesh>;
 }
 
 function Joint({ position, radius, opacity }: { position: V3; radius: number; opacity: number }) {
-  return (
-    <group position={position} renderOrder={11}>
-      <mesh><sphereGeometry args={[radius, 18, 12]} /><meshPhysicalMaterial color="#e8e1cd" transparent opacity={opacity} roughness={0.78} depthWrite={false} depthTest={false} /></mesh>
-      <mesh scale={[1.12, 0.72, 1.12]}><sphereGeometry args={[radius, 14, 10]} /><meshPhysicalMaterial color="#d7e1d0" transparent opacity={opacity * 0.62} roughness={0.42} depthWrite={false} depthTest={false} /></mesh>
-    </group>
-  );
+  return <group position={position} renderOrder={11}>
+    <mesh><sphereGeometry args={[radius, 18, 12]} /><meshPhysicalMaterial color="#e8e1cd" transparent opacity={opacity} roughness={0.78} depthWrite={false} depthTest={false} /></mesh>
+    <mesh scale={[1.12, 0.72, 1.12]}><sphereGeometry args={[radius, 14, 10]} /><meshPhysicalMaterial color="#d7e1d0" transparent opacity={opacity * 0.62} roughness={0.42} depthWrite={false} depthTest={false} /></mesh>
+  </group>;
 }
 
-export function BoneJointLayer({
-  H, s, torsoWidth, torsoDepth, shoulder, hip, patientMorph, pose, projectionId, opacity,
-}: {
+export function BoneJointLayer({ H, s, torsoWidth, torsoDepth, shoulder, hip, patientMorph, pose, projectionId, opacity }: {
   H: number; s: number; torsoWidth: number; torsoDepth: number; shoulder: number; hip: number;
   patientMorph: { limb: number };
   pose: { elbowFlex: number; hipInternal: number; armRaise: number; shoulderRoll: number };
@@ -50,6 +37,7 @@ export function BoneJointLayer({
   const hipInternal = (pose.hipInternal * Math.PI) / 180;
   const raise = Math.max(0, Math.min(1, pose.armRaise));
   const ribHalf = torsoWidth * 0.72;
+  const ribDepth = Math.max(0.06 * s, torsoDepth * 0.42);
   const lateralChest = projectionId === "lat-chest";
   const paChest = projectionId === "pa-chest";
 
@@ -69,8 +57,7 @@ export function BoneJointLayer({
       elbowPoint = [upper[0] + side * 0.005 * s, upper[1] - 0.16 * s * Math.cos(elbow), 0.02 * s * Math.sin(elbow)];
       wrist = [elbowPoint[0] + side * 0.012 * s, elbowPoint[1] - 0.16 * s * Math.cos(elbow), 0.04 * s * Math.sin(elbow)];
     }
-    const hand: V3 = [wrist[0] + side * 0.004 * s, wrist[1] - 0.055 * s, wrist[2]];
-    return { shoulder: shoulderPoint, upper, elbow: elbowPoint, wrist, hand };
+    return { shoulder: shoulderPoint, upper, elbow: elbowPoint, wrist, hand: [wrist[0] + side * 0.004 * s, wrist[1] - 0.055 * s, wrist[2]] };
   };
 
   const bones = useMemo(() => {
@@ -82,14 +69,9 @@ export function BoneJointLayer({
     out.push({ a: [0, Y.shoulder + 0.008 * s, 0.012 * torsoDepth], b: [0, Y.pelvis + 0.04 * s, 0.012 * torsoDepth], r: 0.010 * s });
     out.push({ a: [-hipGap, Y.pelvis, 0], b: [0, Y.pelvis - 0.04 * s, 0.018 * torsoDepth], r: 0.013 * s });
     out.push({ a: [hipGap, Y.pelvis, 0], b: [0, Y.pelvis - 0.04 * s, 0.018 * torsoDepth], r: 0.013 * s });
-
-    ([-1, 1] as const).forEach((side) => {
+    ([-1, 1] as const).forEach(side => {
       const arm = armPoints(side);
-      out.push({ a: arm.shoulder, b: arm.upper, r: limb * 1.08 });
-      out.push({ a: arm.upper, b: arm.elbow, r: limb * 0.82 });
-      out.push({ a: arm.elbow, b: arm.wrist, r: limb * 0.68 });
-      out.push({ a: arm.wrist, b: arm.hand, r: limb * 0.50 });
-
+      out.push({ a: arm.shoulder, b: arm.upper, r: limb * 1.08 }, { a: arm.upper, b: arm.elbow, r: limb * 0.82 }, { a: arm.elbow, b: arm.wrist, r: limb * 0.68 }, { a: arm.wrist, b: arm.hand, r: limb * 0.50 });
       const hipPoint: V3 = [side * hipGap, Y.pelvis - 0.01 * s, 0];
       const thigh: V3 = [side * (hipGap + 0.008 * s), Y.knee + 0.12 * H, side * 0.008 * s * Math.sin(hipInternal)];
       const knee: V3 = [side * (hipGap + 0.006 * s), Y.knee, side * 0.012 * s];
@@ -103,38 +85,40 @@ export function BoneJointLayer({
 
   const joints = useMemo(() => {
     const result: { p: V3; r: number }[] = [{ p: [0, Y.neck, 0], r: 0.018 * s }, { p: [0, Y.pelvis, 0], r: 0.035 * s }];
-    ([-1, 1] as const).forEach((side) => {
+    ([-1, 1] as const).forEach(side => {
       const arm = armPoints(side);
       const hipPoint: V3 = [side * hipGap, Y.pelvis - 0.01 * s, 0];
       const knee: V3 = [side * (hipGap + 0.006 * s), Y.knee, side * 0.012 * s];
       const ankle: V3 = [side * (hipGap + 0.006 * s), Y.ankle, side * 0.01 * s];
-      result.push(
-        { p: arm.shoulder, r: limb * 1.18 }, { p: arm.elbow, r: limb * 0.92 }, { p: arm.wrist, r: limb * 0.76 },
-        { p: hipPoint, r: limb * 1.34 }, { p: knee, r: limb * 1.08 }, { p: ankle, r: limb * 0.84 },
-      );
+      result.push({ p: arm.shoulder, r: limb * 1.18 }, { p: arm.elbow, r: limb * 0.92 }, { p: arm.wrist, r: limb * 0.76 }, { p: hipPoint, r: limb * 1.34 }, { p: knee, r: limb * 1.08 }, { p: ankle, r: limb * 0.84 });
     });
     return result;
   }, [H, s, shoulderWidth, hipGap, limb, elbow, hipInternal, raise, projectionId, pose.shoulderRoll, patientMorph.limb, Y.neck, Y.shoulder, Y.pelvis, Y.knee, Y.ankle]);
 
-  return (
-    <group>
-      <group position={[0, Y.head, 0]}>
-        <mesh scale={[0.092 * s, 0.108 * s, 0.086 * s]} renderOrder={10}><sphereGeometry args={[1, 24, 16]} /><meshPhysicalMaterial color="#e8e1cd" transparent opacity={opacity} roughness={0.8} depthWrite={false} depthTest={false} /></mesh>
-        <mesh position={[0, -0.052 * s, 0.02 * s]} scale={[0.058 * s, 0.047 * s, 0.058 * s]} renderOrder={10}><sphereGeometry args={[1, 20, 14]} /><meshPhysicalMaterial color="#e8e1cd" transparent opacity={opacity} roughness={0.8} depthWrite={false} depthTest={false} /></mesh>
-      </group>
-      {bones.map((bone, i) => <Bone key={`bone-${i}`} a={bone.a} b={bone.b} radius={bone.r} opacity={opacity} />)}
-      {joints.map((joint, i) => <Joint key={`joint-${i}`} position={joint.p} radius={joint.r} opacity={opacity} />)}
-      {Array.from({ length: 10 }, (_, i) => {
-        const y = Y.chest + (9 - i) * 0.018 * s;
-        const width = ribHalf * (0.92 - i * 0.035);
-        const z = 0.015 * torsoDepth;
-        return <group key={`rib-${i}`}>
-          <Bone a={[0, y, z]} b={[-width * 0.58, y + 0.006 * s, z + 0.004 * s]} radius={0.0058 * s} opacity={opacity * 0.9} />
-          <Bone a={[-width * 0.58, y + 0.006 * s, z + 0.004 * s]} b={[-width, y - 0.008 * s, z]} radius={0.0058 * s} opacity={opacity * 0.9} />
-          <Bone a={[0, y, z]} b={[width * 0.58, y + 0.006 * s, z + 0.004 * s]} radius={0.0058 * s} opacity={opacity * 0.9} />
-          <Bone a={[width * 0.58, y + 0.006 * s, z + 0.004 * s]} b={[width, y - 0.008 * s, z]} radius={0.0058 * s} opacity={opacity * 0.9} />
-        </group>;
-      })}
+  const ribs = useMemo(() => Array.from({ length: 10 }, (_, i) => {
+    const y = Y.chest + (9 - i) * 0.018 * s;
+    const width = ribHalf * (0.96 - i * 0.035);
+    const depth = ribDepth * (0.96 - i * 0.015);
+    const points: V3[] = [];
+    for (let j = 0; j <= 12; j++) {
+      const t = j / 12;
+      const theta = t * Math.PI;
+      const x = Math.sin(theta) * width;
+      const z = Math.cos(theta) * depth;
+      const posteriorDrop = 0.012 * s * Math.sin(theta);
+      points.push([x, y - posteriorDrop, z]);
+    }
+    return points;
+  }), [Y.chest, s, ribHalf, ribDepth]);
+
+  return <group>
+    <group position={[0, Y.head, 0]}>
+      <mesh scale={[0.092 * s, 0.108 * s, 0.086 * s]} renderOrder={10}><sphereGeometry args={[1, 24, 16]} /><meshPhysicalMaterial color="#e8e1cd" transparent opacity={opacity} roughness={0.8} depthWrite={false} depthTest={false} /></mesh>
+      <mesh position={[0, -0.052 * s, 0.02 * s]} scale={[0.058 * s, 0.047 * s, 0.058 * s]} renderOrder={10}><sphereGeometry args={[1, 20, 14]} /><meshPhysicalMaterial color="#e8e1cd" transparent opacity={opacity} roughness={0.8} depthWrite={false} depthTest={false} /></mesh>
     </group>
-  );
+    {bones.map((bone, i) => <Bone key={`bone-${i}`} a={bone.a} b={bone.b} radius={bone.r} opacity={opacity} />)}
+    {joints.map((joint, i) => <Joint key={`joint-${i}`} position={joint.p} radius={joint.r} opacity={opacity} />)}
+    {ribs.map((points, i) => <group key={`rib-${i}`}>{points.slice(0, -1).map((p, j) => <Bone key={j} a={p} b={points[j + 1]} radius={0.0058 * s} opacity={opacity * 0.9} />)}</group>)}
+    <Bone a={[0, Y.chest + 0.06 * s, ribDepth]} b={[0, Y.pelvis + 0.03 * s, -0.01 * torsoDepth]} radius={0.009 * s} opacity={opacity * 0.9} />
+  </group>;
 }
