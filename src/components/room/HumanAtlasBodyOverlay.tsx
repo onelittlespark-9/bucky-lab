@@ -5,22 +5,8 @@ import { useSim } from "@/lib/sim/store";
 import { patientById } from "@/lib/sim/patients";
 import type { V3 } from "@/lib/sim/patient-kinematics";
 
-interface AtlasPart {
-  id: string;
-  name: string;
-  system: string;
-  chunk: number;
-  positions: number;
-  normals: number;
-  indices: number;
-  vertexCount: number;
-  indexCount: number;
-}
-
-interface AtlasManifest {
-  parts: AtlasPart[];
-  chunks: { url: string; bytes: number }[];
-}
+interface AtlasPart { id: string; name: string; system: string; chunk: number; positions: number; normals: number; indices: number; vertexCount: number; indexCount: number; }
+interface AtlasManifest { parts: AtlasPart[]; chunks: { url: string; bytes: number }[]; }
 
 const MODEL_ROOT = "/models/human-atlas/";
 const ATLAS_HEIGHT_M = 1.7;
@@ -62,13 +48,7 @@ async function loadBodySurface(): Promise<THREE.Group> {
       const merged = mergeGeometries(geometries, false);
       if (!merged) throw new Error(`Human Atlas chunk ${chunkIndex} could not be merged.`);
       merged.computeVertexNormals();
-      const material = new THREE.MeshPhysicalMaterial({
-        color: "#b88970",
-        roughness: 0.66,
-        metalness: 0,
-        clearcoat: 0.03,
-        side: THREE.FrontSide,
-      });
+      const material = new THREE.MeshPhysicalMaterial({ color: "#b88970", roughness: 0.66, metalness: 0, clearcoat: 0.03, side: THREE.FrontSide });
       const mesh = new THREE.Mesh(merged, material);
       mesh.name = `Human Atlas body surface chunk ${chunkIndex}`;
       mesh.castShadow = true;
@@ -92,6 +72,8 @@ function PatientTransform({ children }: { children: ReactNode }) {
   const bodyThickness = Math.max(0.13 * scale, 0.12 * patient.morph.torsoDepth * scale * 1.05);
   const footRadiusY = 0.045 * scale;
   const footSole = 0.055 * H - 0.012 * scale - footRadiusY;
+  const kyphosis = patient.morph.kyphosis * 0.22;
+  const oblique = pose.oblique * Math.PI / 180;
   const yaw = pose.rotationY * Math.PI / 180;
   const wall = equipment.placement !== "table";
 
@@ -109,7 +91,7 @@ function PatientTransform({ children }: { children: ReactNode }) {
     groupRot = [-Math.PI / 2, 0, yaw];
   }
 
-  return <group position={groupPos} rotation={groupRot}><group scale={scale}>{children}</group></group>;
+  return <group position={groupPos} rotation={groupRot}><group rotation={[kyphosis, oblique, 0]} scale={scale}>{children}</group></group>;
 }
 
 export function HumanAtlasBodyOverlay() {
