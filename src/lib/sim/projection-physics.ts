@@ -1,4 +1,4 @@
-import type { Projection, SimPose, TubeState } from "./types";
+import type { FocalSpot, Projection, SimPose, TubeState } from "./types";
 
 export interface ProjectionGeometry {
   magnification: number;
@@ -11,28 +11,24 @@ export interface ProjectionGeometry {
 }
 
 /**
- * Geometry model used by the simulator to turn SID/OID, focal spot, tube angle
- * and patient rotation into recognisable radiographic consequences.
- *
- * Distances are expressed in cm; geometric unsharpness is returned in mm.
+ * Teaching model for projection geometry. Distances are cm; geometric
+ * unsharpness is returned in mm.
  */
 export function projectionGeometry(
   projection: Projection,
   tube: TubeState,
   pose: SimPose,
+  focalSpot: FocalSpot = "broad",
 ): ProjectionGeometry {
   const sid = Math.max(1, tube.sid);
-  // The current simulator models the detector plane at the IR and the anatomy
-  // a short distance in front of it. Keep OID bounded so unusual user input
-  // cannot produce an invalid magnification value.
   const expectedOid = projection.setup === "tabletop" ? 2.0 : projection.grid ? 4.0 : 2.5;
   const angleRad = (tube.angle * Math.PI) / 180;
   const oidCm = Math.max(0, Math.min(sid * 0.45, expectedOid + Math.abs(Math.sin(angleRad)) * 1.5));
   const magnification = sid / Math.max(0.1, sid - oidCm);
 
-  // Ug = focal spot × OID / SOD. Fine focus is approximated at 0.6 mm and
-  // broad focus at 1.2 mm for the teaching model.
-  const focalSpotMm = 1.2;
+  // Ug = focal spot × OID / SOD. The values are deliberately simple teaching
+  // approximations rather than manufacturer-specific focal-spot data.
+  const focalSpotMm = focalSpot === "fine" ? 0.6 : 1.2;
   const geometricUnsharpnessMm = focalSpotMm * (oidCm / Math.max(0.1, sid - oidCm));
 
   const angleOffsetCm = Math.abs(Math.tan(angleRad)) * oidCm;
@@ -40,12 +36,7 @@ export function projectionGeometry(
   const obliqueRad = (Math.abs(pose.oblique) * Math.PI) / 180;
   const projectedOffsetCm = angleOffsetCm + Math.sin(rotationRad) * oidCm;
   const rotationPenalty = Math.min(1, Math.sin(Math.min(Math.PI / 2, rotationRad)) + Math.sin(Math.min(Math.PI / 2, obliqueRad)) * 0.5);
-
-  // A compact teaching index: 0 = little geometric distortion, 1 = marked.
-  const distortionIndex = Math.min(
-    1,
-    Math.max(0, (magnification - 1) * 2.2) + rotationPenalty * 0.55 + Math.min(0.45, Math.abs(Math.sin(angleRad)) * 0.3),
-  );
+  const distortionIndex = Math.min(1, Math.max(0, (magnification - 1) * 2.2) + rotationPenalty * 0.55 + Math.min(0.45, Math.abs(Math.sin(angleRad)) * 0.3));
 
   return {
     magnification,
