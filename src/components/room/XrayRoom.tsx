@@ -44,13 +44,11 @@ export function XrayRoom() {
     <directionalLight position={[2.5, 4, 2]} intensity={1.15} castShadow shadow-mapSize={[1024, 1024]} />
     <directionalLight position={[-2, 2, -1]} intensity={.25} />
     <TableAndBucky />
-    {/* Skin, fat, muscle and organs share one patient rig. The atlas skeleton retains its
-        own identical placement transform until its loader is migrated to the rig. */}
     <PatientRig>
       <PatientModel />
       <InternalAnatomy />
+      <DetailedSkeletalOverlay />
     </PatientRig>
-    <DetailedSkeletalOverlay />
     <AnatomyControls />
     <XraySourceAssembly />
     <ContactShadows opacity={.35} scale={8} blur={2.2} far={5} />
