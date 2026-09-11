@@ -108,12 +108,10 @@ export interface SimStore {
 }
 
 function safeProjectionId(id: string): string {
-  const exists = PROJECTIONS.some((p) => p.id === id);
-  return exists ? id : "pa-chest";
+  return PROJECTIONS.some((p) => p.id === id) ? id : "pa-chest";
 }
 
 function presentedPose(projectionId: string, placement?: PlacementMode): SimPose {
-  const p = projectionById(projectionId);
   const place = placement ?? placementFromProjection(projectionId);
   const erect = place === "standing" || place === "upright-bucky" || place === "seated";
   return {
@@ -163,7 +161,7 @@ function defaultExposure(projectionId: string, patientId: string): ExposureState
     mas,
     grid: p.grid,
     focalSpot: p.setup === "tabletop" ? "fine" : "broad",
-    marker: null,
+    marker: "R",
   };
 }
 
@@ -274,7 +272,7 @@ export const useSim = create<SimStore>((set, get) => ({
       requestId: requestId ?? null,
       pathologyId: req?.pathologyId ?? "none",
       pose: presentedPose(safeId, place),
-      tube: presentedTube(safeId, pid, mode),
+      tube: { ...presentedTube(safeId, pid, mode), ...handbookTube(safeId, pid), lockedToDetector: true },
       exposure: defaultExposure(safeId, pid),
       equipment: defaultEquipment(place),
       result: null,
@@ -295,7 +293,16 @@ export const useSim = create<SimStore>((set, get) => ({
   patchPose: (p) => set({ pose: { ...get().pose, ...p } }),
   patchTube: (t) => set({ tube: { ...get().tube, ...t } }),
   patchExposure: (e) => set({ exposure: { ...get().exposure, ...e } }),
-  patchEquipment: (e) => set({ equipment: { ...get().equipment, ...e } }),
+  patchEquipment: (e) => {
+    const cur = get().equipment;
+    const next = { ...cur, ...e };
+    if (next.placement === "upright-bucky" || next.placement === "standing" || next.placement === "seated") {
+      next.patientZ = Math.max(-0.12, Math.min(0.35, next.patientZ));
+    } else {
+      next.patientY = Math.max(-0.02, Math.min(0.35, next.patientY));
+    }
+    set({ equipment: next });
+  },
   applyHandbook: () => {
     const { projectionId, patientId } = get();
     set({
@@ -309,7 +316,7 @@ export const useSim = create<SimStore>((set, get) => ({
       const sug = suggestedTechnique(patientById(patientId), projectionById(projectionId));
       set({ exposure: { ...exposure, ...sug, grid: projectionById(projectionId).grid } });
     } catch {
-      /* keep current exposure if suggestion fails */
+      /* keep current */
     }
   },
   setLandmarkCR: (landmarkY, landmarkX) => {
@@ -356,5 +363,4 @@ export const useSim = create<SimStore>((set, get) => ({
 }));
 
 export { PATIENTS, PROJECTIONS };
-
 export type { Recumbency, Breath, FocalSpot, Marker };
