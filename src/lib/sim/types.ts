@@ -23,7 +23,10 @@ export type Region =
   | "Upper limb"
   | "Lower limb"
   | "Skull";
-export type Screen = "library" | "room" | "viewer";
+export type Screen = "library" | "setup" | "room" | "viewer";
+
+/** How the patient is presented in the room before fine positioning. */
+export type PlacementMode = "standing" | "seated" | "upright-bucky" | "table";
 export type Mode = "practice" | "assessment";
 export type Breath = "inspiration" | "expiration";
 export type FocalSpot = "fine" | "broad";
@@ -124,12 +127,33 @@ export interface SimPose {
 }
 
 export interface TubeState {
+  /** Centring height, cm from vertex (anatomy space) */
   crY: number;
+  /** Centring lateral, cm from midline */
   crX: number;
   sid: number;
   angle: number;
   collimationW: number;
   collimationH: number;
+  /** When true, tube tracks the detector (bucky/table IR) — move patient in the beam */
+  lockedToDetector: boolean;
+}
+
+/** Movable room furniture + patient offset in metres (scene space). */
+export interface RoomEquipment {
+  /** Patient lateral (X), height offset (Y), depth (Z) relative to detector */
+  patientX: number;
+  patientY: number;
+  patientZ: number;
+  /** Table top height from floor (m), lateral and longitudinal shift */
+  tableHeight: number;
+  tableX: number;
+  tableZ: number;
+  /** Wall bucky cassette centre height from floor (m) and tilt 0 = vertical, 90 = horizontal */
+  buckyHeight: number;
+  buckyTilt: number;
+  /** Placement chosen on the setup screen */
+  placement: PlacementMode;
 }
 
 export interface ExposureState {
