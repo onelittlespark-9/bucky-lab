@@ -4,6 +4,7 @@ import { useSim } from "@/lib/sim/store";
 import { patientById } from "@/lib/sim/patients";
 import { scaleLandmarkY, LANDMARKS } from "@/lib/sim/projections";
 import { InternalAnatomy } from "./InternalAnatomy";
+import { BodyShell } from "./BodyShell";
 
 const SKIN_ROUGHNESS = .58;
 type V3 = [number, number, number];
@@ -42,6 +43,7 @@ export function PatientModel() {
  const landmarks = LANDMARKS.filter(l => l.y > 0 && !["3rd-mcp", "midcarpal", "elbow", "patella-apex", "medial-epicondyle-knee", "malleoli", "3rd-mt"].includes(l.id));
  const bodyGeometry = useMemo(() => ({ pelvis: [.13 * m.hip * s, .105 * m.abdomen * s, .12 * m.torsoDepth * s] as V3, abdomen: [.155 * m.torsoWidth * s, .16 * m.abdomen * s, .11 * m.torsoDepth * s] as V3, chest: [bodyWidth, .22 * m.torsoLength * s, chestDepth] as V3 }), [bodyWidth, chestDepth, m.abdomen, m.hip, m.torsoDepth, m.torsoLength, m.torsoWidth, s]);
  return <group position={groupPos} rotation={groupRot}>
+  <BodyShell />
   <InternalAnatomy />
   <group rotation={[kyphosis, oblique, 0]}>
    <Ellipsoid position={[0, Y.pelvis, 0]} scale={bodyGeometry.pelvis} color={skin} /><Ellipsoid position={[0, Y.waist, 0]} scale={bodyGeometry.abdomen} color={skin} /><Ellipsoid position={[0, Y.chest, 0]} scale={bodyGeometry.chest} color={skin} />
