@@ -3,6 +3,7 @@ import { sampleAnatomy, hashPatient, type Paths, type SampleCtx } from "./anatom
 import { buildMetrics, fieldScatter, incidentFluence, muEffective, partThickness } from "./exposure";
 import { clamp, fbm } from "./geometry";
 import { scoreExposure } from "./scoring";
+import type { PathologyId } from "./requests";
 
 const PHOTO_CACHE = new Map<string, ImageData>();
 const PHOTO_WAIT = new Map<string, Promise<ImageData | null>>();
@@ -125,10 +126,13 @@ export async function renderRadiograph(args: {
   pose: SimPose;
   tube: TubeState;
   exposure: ExposureState;
+  pathologyId?: PathologyId;
   width?: number;
   height?: number;
 }): Promise<RadiographResult> {
   const { patient, projection, pose, tube, exposure } = args;
+  // pathologyId is accepted so the call from the store succeeds.
+  // Visual rendering of pathology will be added in a later step.
   const aspect = tube.collimationW / tube.collimationH;
   const height = args.height ?? 640;
   const width = args.width ?? Math.round(height * aspect);
@@ -187,7 +191,6 @@ export async function renderRadiograph(args: {
 
   const n = width * height;
   const mean = sum / n;
-  const variance = Math.max(0, sumSq / n - mean * mean);
 
   const well = 280;
   const canvas = document.createElement("canvas");
