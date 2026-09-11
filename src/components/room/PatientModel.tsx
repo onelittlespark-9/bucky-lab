@@ -36,8 +36,8 @@ export function PatientModel() {
    groupRot = [-Math.PI / 2, 0, yaw];
  }
  const hipGap = .085 * m.hip * s, elbow = pose.elbowFlex * Math.PI / 180, hipInt = pose.hipInternal * Math.PI / 180;
- const lateralChest = useSim.getState ? useSim.getState().projectionId === "lat-chest" : false;
  const projectionId = useSim(s => s.projectionId);
+ const lateralChest = projectionId === "lat-chest";
  const paChest = projectionId === "pa-chest", raise = Math.max(0, Math.min(1, pose.armRaise));
  const landmarks = LANDMARKS.filter(l => l.y > 0 && !["3rd-mcp", "midcarpal", "elbow", "patella-apex", "medial-epicondyle-knee", "malleoli", "3rd-mt"].includes(l.id));
  const bodyGeometry = useMemo(() => ({ pelvis: [.13 * m.hip * s, .105 * m.abdomen * s, .12 * m.torsoDepth * s] as V3, abdomen: [.155 * m.torsoWidth * s, .16 * m.abdomen * s, .11 * m.torsoDepth * s] as V3, chest: [bodyWidth, .22 * m.torsoLength * s, chestDepth] as V3 }), [bodyWidth, chestDepth, m.abdomen, m.hip, m.torsoDepth, m.torsoLength, m.torsoWidth, s]);
