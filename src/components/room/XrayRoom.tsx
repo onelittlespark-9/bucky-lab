@@ -16,57 +16,101 @@ function LightField() {
     equipment.placement === "standing" ||
     equipment.placement === "seated";
 
-  const tex = useMemo(() => {
-    const c = document.createElement("canvas");
-    c.width = 256;
-    c.height = 256;
-    const g = c.getContext("2d")!;
-    g.clearRect(0, 0, 256, 256);
-    g.strokeStyle = "rgba(226,195,90,0.95)";
-    g.lineWidth = 4;
-    g.strokeRect(18, 18, 220, 220);
-    g.beginPath();
-    g.moveTo(128, 28);
-    g.lineTo(128, 228);
-    g.moveTo(28, 128);
-    g.lineTo(228, 128);
-    g.stroke();
-    g.fillStyle = "rgba(226,195,90,0.12)";
-    g.fillRect(18, 18, 220, 220);
-    const t = new THREE.CanvasTexture(c);
-    t.needsUpdate = true;
-    return t;
-  }, []);
-
   const mag = tube.sid / Math.max(80, tube.sid - 14);
-  const w = tube.collimationW / 100 / mag;
-  const hgt = tube.collimationH / 100 / mag;
-  const intensity = preparing || exposing ? 1 : 0.65;
+  const fieldW = tube.collimationW / 100 / mag;
+  const fieldH = tube.collimationH / 100 / mag;
+  const sidM = tube.sid / 100;
+  const angle = (tube.angle * Math.PI) / 180;
+  const lock = tube.lockedToDetector;
+  const bright = preparing || exposing;
 
-  let pos: [number, number, number];
-  let rot: [number, number, number];
+  let fieldPos: [number, number, number];
+  let fieldRot: [number, number, number];
+  let tubePos: [number, number, number];
   if (wall) {
     const tilt = (equipment.buckyTilt * Math.PI) / 180;
-    pos = [tube.crX / 100, equipment.buckyHeight, -0.42];
-    rot = [tilt, 0, 0];
+    fieldPos = [tube.crX / 100, equipment.buckyHeight, -0.42];
+    fieldRot = [tilt, 0, 0];
+    const detY = equipment.buckyHeight;
+    const detX = lock ? 0 : tube.crX / 100;
+    tubePos = [detX, detY, -0.55 + sidM];
   } else {
-    pos = [equipment.tableX + tube.crX / 100, equipment.tableHeight + 0.04, equipment.tableZ];
-    rot = [-Math.PI / 2, 0, 0];
+    fieldPos = [equipment.tableX + tube.crX / 100, equipment.tableHeight + 0.05, equipment.tableZ];
+    fieldRot = [-Math.PI / 2, 0, 0];
+    tubePos = [
+      equipment.tableX + (lock ? 0 : tube.crX / 100),
+      equipment.tableHeight + 0.05 + sidM,
+      equipment.tableZ,
+    ];
   }
 
+  const coneGeo = useMemo(() => {
+    const hw0 = 0.02;
+    const hh0 = 0.02;
+    const hw1 = fieldW / 2;
+    const hh1 = fieldH / 2;
+    const depth = Math.max(0.3, sidM - 0.15);
+    const positions = new Float32Array([
+      -hw0, -hh0, 0, hw0, -hh0, 0, hw0, hh0, 0, -hw0, hh0, 0,
+      -hw1, -hh1, -depth, hw1, -hh1, -depth, hw1, hh1, -depth, -hw1, hh1, -depth,
+    ]);
+    const indices = [
+      0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7, 4, 5, 6, 4, 6, 7,
+    ];
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    g.setIndex(indices);
+    g.computeVertexNormals();
+    return g;
+  }, [fieldW, fieldH, sidM]);
+
   if (!show) return null;
+
+  const mid: [number, number, number] = [
+    (tubePos[0] + fieldPos[0]) / 2,
+    (tubePos[1] + fieldPos[1]) / 2,
+    (tubePos[2] + fieldPos[2]) / 2,
+  ];
+
   return (
-    <mesh position={pos} rotation={rot} renderOrder={2}>
-      <planeGeometry args={[w, hgt]} />
-      <meshBasicMaterial
-        map={tex}
-        transparent
-        opacity={intensity}
-        depthWrite={false}
-        side={THREE.DoubleSide}
-        color={exposing ? "#fff6d2" : "#e2c35a"}
+    <group>
+      <mesh
+        geometry={coneGeo}
+        position={tubePos}
+        rotation={wall ? [0, Math.PI, -angle] : [Math.PI / 2 - angle, 0, 0]}
+        renderOrder={1}
+      >
+        <meshBasicMaterial
+          color={bright ? "#ffe566" : "#e2c35a"}
+          transparent
+          opacity={bright ? 0.28 : 0.16}
+          depthWrite={false}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+
+      <mesh position={fieldPos} rotation={fieldRot} renderOrder={2}>
+        <planeGeometry args={[fieldW, fieldH]} />
+        <meshBasicMaterial
+          color={bright ? "#fff6a0" : "#f0d060"}
+          transparent
+          opacity={bright ? 0.55 : 0.35}
+          depthWrite={false}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+      <mesh position={fieldPos} rotation={fieldRot} renderOrder={3}>
+        <planeGeometry args={[fieldW, fieldH]} />
+        <meshBasicMaterial color="#e2c35a" transparent opacity={0.9} depthWrite={false} wireframe />
+      </mesh>
+      <pointLight
+        position={mid}
+        color="#ffe08a"
+        intensity={bright ? 2.2 : 0.9}
+        distance={Math.max(1.2, sidM)}
+        decay={2}
       />
-    </mesh>
+    </group>
   );
 }
 
