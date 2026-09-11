@@ -1,10 +1,11 @@
-import { ContactShadows, OrbitControls, Html } from "@react-three/drei";
+import { ContactShadows, Html } from "@react-three/drei";
 import { useSim } from "@/lib/sim/store";
 import { PatientModel } from "./PatientModel";
 import { InternalAnatomy } from "./InternalAnatomy";
 import { DetailedSkeletalOverlay } from "./DetailedSkeletalOverlay";
 import { PatientRig } from "./PatientRig";
 import { XraySourceVisibility } from "./XraySourceVisibility";
+import { RoomQuickControls } from "./RoomQuickControls";
 import type { AnatomyLayer } from "@/lib/sim/muscle-segmentation";
 
 function TableAndBucky() {
@@ -51,7 +52,7 @@ export function XrayRoom() {
     </PatientRig>
     <AnatomyControls />
     <XraySourceVisibility />
+    <RoomQuickControls />
     <ContactShadows opacity={.35} scale={8} blur={2.2} far={5} />
-    <OrbitControls enablePan minPolarAngle={.2} maxPolarAngle={Math.PI / 2.05} minDistance={1.2} maxDistance={6} target={[0, .9, 0]} />
   </>;
 }
