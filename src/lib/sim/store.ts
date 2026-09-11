@@ -18,48 +18,18 @@ import { projectionById, PROJECTIONS, scaleLandmarkY } from "./projections";
 import { predictEI, suggestedTechnique } from "./exposure";
 import { renderRadiograph, preloadRadiographAssets } from "./render-radiograph";
 import type { PathologyId } from "./requests";
-import { requestById } from "./requests";
+import { IMAGING_REQUESTS, requestById } from "./requests";
 
 preloadRadiographAssets(PROJECTIONS);
 
 function defaultEquipment(placement: PlacementMode = "table"): RoomEquipment {
   if (placement === "upright-bucky" || placement === "standing") {
-    return {
-      patientX: 0,
-      patientY: 0,
-      patientZ: 0,
-      tableHeight: 0.9,
-      tableX: 0,
-      tableZ: 0,
-      buckyHeight: 1.1,
-      buckyTilt: 0,
-      placement,
-    };
+    return { patientX: 0, patientY: 0, patientZ: 0, tableHeight: 0.9, tableX: 0, tableZ: 0, buckyHeight: 1.1, buckyTilt: 0, placement };
   }
   if (placement === "seated") {
-    return {
-      patientX: 0,
-      patientY: -0.35,
-      patientZ: 0,
-      tableHeight: 0.9,
-      tableX: 0,
-      tableZ: 0,
-      buckyHeight: 0.95,
-      buckyTilt: 0,
-      placement,
-    };
+    return { patientX: 0, patientY: -0.35, patientZ: 0, tableHeight: 0.9, tableX: 0, tableZ: 0, buckyHeight: 0.95, buckyTilt: 0, placement };
   }
-  return {
-    patientX: 0,
-    patientY: 0,
-    patientZ: 0,
-    tableHeight: 0.9,
-    tableX: 0,
-    tableZ: 0,
-    buckyHeight: 1.1,
-    buckyTilt: 0,
-    placement: "table",
-  };
+  return { patientX: 0, patientY: 0, patientZ: 0, tableHeight: 0.9, tableX: 0, tableZ: 0, buckyHeight: 1.1, buckyTilt: 0, placement: "table" };
 }
 
 function placementFromProjection(projectionId: string): PlacementMode {
@@ -67,48 +37,6 @@ function placementFromProjection(projectionId: string): PlacementMode {
   if (p.setup === "wall") return "upright-bucky";
   if (p.setup === "tabletop") return "table";
   return "table";
-}
-
-export interface SimStore {
-  screen: Screen;
-  mode: Mode;
-  patientId: string;
-  projectionId: string;
-  requestId: string | null;
-  pathologyId: PathologyId;
-  pose: SimPose;
-  tube: TubeState;
-  exposure: ExposureState;
-  equipment: RoomEquipment;
-  showLandmarks: boolean;
-  showLightField: boolean;
-  setShowLandmarks: (v: boolean) => void;
-  setShowLightField: (v: boolean) => void;
-  preparing: boolean;
-  exposing: boolean;
-  result: RadiographResult | null;
-  error: string | null;
-  setScreen: (s: Screen) => void;
-  setMode: (m: Mode) => void;
-  setPatient: (id: string) => void;
-  setProjection: (id: string) => void;
-  startExam: (projectionId: string, patientId?: string, requestId?: string) => void;
-  confirmSetup: (placement: PlacementMode) => void;
-  patchPose: (p: Partial<SimPose>) => void;
-  patchTube: (t: Partial<TubeState>) => void;
-  patchExposure: (e: Partial<ExposureState>) => void;
-  patchEquipment: (e: Partial<RoomEquipment>) => void;
-  applyHandbook: () => void;
-  applySuggestedFactors: () => void;
-  setLandmarkCR: (landmarkY: number, landmarkX: number) => void;
-  predictedEI: () => number;
-  prepare: () => void;
-  expose: () => Promise<void>;
-  retake: () => void;
-}
-
-function safeProjectionId(id: string): string {
-  return PROJECTIONS.some((p) => p.id === id) ? id : "pa-chest";
 }
 
 function presentedPose(projectionId: string, placement?: PlacementMode): SimPose {
@@ -134,12 +62,12 @@ function presentedTube(projectionId: string, patientId: string, mode: Mode): Tub
   const jitter = (span: number) => (Math.random() - 0.5) * span;
   const assess = mode === "assessment";
   return {
-    crY: scaleLandmarkY(42, patient.heightCm) + (assess ? jitter(8) : 0),
-    crX: assess ? jitter(4) : 0,
-    sid: p.setup === "wall" ? 180 : 100,
-    angle: 0,
-    collimationW: p.irW,
-    collimationH: p.irH,
+    crY: scaleLandmarkY(p.cr.y, patient.heightCm) + (assess ? jitter(8) : 0),
+    crX: p.cr.x * (p.anatomy === "torso-ap" || p.anatomy === "torso-lat" ? patient.morph.torsoWidth : 1) + (assess ? jitter(4) : 0),
+    sid: p.sidCm,
+    angle: p.tubeAngle,
+    collimationW: p.collimationW,
+    collimationH: p.collimationH,
     lockedToDetector: true,
   };
 }
@@ -154,15 +82,14 @@ function defaultExposure(projectionId: string, patientId: string): ExposureState
     kvp = sug.kvp;
     mas = sug.mas;
   } catch {
-    /* keep handbook defaults */
+    /* handbook values remain */
   }
-  return {
-    kvp,
-    mas,
-    grid: p.grid,
-    focalSpot: p.setup === "tabletop" ? "fine" : "broad",
-    marker: "R",
-  };
+  return { kvp, mas, grid: p.grid, focalSpot: p.setup === "tabletop" ? "fine" : "broad", marker: "R" };
+}
+
+function assessmentExposure(projectionId: string): ExposureState {
+  const p = projectionById(projectionId);
+  return { kvp: p.kvp, mas: p.mas, grid: p.grid, focalSpot: p.setup === "tabletop" ? "fine" : "broad", marker: "R" };
 }
 
 function playConsoleSound(kind: "prep" | "expose") {
@@ -170,27 +97,20 @@ function playConsoleSound(kind: "prep" | "expose") {
     const ctx = new AudioContext();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
+    osc.connect(gain); gain.connect(ctx.destination);
     if (kind === "prep") {
-      osc.frequency.value = 90;
-      osc.type = "sawtooth";
+      osc.frequency.value = 90; osc.type = "sawtooth";
       gain.gain.setValueAtTime(0.02, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.06, ctx.currentTime + 0.4);
-      osc.start();
-      osc.stop(ctx.currentTime + 1.2);
+      osc.start(); osc.stop(ctx.currentTime + 1.2);
     } else {
-      osc.frequency.value = 880;
-      osc.type = "square";
+      osc.frequency.value = 880; osc.type = "square";
       gain.gain.setValueAtTime(0.05, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.2);
+      osc.start(); osc.stop(ctx.currentTime + 0.2);
     }
     window.setTimeout(() => void ctx.close(), 1500);
-  } catch {
-    /* autoplay may be blocked */
-  }
+  } catch { /* autoplay may be blocked */ }
 }
 
 function handbookPose(projectionId: string): SimPose {
@@ -213,10 +133,9 @@ function handbookPose(projectionId: string): SimPose {
 function handbookTube(projectionId: string, patientId: string): TubeState {
   const p = projectionById(projectionId);
   const patient = patientById(patientId);
-  const isLocal = !["torso-ap", "torso-lat", "cspine-lat", "shoulder-ap"].includes(p.anatomy);
   return {
-    crY: isLocal ? p.cr.y : scaleLandmarkY(p.cr.y, patient.heightCm),
-    crX: isLocal ? p.cr.x : p.cr.x * patient.morph.torsoWidth,
+    crY: scaleLandmarkY(p.cr.y, patient.heightCm),
+    crX: p.cr.x * (p.anatomy === "torso-ap" || p.anatomy === "torso-lat" ? patient.morph.torsoWidth : 1),
     sid: p.sidCm,
     angle: p.tubeAngle,
     collimationW: p.collimationW,
@@ -225,6 +144,61 @@ function handbookTube(projectionId: string, patientId: string): TubeState {
   };
 }
 
+function tableLongitudinalTarget(projectionId: string, patientId: string): number {
+  const patient = patientById(patientId);
+  const p = projectionById(projectionId);
+  const patientHeightM = patient.heightCm / 100;
+  const targetLocalY = (scaleLandmarkY(p.cr.y, patient.heightCm) / patient.heightCm) * patientHeightM;
+  // The recumbent patient is rotated -90° about X: local +Y points toward table -Z.
+  return -(targetLocalY - patientHeightM * 0.5);
+}
+
+export interface SimStore {
+  screen: Screen;
+  mode: Mode;
+  patientId: string;
+  projectionId: string;
+  requestId: string | null;
+  pathologyId: PathologyId;
+  viewIndex: number;
+  completedRequestIds: string[];
+  pose: SimPose;
+  tube: TubeState;
+  exposure: ExposureState;
+  equipment: RoomEquipment;
+  showLandmarks: boolean;
+  showLightField: boolean;
+  setShowLandmarks: (v: boolean) => void;
+  setShowLightField: (v: boolean) => void;
+  preparing: boolean;
+  exposing: boolean;
+  result: RadiographResult | null;
+  error: string | null;
+  setScreen: (s: Screen) => void;
+  setMode: (m: Mode) => void;
+  setPatient: (id: string) => void;
+  setProjection: (id: string) => void;
+  startExam: (projectionId: string, patientId?: string, requestId?: string, viewIndex?: number) => void;
+  confirmSetup: (placement: PlacementMode) => void;
+  patchPose: (p: Partial<SimPose>) => void;
+  patchTube: (t: Partial<TubeState>) => void;
+  patchExposure: (e: Partial<ExposureState>) => void;
+  patchEquipment: (e: Partial<RoomEquipment>) => void;
+  applyHandbook: () => void;
+  applySuggestedFactors: () => void;
+  setLandmarkCR: (landmarkY: number, landmarkX: number) => void;
+  predictedEI: () => number;
+  prepare: () => void;
+  expose: () => Promise<void>;
+  retake: () => void;
+  nextRequestedView: () => void;
+  completeCurrentRequest: () => void;
+  startNextRequest: () => void;
+  resetRequests: () => void;
+}
+
+function safeProjectionId(id: string): string { return PROJECTIONS.some((p) => p.id === id) ? id : "pa-chest"; }
+
 export const useSim = create<SimStore>((set, get) => ({
   screen: "library",
   mode: "practice",
@@ -232,6 +206,8 @@ export const useSim = create<SimStore>((set, get) => ({
   projectionId: "pa-chest",
   requestId: null,
   pathologyId: "none",
+  viewIndex: 0,
+  completedRequestIds: [],
   pose: presentedPose("pa-chest"),
   tube: presentedTube("pa-chest", "amara", "practice"),
   exposure: defaultExposure("pa-chest", "amara"),
@@ -244,36 +220,34 @@ export const useSim = create<SimStore>((set, get) => ({
   error: null,
 
   setScreen: (screen) => set({ screen }),
-  setMode: (mode) => set({ mode }),
+  setMode: (mode) => {
+    const { projectionId, patientId } = get();
+    set({ mode, exposure: mode === "assessment" ? assessmentExposure(projectionId) : defaultExposure(projectionId, patientId), showLandmarks: mode === "practice" });
+  },
   setShowLandmarks: (showLandmarks) => set({ showLandmarks }),
   setShowLightField: (showLightField) => set({ showLightField }),
   setPatient: (patientId) => set({ patientId }),
   setProjection: (projectionId) => {
     const { patientId, mode } = get();
     const pid = safeProjectionId(projectionId);
-    set({
-      projectionId: pid,
-      pose: presentedPose(pid),
-      tube: presentedTube(pid, patientId, mode),
-      exposure: defaultExposure(pid, patientId),
-      equipment: defaultEquipment(placementFromProjection(pid)),
-      result: null,
-    });
+    set({ projectionId: pid, pose: presentedPose(pid), tube: presentedTube(pid, patientId, mode), exposure: mode === "assessment" ? assessmentExposure(pid) : defaultExposure(pid, patientId), equipment: defaultEquipment(placementFromProjection(pid)), result: null, viewIndex: 0 });
   },
-  startExam: (projectionId, patientId, requestId) => {
+  startExam: (projectionId, patientId, requestId, viewIndex = 0) => {
     const pid = patientId ?? get().patientId;
     const { mode } = get();
     const safeId = safeProjectionId(projectionId);
     const req = requestId ? requestById(requestId) : null;
     const place = placementFromProjection(safeId);
+    const exposure = mode === "assessment" ? assessmentExposure(safeId) : defaultExposure(safeId, pid);
     set({
       projectionId: safeId,
       patientId: pid,
       requestId: requestId ?? null,
       pathologyId: req?.pathologyId ?? "none",
+      viewIndex,
       pose: presentedPose(safeId, place),
       tube: { ...presentedTube(safeId, pid, mode), ...handbookTube(safeId, pid), lockedToDetector: true },
-      exposure: defaultExposure(safeId, pid),
+      exposure,
       equipment: defaultEquipment(place),
       result: null,
       error: null,
@@ -284,11 +258,7 @@ export const useSim = create<SimStore>((set, get) => ({
   },
   confirmSetup: (placement) => {
     const { projectionId } = get();
-    set({
-      equipment: defaultEquipment(placement),
-      pose: presentedPose(projectionId, placement),
-      screen: "room",
-    });
+    set({ equipment: defaultEquipment(placement), pose: presentedPose(projectionId, placement), screen: "room" });
   },
   patchPose: (p) => set({ pose: { ...get().pose, ...p } }),
   patchTube: (t) => set({ tube: { ...get().tube, ...t } }),
@@ -296,70 +266,63 @@ export const useSim = create<SimStore>((set, get) => ({
   patchEquipment: (e) => {
     const cur = get().equipment;
     const next = { ...cur, ...e };
-    if (next.placement === "upright-bucky" || next.placement === "standing" || next.placement === "seated") {
-      next.patientZ = Math.max(-0.12, Math.min(0.35, next.patientZ));
-    } else {
-      next.patientY = Math.max(-0.02, Math.min(0.35, next.patientY));
-    }
+    if (next.placement === "upright-bucky" || next.placement === "standing" || next.placement === "seated") next.patientZ = Math.max(-0.12, Math.min(0.35, next.patientZ));
+    else next.patientY = Math.max(-0.02, Math.min(0.35, next.patientY));
     set({ equipment: next });
   },
   applyHandbook: () => {
     const { projectionId, patientId } = get();
-    set({
-      pose: handbookPose(projectionId),
-      tube: handbookTube(projectionId, patientId),
-    });
+    set({ pose: handbookPose(projectionId), tube: handbookTube(projectionId, patientId) });
   },
   applySuggestedFactors: () => {
     const { projectionId, patientId, exposure } = get();
     try {
       const sug = suggestedTechnique(patientById(patientId), projectionById(projectionId));
       set({ exposure: { ...exposure, ...sug, grid: projectionById(projectionId).grid } });
-    } catch {
-      /* keep current */
-    }
+    } catch { /* keep current */ }
   },
-  setLandmarkCR: (landmarkY, landmarkX) => {
-    set({ tube: { ...get().tube, crY: landmarkY, crX: landmarkX } });
-  },
+  setLandmarkCR: (landmarkY, landmarkX) => set({ tube: { ...get().tube, crY: landmarkY, crX: landmarkX } }),
   predictedEI: () => {
     const s = get();
-    try {
-      return predictEI(patientById(s.patientId), projectionById(s.projectionId), s.exposure, s.tube);
-    } catch {
-      return 250;
-    }
+    try { return predictEI(patientById(s.patientId), projectionById(s.projectionId), s.exposure, s.tube); } catch { return 250; }
   },
   prepare: () => {
-    playConsoleSound("prep");
-    set({ preparing: true });
-    window.setTimeout(() => {
-      if (get().preparing) set({ preparing: false });
-    }, 4000);
+    playConsoleSound("prep"); set({ preparing: true });
+    window.setTimeout(() => { if (get().preparing) set({ preparing: false }); }, 4000);
   },
   expose: async () => {
     const s = get();
     if (s.exposing) return;
-    playConsoleSound("expose");
-    set({ exposing: true, error: null, preparing: false });
+    playConsoleSound("expose"); set({ exposing: true, error: null, preparing: false });
     try {
-      const result = await renderRadiograph({
-        patient: patientById(s.patientId),
-        projection: projectionById(s.projectionId),
-        pose: s.pose,
-        tube: s.tube,
-        exposure: s.exposure,
-        pathologyId: s.pathologyId,
-      });
+      const result = await renderRadiograph({ patient: patientById(s.patientId), projection: projectionById(s.projectionId), pose: s.pose, tube: s.tube, exposure: s.exposure, pathologyId: s.pathologyId });
       set({ result, screen: "viewer", exposing: false });
     } catch (err) {
-      set({
-        exposing: false,
-        error: err instanceof Error ? err.message : "Exposure failed",
-      });
+      set({ exposing: false, error: err instanceof Error ? err.message : "Exposure failed" });
     }
   },
   retake: () => set({ screen: "room", result: null }),
+  nextRequestedView: () => {
+    const s = get();
+    const req = s.requestId ? requestById(s.requestId) : null;
+    const nextIndex = s.viewIndex + 1;
+    const nextProjection = req?.requestedProjections[nextIndex];
+    if (!req || !nextProjection) { set({ screen: "room", result: null }); return; }
+    get().startExam(nextProjection, req.patientId, req.id, nextIndex);
+  },
+  completeCurrentRequest: () => {
+    const s = get();
+    if (!s.requestId) { set({ screen: "library", result: null }); return; }
+    const completed = s.completedRequestIds.includes(s.requestId) ? s.completedRequestIds : [...s.completedRequestIds, s.requestId];
+    set({ completedRequestIds: completed, result: null, screen: "library" });
+  },
+  startNextRequest: () => {
+    const s = get();
+    const next = IMAGING_REQUESTS.find((r) => !s.completedRequestIds.includes(r.id));
+    if (!next) { set({ screen: "library", result: null }); return; }
+    get().startExam(next.requestedProjections[0] ?? "pa-chest", next.patientId, next.id, 0);
+  },
+  resetRequests: () => set({ completedRequestIds: [], requestId: null, result: null, screen: "library", viewIndex: 0 }),
 }));
 
 export { PATIENTS, PROJECTIONS };
