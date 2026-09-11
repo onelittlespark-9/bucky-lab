@@ -1,6 +1,7 @@
 import type { CriterionScore, ExposureMetrics, ExposureState, Grade, Patient, Projection, SimPose, TubeState } from "./types";
 import { partThickness } from "./exposure";
 import { scaleLandmarkY } from "./projections";
+import { projectionGeometry } from "./projection-physics";
 
 function gradeFromError(err: number, excellent: number, acceptable: number): Grade { if (err <= excellent) return "excellent"; if (err <= acceptable) return "acceptable"; return "repeat"; }
 
@@ -60,6 +61,35 @@ export function scoreExposure(args: { patient: Patient; projection: Projection; 
   scores.push({ id: "sid", label: "FFD / SID", weight: 0.7, grade: gradeFromError(sidErr, 8, 20), detail: `${tube.sid.toFixed(0)} cm (handbook ${projection.sidCm} cm)` });
   const angErr = Math.abs(tube.angle - projection.tubeAngle);
   scores.push({ id: "angle", label: "Tube angle", weight: 0.8, grade: gradeFromError(angErr, 3, 8), detail: projection.tubeAngle === 0 ? `Beam ${tube.angle.toFixed(0)}° (should be perpendicular)` : `${tube.angle.toFixed(0)}° vs handbook ${projection.tubeAngle}° cranial` });
+
+  const geometry = projectionGeometry(projection, tube, pose);
+  const magGrade = geometry.magnification <= 1.04 ? "excellent" : geometry.magnification <= 1.08 ? "acceptable" : "repeat";
+  scores.push({
+    id: "magnification",
+    label: "Magnification / OID",
+    weight: 0.9,
+    grade: magGrade,
+    detail: `Estimated OID ${geometry.oidCm.toFixed(1)} cm; magnification ${geometry.magnification.toFixed(3)}×. Keep the anatomy close to the IR when accurate size matters.`,
+  });
+
+  const blurGrade = geometry.geometricUnsharpnessMm <= 0.05 ? "excellent" : geometry.geometricUnsharpnessMm <= 0.12 ? "acceptable" : "repeat";
+  scores.push({
+    id: "geometric-unsharpness",
+    label: "Geometric sharpness",
+    weight: 0.7,
+    grade: blurGrade,
+    detail: `Estimated geometric unsharpness ${geometry.geometricUnsharpnessMm.toFixed(2)} mm from focal-spot/OID/SOD geometry.`,
+  });
+
+  const projectionError = geometry.projectedOffsetCm;
+  const beamProjectionGrade = projectionError <= 0.5 ? "excellent" : projectionError <= 1.5 ? "acceptable" : "repeat";
+  scores.push({
+    id: "projection-geometry",
+    label: "Beam geometry",
+    weight: 0.8,
+    grade: beamProjectionGrade,
+    detail: projectionError <= 0.5 ? "Central ray is close to perpendicular to the anatomy/IR relationship." : `Angulation and/or OID produces an estimated ${projectionError.toFixed(1)} cm projected offset. Expect shape distortion.`,
+  });
 
   const rot = Math.abs(pose.rotationY), needLateral = projection.anatomy.includes("lat");
   let rotGrade: Grade = "excellent", rotDetail = `Rotation ${pose.rotationY.toFixed(0)}°.`;
