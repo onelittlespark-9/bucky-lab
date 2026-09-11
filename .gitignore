@@ -20,3 +20,6 @@ coverage/
 *.local
 AGENTS.md
 AGENTS.project.md
+
+# Build-time Human Atlas assets (downloaded by prebuild)
+public/models/human-atlas/
