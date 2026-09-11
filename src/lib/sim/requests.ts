@@ -131,10 +131,9 @@ export interface ImagingRequest {
 /**
  * 20 imaging requests using ONLY projection IDs that currently exist.
  * Only 1 is deliberately invalid (~5%).
- * Chest requests follow clinical standards: PA only unless immobile; lateral only for specific indications (e.g. pacemaker check).
+ * Chest: PA only unless immobile; lateral only for specific indications (e.g. pacemaker).
  */
 export const IMAGING_REQUESTS: ImagingRequest[] = [
-  // 1. INVALID – FOOSH wrong side
   {
     id: "req-foosh-wrong-side",
     title: "Wrist – FOOSH",
@@ -152,8 +151,6 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     region: "Upper limb",
     urgency: "urgent",
   },
-
-  // 2. Chest – acute (PA only – patient is mobile)
   {
     id: "req-chest-sob",
     title: "Chest – shortness of breath",
@@ -168,8 +165,6 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     region: "Thorax",
     urgency: "urgent",
   },
-
-  // 3. Wrist / scaphoid
   {
     id: "req-scaphoid",
     title: "Scaphoid series",
@@ -185,8 +180,6 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     region: "Upper limb",
     urgency: "urgent",
   },
-
-  // 4. Shoulder / humerus
   {
     id: "req-humerus",
     title: "Humerus / shoulder – trauma",
@@ -202,8 +195,6 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     region: "Upper limb",
     urgency: "urgent",
   },
-
-  // 5. Hip / femur
   {
     id: "req-femur",
     title: "Hip / femur – fall",
@@ -219,8 +210,6 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     region: "Pelvis & hips",
     urgency: "urgent",
   },
-
-  // 6. Knee / tib-fib area
   {
     id: "req-tibfib",
     title: "Tibia & fibula / knee",
@@ -236,14 +225,12 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     region: "Lower limb",
     urgency: "urgent",
   },
-
-  // 7. Facial / skull area
   {
     id: "req-facial",
     title: "Facial bones",
     clinicalHistory:
       "Assault. Blow to the face. Pain over the left zygoma and periorbital swelling. ?zygomatic fracture",
-    requestedProjections: ["skull-lat"],
+    requestedProjections: ["lat-skull"],
     requestedViewsLabel: "Facial bones – OM and lateral",
     requestedLaterality: null,
     patientId: "tomas",
@@ -252,8 +239,6 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     region: "Skull",
     urgency: "urgent",
   },
-
-  // 8. Ankle / foot
   {
     id: "req-ankle",
     title: "Ankle – inversion injury",
@@ -269,8 +254,6 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     region: "Lower limb",
     urgency: "urgent",
   },
-
-  // 9. Knee
   {
     id: "req-knee",
     title: "Knee – trauma",
@@ -286,8 +269,6 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     region: "Lower limb",
     urgency: "urgent",
   },
-
-  // 10. Shoulder
   {
     id: "req-shoulder",
     title: "Shoulder – dislocation?",
@@ -303,8 +284,6 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     region: "Upper limb",
     urgency: "urgent",
   },
-
-  // 11. Lumbar spine
   {
     id: "req-lumbar",
     title: "Lumbar spine – back pain",
@@ -318,8 +297,6 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     region: "Spine",
     urgency: "routine",
   },
-
-  // 12. Elbow
   {
     id: "req-elbow",
     title: "Elbow – FOOSH",
@@ -335,8 +312,6 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     region: "Upper limb",
     urgency: "urgent",
   },
-
-  // 13. Foot
   {
     id: "req-foot",
     title: "Foot – trauma",
@@ -352,8 +327,6 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     region: "Lower limb",
     urgency: "urgent",
   },
-
-  // 14. C-spine
   {
     id: "req-cspine",
     title: "Cervical spine – trauma",
@@ -368,8 +341,6 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     region: "Spine",
     urgency: "stat",
   },
-
-  // 15. Hand
   {
     id: "req-hand",
     title: "Hand – punch injury",
@@ -385,8 +356,6 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     region: "Upper limb",
     urgency: "urgent",
   },
-
-  // 16. Hip / NOF
   {
     id: "req-hip",
     title: "Hip – fall",
@@ -402,8 +371,6 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     region: "Pelvis & hips",
     urgency: "stat",
   },
-
-  // 17. Abdomen
   {
     id: "req-abdomen",
     title: "Abdomen – acute pain",
@@ -417,8 +384,6 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     region: "Abdomen",
     urgency: "urgent",
   },
-
-  // 18. Wrist valid
   {
     id: "req-wrist-valid",
     title: "Wrist – FOOSH (correct side)",
@@ -433,8 +398,6 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     region: "Upper limb",
     urgency: "urgent",
   },
-
-  // 19. Chest pre-op (PA only)
   {
     id: "req-chest-preop",
     title: "Chest – pre-operative",
@@ -448,8 +411,6 @@ export const IMAGING_REQUESTS: ImagingRequest[] = [
     region: "Thorax",
     urgency: "routine",
   },
-
-  // 20. Lateral chest – appropriate indication (pacemaker check)
   {
     id: "req-chest-pacemaker",
     title: "Chest – pacemaker check",
