@@ -41,19 +41,14 @@ async function loadAtlas(): Promise<THREE.Group> {
   const atlas = (await response.json()) as AtlasManifest;
   const skeleton = atlas.parts.filter(part => part.system === "skeletal");
   if (!skeleton.length) throw new Error("Human Atlas contains no skeletal structures.");
-  const root = new THREE.Group();
-  root.name = "BodyParts3D-Human-Atlas-Skeleton";
+  const root = new THREE.Group(); root.name = "BodyParts3D-Human-Atlas-Skeleton";
   const chunks = new Map<number, Array<{ part: AtlasPart; buffer: ArrayBuffer }>>();
   await Promise.all([...new Set(skeleton.map(p => p.chunk))].map(async chunkIndex => {
-    const chunk = atlas.chunks[chunkIndex];
-    if (!chunk) throw new Error(`Human Atlas chunk ${chunkIndex} is missing from the manifest.`);
-    const r = await fetch(chunk.url, { cache: "force-cache" });
-    if (!r.ok) throw new Error(`Human Atlas chunk ${chunkIndex} failed to load (${r.status}).`);
-    const buffer = await r.arrayBuffer();
-    if (buffer.byteLength !== chunk.bytes) throw new Error(`Human Atlas chunk ${chunkIndex} is incomplete.`);
+    const chunk = atlas.chunks[chunkIndex]; if (!chunk) throw new Error(`Human Atlas chunk ${chunkIndex} is missing from the manifest.`);
+    const r = await fetch(chunk.url, { cache: "force-cache" }); if (!r.ok) throw new Error(`Human Atlas chunk ${chunkIndex} failed to load (${r.status}).`);
+    const buffer = await r.arrayBuffer(); if (buffer.byteLength !== chunk.bytes) throw new Error(`Human Atlas chunk ${chunkIndex} is incomplete.`);
     chunks.set(chunkIndex, skeleton.filter(p => p.chunk === chunkIndex).map(part => ({ part, buffer })));
   }));
-
   for (const { part, buffer } of [...chunks.values()].flat()) {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(buffer, part.positions, part.vertexCount * 3), 3));
@@ -67,12 +62,8 @@ async function loadAtlas(): Promise<THREE.Group> {
     const material = new THREE.MeshStandardMaterial({ color: "#ded8c4", roughness: 0.78, metalness: 0.02, transparent: true, opacity: 0.32, side: THREE.DoubleSide, depthWrite: true });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.name = `Human Atlas bone ${part.name}`;
-    mesh.userData.atlasRegion = region;
-    mesh.userData.atlasSide = side;
-    mesh.userData.atlasPivot = pivot;
-    mesh.position.copy(pivot);
-    mesh.castShadow = true; mesh.receiveShadow = true;
-    root.add(mesh);
+    mesh.userData.atlasRegion = region; mesh.userData.atlasSide = side; mesh.userData.atlasPivot = pivot;
+    mesh.position.copy(pivot); mesh.castShadow = true; mesh.receiveShadow = true; root.add(mesh);
   }
   return root;
 }
@@ -94,19 +85,45 @@ function articulate(root: THREE.Group, pose: { shoulderRoll: number; armRaise: n
   const elbowAngle = THREE.MathUtils.clamp(pose.elbowFlex, 0, 135) * Math.PI / 180;
   const hipAngle = THREE.MathUtils.clamp(pose.hipInternal, -45, 45) * Math.PI / 180;
   const kneeAngle = THREE.MathUtils.clamp(pose.kneeFlex, 0, 135) * Math.PI / 180;
+  const zAxis = new THREE.Vector3(0, 0, 1); const xAxis = new THREE.Vector3(1, 0, 0);
+  const transformPoint = (point: THREE.Vector3, pivot: THREE.Vector3, q: THREE.Quaternion) => point.sub(pivot).applyQuaternion(q).add(pivot);
   root.children.forEach(object => {
     if (!(object instanceof THREE.Mesh)) return;
-    const region = object.userData.atlasRegion as BoneRegion; const side = object.userData.atlasSide as -1 | 1;
-    object.rotation.set(0, 0, 0);
+    const region = object.userData.atlasRegion as BoneRegion; const side = object.userData.atlasSide as -1 | 1; const pivot = object.userData.atlasPivot as THREE.Vector3;
+    object.rotation.set(0, 0, 0); object.position.copy(pivot);
     if (region === "axial" || region === "pelvis") return;
-    if (region === "scapula") { object.rotation.y = -side * shoulderAngle * 0.75; object.position.z = object.userData.atlasPivot.z + 0.035 * (shoulderAngle / THREE.MathUtils.degToRad(28)); object.position.x = object.userData.atlasPivot.x + side * 0.018 * (shoulderAngle / THREE.MathUtils.degToRad(28)); }
-    else if (region === "clavicle") { object.rotation.z = -side * shoulderAngle * 0.35; object.position.z = object.userData.atlasPivot.z + 0.018 * (shoulderAngle / THREE.MathUtils.degToRad(28)); }
-    else if (region === "upperArm") { object.rotation.z = -side * raiseAngle; object.rotation.x = -shoulderAngle * 0.65; object.position.z = object.userData.atlasPivot.z + 0.025 * Math.sin(shoulderAngle); }
-    else if (region === "forearm") { object.rotation.x = -shoulderAngle * 0.65; object.rotation.z = -side * (raiseAngle + elbowAngle); }
-    else if (region === "hand") { object.rotation.x = -shoulderAngle * 0.65; object.rotation.z = -side * (raiseAngle + elbowAngle); }
-    else if (region === "thigh") { object.rotation.z = side * hipAngle * 0.55; }
-    else if (region === "lowerLeg") { object.rotation.z = side * hipAngle * 0.35; object.rotation.x = -kneeAngle; }
-    else if (region === "foot") { object.rotation.x = -kneeAngle * 0.25; }
+
+    if (region === "scapula") {
+      const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, -side * shoulderAngle * 0.75, 0, "XYZ"));
+      object.quaternion.copy(q); object.position.z = pivot.z + 0.035 * (shoulderAngle / THREE.MathUtils.degToRad(28)); object.position.x = pivot.x + side * 0.018 * (shoulderAngle / THREE.MathUtils.degToRad(28));
+      return;
+    }
+    if (region === "clavicle") {
+      object.rotation.z = -side * shoulderAngle * 0.35; object.position.z = pivot.z + 0.018 * (shoulderAngle / THREE.MathUtils.degToRad(28));
+      return;
+    }
+
+    const shoulderQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(-shoulderAngle * 0.65, 0, -side * raiseAngle, "XYZ"));
+    const shoulderPivot = new THREE.Vector3(pivot.x, 0.79 * (ATLAS_HEIGHT_M), pivot.z);
+    const elbowPivot = new THREE.Vector3(side * Math.max(0.09, Math.abs(pivot.x)), 0.63 * ATLAS_HEIGHT_M, pivot.z);
+    const elbowQ = new THREE.Quaternion().setFromAxisAngle(zAxis, -side * elbowAngle);
+
+    if (region === "upperArm") {
+      object.quaternion.copy(shoulderQ); object.position.copy(pivot); transformPoint(object.position, shoulderPivot, shoulderQ); return;
+    }
+    if (region === "forearm" || region === "hand") {
+      const chainQ = shoulderQ.clone().multiply(elbowQ);
+      const chainPivot = elbowPivot.clone(); transformPoint(chainPivot, shoulderPivot, shoulderQ);
+      object.quaternion.copy(chainQ); object.position.copy(pivot); transformPoint(object.position, shoulderPivot, shoulderQ); transformPoint(object.position, chainPivot, elbowQ); return;
+    }
+    if (region === "thigh" || region === "lowerLeg" || region === "foot") {
+      const hipQ = new THREE.Quaternion().setFromAxisAngle(zAxis, side * hipAngle * 0.55);
+      const hipPivot = new THREE.Vector3(pivot.x, 0.47 * ATLAS_HEIGHT_M, pivot.z);
+      if (region === "thigh") { object.quaternion.copy(hipQ); transformPoint(object.position, hipPivot, hipQ); return; }
+      const kneePivot = new THREE.Vector3(pivot.x, 0.245 * ATLAS_HEIGHT_M, pivot.z); transformPoint(kneePivot, hipPivot, hipQ);
+      const kneeQ = new THREE.Quaternion().setFromAxisAngle(xAxis, -kneeAngle);
+      object.quaternion.copy(hipQ.clone().multiply(kneeQ)); transformPoint(object.position, hipPivot, hipQ); transformPoint(object.position, kneePivot, kneeQ);
+    }
   });
 }
 
