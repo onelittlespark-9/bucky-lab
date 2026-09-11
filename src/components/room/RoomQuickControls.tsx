@@ -1,4 +1,5 @@
-import { Html, OrbitControls, useThree } from "@react-three/drei";
+import { Html, OrbitControls } from "@react-three/drei";
+import { useThree } from "@react-three/fiber";
 import { useRef, type CSSProperties, type MutableRefObject } from "react";
 import * as THREE from "three";
 import { useSim } from "@/lib/sim/store";
