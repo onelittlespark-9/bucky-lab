@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+
+  --color-bg: #0a0c0e;
+  --color-surface: #12161a;
+  --color-elevated: #1a2026;
+  --color-panel: #161c22;
+  --color-fg: #e8ece9;
+  --color-muted: #8b9590;
+  --color-subtle: #6a736e;
+  --color-border: #2a3338;
+  --color-accent: #7d9a8a;
+  --color-accent-fg: #0a0c0e;
+  --color-field: #e2c35a;
+  --color-ok: #7d9a8a;
+  --color-warn: #c4a574;
+  --color-danger: #c47a74;
+  --color-expose: #d7ddd8;
+  --color-well: #050607;
+
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  html,
+  body,
+  #app {
+    min-height: 100%;
+    background: var(--color-bg);
+    color: var(--color-fg);
+  }
+
+  body {
+    font-family: var(--font-sans);
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
