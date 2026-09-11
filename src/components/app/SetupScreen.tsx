@@ -3,6 +3,7 @@ import { patientById } from "@/lib/sim/patients";
 import { projectionById } from "@/lib/sim/projections";
 import { requestFromBank } from "@/lib/sim/request-bank";
 import { requestSpecificity } from "@/lib/sim/request-specificity";
+import { poseForExtremityPlacement } from "@/lib/sim/extremity-kinematics";
 import type { PlacementMode } from "@/lib/sim/types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -24,7 +25,9 @@ export function SetupScreen() {
   const patientId = useSim((s) => s.patientId);
   const requestId = useSim((s) => s.requestId);
   const equipment = useSim((s) => s.equipment);
+  const pose = useSim((s) => s.pose);
   const confirmSetup = useSim((s) => s.confirmSetup);
+  const patchPose = useSim((s) => s.patchPose);
   const setScreen = useSim((s) => s.setScreen);
   const patchEquipment = useSim((s) => s.patchEquipment);
   const projection = projectionById(projectionId);
@@ -33,6 +36,11 @@ export function SetupScreen() {
   const specificity = request ? requestSpecificity(request) : null;
   const selected = equipment.placement;
   const suggested: PlacementMode = projection.setup === "wall" ? "upright-bucky" : "table";
+
+  const enterRoom = () => {
+    confirmSetup(selected);
+    patchPose(poseForExtremityPlacement(projectionId, selected, equipment.buckyTilt, pose));
+  };
 
   return (
     <div className="flex min-h-dvh flex-col bg-bg">
@@ -62,7 +70,7 @@ export function SetupScreen() {
           Use the upright bucky for standing or seated limb work, or tilt the bucky to 90° for a table-top detector position. Hands, wrists, elbows, knees, ankles and feet can therefore be presented against the detector without forcing every examination onto the fixed X-ray table.
           <div className="mt-2 flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={()=>patchEquipment({placement:"upright-bucky",buckyTilt:90})}>Tilt bucky 90° · table position</Button><Button size="sm" variant="outline" onClick={()=>patchEquipment({placement:"upright-bucky",buckyTilt:0})}>Return upright</Button></div>
         </div>
-        <div className="mt-auto flex flex-col gap-2 pt-4"><Button variant="solid" size="lg" className="w-full" onClick={()=>confirmSetup(selected)}>Enter room with this setup</Button><Button variant="ghost" className="w-full" onClick={()=>setScreen("library")}>Back to library</Button></div>
+        <div className="mt-auto flex flex-col gap-2 pt-4"><Button variant="solid" size="lg" className="w-full" onClick={enterRoom}>Enter room with this setup</Button><Button variant="ghost" className="w-full" onClick={()=>setScreen("library")}>Back to library</Button></div>
       </main>
     </div>
   );
