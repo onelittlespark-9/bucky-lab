@@ -4,59 +4,121 @@ import { useSim } from "@/lib/sim/store";
 import { patientById } from "@/lib/sim/patients";
 import { scaleLandmarkY } from "@/lib/sim/projections";
 import { SHARED_ORGANS, SPINE_LEVELS_CM, RIB_LEVELS_CM, scaleAnatomyCm } from "@/lib/sim/anatomy-structures";
+import { HeartMesh, KidneyMesh, LiverMesh, LungMesh, PelvisMesh, RibMesh, StomachMesh, VertebraMesh } from "./AnatomicalMeshes";
 
 type V3 = [number, number, number];
-function Material({ color, opacity, roughness = .65 }: { color: string; opacity: number; roughness?: number }) { return <meshPhysicalMaterial color={color} transparent opacity={opacity} roughness={roughness} metalness={0} depthWrite={false} depthTest={false} side={THREE.DoubleSide} />; }
-function Organ({ position, scale, color, opacity, rotation = [0, 0, 0] as V3 }: { position: V3; scale: V3; color: string; opacity: number; rotation?: V3 }) { return <mesh position={position} rotation={rotation} scale={scale} renderOrder={8}><sphereGeometry args={[1, 36, 24]} /><Material color={color} opacity={opacity} /></mesh>; }
-function Tube({ a, b, radius, color, opacity }: { a: V3; b: V3; radius: number; color: string; opacity: number }) { const { position, quaternion, length } = useMemo(() => { const start = new THREE.Vector3(...a), end = new THREE.Vector3(...b), d = end.clone().sub(start), length = d.length(), quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize()); return { position: start.add(end).multiplyScalar(.5), quaternion, length }; }, [a, b]); return <mesh position={position} quaternion={quaternion} renderOrder={9}><capsuleGeometry args={[radius, Math.max(.01, length - radius * 2), 10, 16]} /><Material color={color} opacity={opacity} /></mesh>; }
-function Bone({ position, scale, opacity, color = "#e8dfc8" }: { position: V3; scale: V3; opacity: number; color?: string }) { return <mesh position={position} scale={scale} renderOrder={7}><sphereGeometry args={[1, 24, 16]} /><Material color={color} opacity={opacity} roughness={.78} /></mesh>; }
-function LayeredTorso({ H, s, width, depth, exposing, skin }: { H: number; s: number; width: number; depth: number; exposing: boolean; skin: string }) {
-  const muscleOpacity = exposing ? .18 : .055, fatOpacity = exposing ? .11 : .035;
-  const profile = (w: number, h: number, d: number) => [[w * .48, .44 * h], [w * .78, .50 * h], [w * .94, .59 * h], [w * 1.0, .68 * h], [w * .97, .76 * h], [w * .76, .82 * h], [w * .45, .86 * h]] as V3[];
+
+function Material({ color, opacity, roughness = .65 }: { color: string; opacity: number; roughness?: number }) {
+  return <meshPhysicalMaterial color={color} transparent opacity={opacity} roughness={roughness} metalness={0} depthWrite={false} depthTest={false} side={THREE.DoubleSide} />;
+}
+
+function Tube({ points, radius, color, opacity }: { points: V3[]; radius: number; color: string; opacity: number }) {
+  const curve = useMemo(() => new THREE.CatmullRomCurve3(points.map(p => new THREE.Vector3(...p))), [points]);
+  const geometry = useMemo(() => new THREE.TubeGeometry(curve, 18, radius, 8, false), [curve, radius]);
+  return <mesh geometry={geometry} renderOrder={9}><Material color={color} opacity={opacity} /></mesh>;
+}
+
+function LayeredTorso({ H, width, depth, exposing, skin }: { H: number; width: number; depth: number; exposing: boolean; skin: string }) {
+  const muscleOpacity = exposing ? .22 : .065;
+  const fatOpacity = exposing ? .14 : .045;
+  const profile = (w: number, h: number) => [
+    [w * .44, .42 * h], [w * .70, .48 * h], [w * .91, .57 * h], [w * 1.0, .66 * h],
+    [w * .98, .74 * h], [w * .82, .80 * h], [w * .53, .85 * h],
+  ] as [number, number][];
   return <group renderOrder={2}>
-    <mesh scale={[1, 1, Math.max(.5, depth / Math.max(.001, width))]}><latheGeometry args={[profile(width * .98, H, depth), 40]} /><Material color="#b88763" opacity={fatOpacity} /></mesh>
-    <mesh scale={[1, 1, Math.max(.5, depth * .82 / Math.max(.001, width * .92))]}><latheGeometry args={[profile(width * .90, H, depth * .82), 40]} /><Material color="#a75d55" opacity={muscleOpacity} /></mesh>
-    <mesh scale={[1, 1, Math.max(.5, depth * .66 / Math.max(.001, width * .82))]}><latheGeometry args={[profile(width * .80, H, depth * .66), 40]} /><Material color={skin} opacity={exposing ? .025 : .01} /></mesh>
+    <mesh scale={[1, 1, Math.max(.5, depth / Math.max(.001, width))]}>
+      <latheGeometry args={[profile(width * .98, H), 48]} />
+      <Material color="#c18c68" opacity={fatOpacity} />
+    </mesh>
+    <mesh scale={[1, 1, Math.max(.5, depth * .80 / Math.max(.001, width * .90))]}>
+      <latheGeometry args={[profile(width * .90, H), 48]} />
+      <Material color="#a85f56" opacity={muscleOpacity} />
+    </mesh>
+    <mesh scale={[1, 1, Math.max(.5, depth * .62 / Math.max(.001, width * .80))]}>
+      <latheGeometry args={[profile(width * .80, H), 48]} />
+      <Material color={skin} opacity={exposing ? .035 : .012} />
+    </mesh>
+  </group>;
+}
+
+function Skull({ position, scale, opacity }: { position: V3; scale: number; opacity: number }) {
+  return <group position={position} scale={scale} renderOrder={7}>
+    <mesh scale={[.92, 1.08, .86]}><sphereGeometry args={[1, 32, 20]} /><Material color="#e7dfc9" opacity={opacity} roughness={.8} /></mesh>
+    <mesh position={[0, -.48, .22]} scale={[.58, .46, .58]}><sphereGeometry args={[1, 24, 16]} /><Material color="#e7dfc9" opacity={opacity} roughness={.8} /></mesh>
   </group>;
 }
 
 export function InternalAnatomy() {
-  const patientId = useSim(s => s.patientId), projectionId = useSim(s => s.projectionId), exposing = useSim(s => s.exposing);
-  const patient = patientById(patientId), H = patient.heightCm / 100, s = H / 1.7, xScale = patient.morph.torsoWidth * s, zScale = patient.morph.torsoDepth * s;
-  const anatomyOpacity = exposing ? .9 : .32, lateral = projectionId.includes("lat");
-  const Y = { head: .955 * H, neck: .86 * H, clavicle: H - scaleLandmarkY(26, patient.heightCm) / 100, pelvis: H - scaleLandmarkY(72, patient.heightCm) / 100, pubis: H - scaleLandmarkY(82, patient.heightCm) / 100 };
+  const patientId = useSim(s => s.patientId);
+  const projectionId = useSim(s => s.projectionId);
+  const exposing = useSim(s => s.exposing);
+  const patient = patientById(patientId);
+  const H = patient.heightCm / 100;
+  const s = H / 1.7;
+  const torsoW = .32 * patient.morph.torsoWidth * s;
+  const torsoD = .24 * patient.morph.torsoDepth * s;
+  const anatomyOpacity = exposing ? .96 : .34;
+  const lateral = projectionId.includes("lat");
   const point = (cm: number) => H - scaleAnatomyCm(cm, patient.heightCm) / 100;
-  const organScale = (v: number) => scaleAnatomyCm(v, patient.heightCm) / 100;
-  const zFront = lateral ? .035 * zScale : .015 * zScale;
+  const organScale = (cm: number) => scaleAnatomyCm(cm, patient.heightCm) / 100;
+  const Y = {
+    head: .955 * H,
+    neck: .86 * H,
+    clavicle: H - scaleLandmarkY(26, patient.heightCm) / 100,
+    pelvis: H - scaleLandmarkY(72, patient.heightCm) / 100,
+    pubis: H - scaleLandmarkY(82, patient.heightCm) / 100,
+  };
+
+  const organs = Object.fromEntries(SHARED_ORGANS.map(o => [o.id, o]));
+  const lungDepth = organScale(8.3) * .5;
+  const lungZ = lateral ? .015 * torsoD : .0;
+  const lungY = point(43.5);
+  const lungHeight = organScale(24) * .5;
+  const lungWidth = organScale(10) * .5;
+  const heart = organs.heart!;
+  const liver = organs.liver!;
+  const stomach = organs.stomach!;
+  const rightKidney = organs["kidney-right"]!;
+  const leftKidney = organs["kidney-left"]!;
+
   return <group>
-    <LayeredTorso H={H} s={s} width={xScale} depth={zScale} exposing={exposing} skin={patient.skin} />
+    <LayeredTorso H={H} width={torsoW} depth={torsoD} exposing={exposing} skin={patient.skin} />
 
-    <Bone position={[0, Y.head, 0]} scale={[.09 * s, .105 * s, .08 * s]} opacity={anatomyOpacity} />
-    <Tube a={[0, Y.neck, -.015 * s]} b={[0, Y.clavicle + .03 * s, -.02 * s]} radius={.018 * s} color="#e7dfc9" opacity={anatomyOpacity} />
+    <Skull position={[0, Y.head, 0]} scale={.095 * s} opacity={anatomyOpacity} />
 
-    {SPINE_LEVELS_CM.map((cm, i) => { const y = point(cm), lumbar = i > 10; return <Bone key={`v-${i}`} position={[0, y, -.028 * zScale]} scale={[(lumbar ? .030 : .022) * s, .018 * s, .027 * s]} opacity={anatomyOpacity} />; })}
-    {RIB_LEVELS_CM.map((cm, i) => { const y = point(cm), width = (.125 - i * .003) * patient.morph.torsoWidth * s; return <group key={`rib-${i}`}><Tube a={[-.012 * s, y, 0]} b={[-width, y - .008 * s, -.015 * s]} radius={.0075 * s} color="#e7dfc9" opacity={anatomyOpacity * .78} /><Tube a={[.012 * s, y, 0]} b={[width, y - .008 * s, -.015 * s]} radius={.0075 * s} color="#e7dfc9" opacity={anatomyOpacity * .78} /></group>; })}
-    <Tube a={[-.12 * xScale, Y.clavicle, 0]} b={[0, Y.clavicle - .008 * s, .02 * zScale]} radius={.009 * s} color="#e7dfc9" opacity={anatomyOpacity} />
-    <Tube a={[.12 * xScale, Y.clavicle, 0]} b={[0, Y.clavicle - .008 * s, .02 * zScale]} radius={.009 * s} color="#e7dfc9" opacity={anatomyOpacity} />
-    <Tube a={[0, Y.clavicle, .015 * zScale]} b={[0, point(48), .015 * zScale]} radius={.012 * s} color="#e7dfc9" opacity={anatomyOpacity} />
-
-    {SHARED_ORGANS.map(o => {
-      const x = organScale(o.xCm) * 100 / 100 * patient.morph.torsoWidth;
-      const y = point(o.yCm);
-      const sx = organScale(o.widthCm) * .5 * patient.morph.torsoWidth;
-      const sy = organScale(o.heightCm) * .5;
-      const sz = organScale(o.depthCm) * .5;
-      const color = o.id.startsWith("lung") ? "#82aeb9" : o.id === "heart" ? "#9f4d59" : o.id === "liver" ? "#8d6849" : o.id === "stomach" ? "#a56859" : "#99635b";
-      const organOpacity = o.density === "lung" ? anatomyOpacity * .72 : anatomyOpacity * .88;
-      const xPos = o.xCm * s / 100;
-      return <Organ key={o.id} position={[xPos * patient.morph.torsoWidth, y, zFront]} scale={[Math.max(.025, sx), Math.max(.03, sy), Math.max(.025, sz)]} color={color} opacity={organOpacity} rotation={o.id === "heart" ? [0, 0, -.18] : [0, 0, 0]} />;
+    {SPINE_LEVELS_CM.map((cm, i) => {
+      const y = point(cm);
+      const lumbar = i >= 12;
+      const cervical = i < 7;
+      return <VertebraMesh key={`v-${i}`} position={[0, y, -.035 * torsoD]} scale={[(cervical ? .018 : lumbar ? .032 : .025) * s, .014 * s, .022 * s]} color="#e7dfc9" opacity={anatomyOpacity} />;
     })}
 
-    <Tube a={[0, point(20), .02 * zScale]} b={[0, point(48), .02 * zScale]} radius={.011 * s} color="#8bbbc5" opacity={anatomyOpacity * .9} />
-    <Bone position={[-.075 * xScale, Y.pelvis, 0]} scale={[.075 * xScale, .085 * H, .038 * zScale]} opacity={anatomyOpacity} />
-    <Bone position={[.075 * xScale, Y.pelvis, 0]} scale={[.075 * xScale, .085 * H, .038 * zScale]} opacity={anatomyOpacity} />
-    <Bone position={[0, Y.pubis, .025 * zScale]} scale={[.045 * xScale, .025 * H, .025 * zScale]} opacity={anatomyOpacity} />
-    <Tube a={[-.075 * xScale, Y.pelvis - .02 * H, 0]} b={[-.065 * xScale, .245 * H, 0]} radius={.025 * s} color="#e7dfc9" opacity={anatomyOpacity} />
-    <Tube a={[.075 * xScale, Y.pelvis - .02 * H, 0]} b={[.065 * xScale, .245 * H, 0]} radius={.025 * s} color="#e7dfc9" opacity={anatomyOpacity} />
+    {RIB_LEVELS_CM.map((cm, i) => {
+      const y = point(cm);
+      const width = organScale(7.4 - i * .16) * patient.morph.torsoWidth;
+      const depth = lateral ? -.01 * torsoD : -.015 * torsoD;
+      return <group key={`rib-${i}`}>
+        <RibMesh points={[[0, y, depth], [-width * .52, y + .006 * s, depth + .006 * s], [-width * .92, y + .004 * s, depth], [-width, y - .014 * s, depth - .006 * s]]} radius={.0065 * s} color="#e7dfc9" opacity={anatomyOpacity * .88} />
+        <RibMesh points={[[0, y, depth], [width * .52, y + .006 * s, depth + .006 * s], [width * .92, y + .004 * s, depth], [width, y - .014 * s, depth - .006 * s]]} radius={.0065 * s} color="#e7dfc9" opacity={anatomyOpacity * .88} />
+      </group>;
+    })}
+
+    <RibMesh points={[[-.02 * s, Y.clavicle, .01 * torsoD], [-.07 * torsoW, Y.clavicle + .012 * s, .015 * torsoD], [-.13 * torsoW, Y.clavicle - .002 * s, 0]]} radius={.008 * s} color="#e7dfc9" opacity={anatomyOpacity} />
+    <RibMesh points={[[.02 * s, Y.clavicle, .01 * torsoD], [.07 * torsoW, Y.clavicle + .012 * s, .015 * torsoD], [.13 * torsoW, Y.clavicle - .002 * s, 0]]} radius={.008 * s} color="#e7dfc9" opacity={anatomyOpacity} />
+    <Tube points={[[0, Y.clavicle, .012 * torsoD], [0, point(36), .018 * torsoD], [0, point(48), .012 * torsoD]]} radius={.011 * s} color="#e7dfc9" opacity={anatomyOpacity} />
+
+    <LungMesh position={[organScale(-7.2) * patient.morph.torsoWidth, lungY, lungZ]} scale={[lungWidth, lungHeight, lungDepth]} color="#709daa" opacity={anatomyOpacity * .70} />
+    <LungMesh position={[organScale(7.0) * patient.morph.torsoWidth, lungY + .002 * s, lungZ]} scale={[organScale(9.1) * .5, organScale(23) * .5, organScale(8.0) * .5]} color="#709daa" opacity={anatomyOpacity * .70} />
+    <HeartMesh position={[organScale(heart.xCm), point(heart.yCm), lateral ? .028 * torsoD : .035 * torsoD]} scale={[organScale(heart.widthCm) * .52, organScale(heart.heightCm) * .53, organScale(heart.depthCm) * .48]} color="#a74f5d" opacity={anatomyOpacity * .92} />
+    <LiverMesh position={[organScale(liver.xCm), point(liver.yCm), .018 * torsoD]} scale={[organScale(liver.widthCm) * .54, organScale(liver.heightCm) * .48, organScale(liver.depthCm) * .46]} color="#8c6245" opacity={anatomyOpacity * .82} />
+    <StomachMesh position={[organScale(stomach.xCm), point(stomach.yCm), .012 * torsoD]} scale={[organScale(stomach.widthCm) * .54, organScale(stomach.heightCm) * .52, organScale(stomach.depthCm) * .48]} color="#a76558" opacity={anatomyOpacity * .78} />
+    <KidneyMesh position={[organScale(rightKidney.xCm), point(rightKidney.yCm), -.018 * torsoD]} scale={[organScale(rightKidney.widthCm) * .55, organScale(rightKidney.heightCm) * .54, organScale(rightKidney.depthCm) * .52]} color="#9a655b" opacity={anatomyOpacity * .78} />
+    <KidneyMesh position={[organScale(leftKidney.xCm), point(leftKidney.yCm), -.018 * torsoD]} scale={[organScale(leftKidney.widthCm) * .55, organScale(leftKidney.heightCm) * .54, organScale(leftKidney.depthCm) * .52]} color="#9a655b" opacity={anatomyOpacity * .78} />
+
+    <Tube points={[[0, point(20), .02 * torsoD], [0, point(28), .02 * torsoD], [0, point(35), .018 * torsoD], [0, point(44), .012 * torsoD]]} radius={.009 * s} color="#78aeb7" opacity={anatomyOpacity * .85} />
+
+    <PelvisMesh position={[0, Y.pelvis, 0]} scale={[.16 * patient.morph.hip * s, .11 * s, .09 * patient.morph.torsoDepth * s]} color="#e7dfc9" opacity={anatomyOpacity} />
+    <RibMesh points={[[0, Y.pubis, .018 * torsoD], [-.055 * patient.morph.hip * s, Y.pubis - .018 * s, .012 * torsoD], [-.10 * patient.morph.hip * s, Y.pelvis - .04 * s, .005 * torsoD]]} radius={.009 * s} color="#e7dfc9" opacity={anatomyOpacity} />
+    <RibMesh points={[[0, Y.pubis, .018 * torsoD], [.055 * patient.morph.hip * s, Y.pubis - .018 * s, .012 * torsoD], [.10 * patient.morph.hip * s, Y.pelvis - .04 * s, .005 * torsoD]]} radius={.009 * s} color="#e7dfc9" opacity={anatomyOpacity} />
   </group>;
 }
