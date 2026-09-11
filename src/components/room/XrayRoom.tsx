@@ -1,9 +1,9 @@
 import { ContactShadows, OrbitControls, Html } from "@react-three/drei";
-import * as THREE from "three";
 import { useSim } from "@/lib/sim/store";
 import { PatientModel } from "./PatientModel";
 import { InternalAnatomy } from "./InternalAnatomy";
 import { DetailedSkeletalOverlay } from "./DetailedSkeletalOverlay";
+import { PatientRig } from "./PatientRig";
 import { XraySourceAssembly } from "./XraySourceAssembly";
 import type { AnatomyLayer } from "@/lib/sim/muscle-segmentation";
 
@@ -44,9 +44,12 @@ export function XrayRoom() {
     <directionalLight position={[2.5, 4, 2]} intensity={1.15} castShadow shadow-mapSize={[1024, 1024]} />
     <directionalLight position={[-2, 2, -1]} intensity={.25} />
     <TableAndBucky />
-    <PatientModel />
-    <InternalAnatomy />
-    <DetailedSkeletalOverlay />
+    {/* One patient rig owns placement, scale, spinal posture and rotation for every layer. */}
+    <PatientRig>
+      <PatientModel />
+      <InternalAnatomy />
+      <DetailedSkeletalOverlay />
+    </PatientRig>
     <AnatomyControls />
     <XraySourceAssembly />
     <ContactShadows opacity={.35} scale={8} blur={2.2} far={5} />
