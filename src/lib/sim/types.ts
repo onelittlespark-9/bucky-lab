@@ -24,8 +24,6 @@ export type Region =
   | "Lower limb"
   | "Skull";
 export type Screen = "library" | "setup" | "room" | "viewer";
-
-/** How the patient is presented in the room before fine positioning. */
 export type PlacementMode = "standing" | "seated" | "upright-bucky" | "table";
 export type Mode = "practice" | "assessment";
 export type Breath = "inspiration" | "expiration";
@@ -44,7 +42,6 @@ export interface Patient {
   skin: string;
   hair: string;
   gown: string;
-  /** AP part thickness at chest / abdomen / pelvis / extremity, cm */
   thickness: {
     chest: number;
     abdomen: number;
@@ -56,7 +53,6 @@ export interface Patient {
     shoulder: number;
     knee: number;
   };
-  /** Morphs for the 3D model (1 = sthenic male-ish). */
   morph: {
     torsoWidth: number;
     torsoDepth: number;
@@ -74,9 +70,7 @@ export interface Patient {
 export interface Landmark {
   id: string;
   label: string;
-  /** cm from vertex along the long axis of the body */
   y: number;
-  /** cm from midline, + patient left */
   x: number;
 }
 
@@ -98,7 +92,6 @@ export interface Projection {
   mas: number;
   collimationW: number;
   collimationH: number;
-  /** Handbook centring, cm from vertex (y) and midline (x) */
   cr: { x: number; y: number };
   landmarkId: string;
   centring: string;
@@ -109,7 +102,6 @@ export interface Projection {
   include: string[];
   respiration?: Breath;
   referenceImage?: string;
-  /** Extra FOV around the photo, as fraction of image */
   photoBounds?: { x0: number; y0: number; x1: number; y1: number };
 }
 
@@ -127,32 +119,24 @@ export interface SimPose {
 }
 
 export interface TubeState {
-  /** Centring height, cm from vertex (anatomy space) */
   crY: number;
-  /** Centring lateral, cm from midline */
   crX: number;
   sid: number;
   angle: number;
   collimationW: number;
   collimationH: number;
-  /** When true, tube tracks the detector (bucky/table IR) — move patient in the beam */
   lockedToDetector: boolean;
 }
 
-/** Movable room furniture + patient offset in metres (scene space). */
 export interface RoomEquipment {
-  /** Patient lateral (X), height offset (Y), depth (Z) relative to detector */
   patientX: number;
   patientY: number;
   patientZ: number;
-  /** Table top height from floor (m), lateral and longitudinal shift */
   tableHeight: number;
   tableX: number;
   tableZ: number;
-  /** Wall bucky cassette centre height from floor (m) and tilt 0 = vertical, 90 = horizontal */
   buckyHeight: number;
   buckyTilt: number;
-  /** Placement chosen on the setup screen */
   placement: PlacementMode;
 }
 
