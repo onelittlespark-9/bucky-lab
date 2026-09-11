@@ -70,7 +70,7 @@ function LightField() {
   }, [fieldW, fieldH, sidM]);
   if (!show) return null;
   const mid: [number, number, number] = [(tubePos[0] + fieldPos[0]) / 2, (tubePos[1] + fieldPos[1]) / 2, (tubePos[2] + fieldPos[2]) / 2];
-  return <group><mesh geometry={coneGeo} position={tubePos} rotation={wall ? [0, 0, -angle] : [Math.PI / 2 - angle, 0, 0]} renderOrder={1}><meshBasicMaterial color={bright ? "#ffe566" : "#e2c35a"} transparent opacity={bright ? 0.28 : 0.16} depthWrite={false} side={THREE.DoubleSide} /></mesh><mesh position={fieldPos} rotation={fieldRot} renderOrder={2}><planeGeometry args={[fieldW, fieldH]} /><meshBasicMaterial color={bright ? "#fff6a0" : "#f0d060"} transparent opacity={bright ? 0.55 : 0.35} depthWrite={false} side={THREE.DoubleSide} /></mesh><mesh position={fieldPos} rotation={fieldRot} renderOrder={3}><planeGeometry args={[fieldW, fieldH]} /><meshBasicMaterial color="#e2c35a" transparent opacity={0.9} depthWrite={false} side={THREE.DoubleSide} wireframe /></mesh><pointLight position={mid} color="#ffe08a" intensity={bright ? 2.2 : 0.9} distance={Math.max(1.2, sidM)} decay={2} /></group>;
+  return <group><mesh geometry={coneGeo} position={tubePos} rotation={wall ? [0, 0, -angle] : [-Math.PI / 2 - angle, 0, 0]} renderOrder={1}><meshBasicMaterial color={bright ? "#ffe566" : "#e2c35a"} transparent opacity={bright ? 0.28 : 0.16} depthWrite={false} side={THREE.DoubleSide} /></mesh><mesh position={fieldPos} rotation={fieldRot} renderOrder={2}><planeGeometry args={[fieldW, fieldH]} /><meshBasicMaterial color={bright ? "#fff6a0" : "#f0d060"} transparent opacity={bright ? 0.55 : 0.35} depthWrite={false} side={THREE.DoubleSide} /></mesh><mesh position={fieldPos} rotation={fieldRot} renderOrder={3}><planeGeometry args={[fieldW, fieldH]} /><meshBasicMaterial color="#e2c35a" transparent opacity={0.9} depthWrite={false} side={THREE.DoubleSide} wireframe /></mesh><pointLight position={mid} color="#ffe08a" intensity={bright ? 2.2 : 0.9} distance={Math.max(1.2, sidM)} decay={2} /></group>;
 }
 
 function TubeHead() {
@@ -99,7 +99,7 @@ function TubeHead() {
     const detX = equipment.tableX + (lock ? 0 : tube.crX / 100);
     const detZ = tableTargetZ(tube.crY, patientId, equipment.tableZ, equipment.patientZ, projectionId);
     pos = [detX, detY, detZ];
-    rot = [Math.PI / 2 - angle, 0, 0];
+    rot = [Math.PI / 2 + angle, 0, 0];
   }
   return <group position={pos} rotation={rot}><mesh position={[0, 0, 0.12]}><boxGeometry args={[0.22, 0.16, 0.28]} /><meshStandardMaterial color="#3a4148" metalness={0.4} roughness={0.4} /></mesh><mesh position={[0, 0, -0.08]} ref={anode}><cylinderGeometry args={[0.07, 0.09, 0.12, 16]} /><meshStandardMaterial color="#1c2228" metalness={0.6} roughness={0.3} /></mesh><mesh position={[0, 0, -0.18]}><boxGeometry args={[0.18, 0.14, 0.08]} /><meshStandardMaterial color="#2a3036" /></mesh>{(preparing || exposing) && <pointLight color={exposing ? "#fff7e0" : "#e2c35a"} intensity={exposing ? 8 : 2.4} distance={3} />}<mesh position={[0, 0.28, 0.1]}><boxGeometry args={[0.04, 0.4, 0.04]} /><meshStandardMaterial color="#4a5560" /></mesh>{lock ? <mesh position={[0.12, 0.1, 0.05]}><boxGeometry args={[0.03, 0.03, 0.03]} /><meshStandardMaterial color="#3ecf8e" emissive="#3ecf8e" emissiveIntensity={0.4} /></mesh> : null}</group>;
 }
