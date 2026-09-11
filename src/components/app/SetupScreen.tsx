@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useSim } from "@/lib/sim/store";
 import { patientById } from "@/lib/sim/patients";
 import { projectionById } from "@/lib/sim/projections";
@@ -8,12 +9,7 @@ import type { PlacementMode } from "@/lib/sim/types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
-const OPTIONS: {
-  id: PlacementMode;
-  title: string;
-  detail: string;
-  badge: string;
-}[] = [
+const OPTIONS: { id: PlacementMode; title: string; detail: string; badge: string }[] = [
   { id: "standing", title: "Standing", detail: "Patient erect, free-standing.", badge: "Erect · free standing" },
   { id: "seated", title: "Seated", detail: "Patient sitting on a stool or chair.", badge: "Erect · seated" },
   { id: "upright-bucky", title: "Upright bucky", detail: "Patient against the wall stand. Bucky height and tilt are adjustable in the room.", badge: "Wall stand" },
@@ -36,8 +32,14 @@ export function SetupScreen() {
   const specificity = request ? requestSpecificity(request) : null;
   const selected = equipment.placement;
   const suggested: PlacementMode = projection.setup === "wall" ? "upright-bucky" : "table";
+  const [sideChoice, setSideChoice] = useState<"left" | "right" | null>(specificity?.laterality === "left" || specificity?.laterality === "right" ? specificity.laterality : null);
+  const [aoiConfirmed, setAoiConfirmed] = useState(false);
+  const extremityExam = specificity && specificity.anatomy !== "not specified" && /hand|wrist|elbow|shoulder|knee|ankle|foot|hip/i.test(specificity.anatomy);
+  const needsSide = !!specificity && specificity.laterality === "not specified" && !!extremityExam;
 
   const enterRoom = () => {
+    if (needsSide && !sideChoice) return;
+    if (specificity && !aoiConfirmed) return;
     confirmSetup(selected);
     patchPose(poseForExtremityPlacement(projectionId, selected, equipment.buckyTilt, pose));
   };
@@ -59,6 +61,13 @@ export function SetupScreen() {
             <span>Surface: <strong className="text-fg">{specificity.surface}</strong></span>
           </div>
           <p className="mt-2 text-muted">{specificity.confirmationPrompt}</p>
+          {needsSide && <div className="mt-3 flex gap-2">
+            {(["left", "right"] as const).map(side => <Button key={side} size="sm" variant={sideChoice === side ? "solid" : "outline"} onClick={() => { setSideChoice(side); setAoiConfirmed(false); }}>{side === "left" ? "Left" : "Right"}</Button>)}
+          </div>}
+          {specificity.surface === "not specified" && <p className="mt-3 text-muted">Surface is not specified by the request — do not invent medial/lateral or anterior/posterior positioning.</p>}
+          <Button size="sm" variant={aoiConfirmed ? "solid" : "outline"} className="mt-3" disabled={needsSide && !sideChoice} onClick={() => setAoiConfirmed(true)}>
+            {aoiConfirmed ? "Area confirmed" : "Confirm area of interest"}
+          </Button>
         </div>}
         <p className="text-sm leading-relaxed text-muted">Choose how the patient will be presented. The suggested setup is a starting point, not a restriction — extremities and joints can be adapted to the room equipment.</p>
         <div className="flex items-center gap-2 text-xs text-muted"><span>Typical setup</span><Badge tone="accent">{suggested === "upright-bucky" ? "Upright bucky" : "Table"}</Badge></div>
@@ -70,7 +79,7 @@ export function SetupScreen() {
           Use the upright bucky for standing or seated limb work, or tilt the bucky to 90° for a table-top detector position. Hands, wrists, elbows, knees, ankles and feet can therefore be presented against the detector without forcing every examination onto the fixed X-ray table.
           <div className="mt-2 flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={()=>patchEquipment({placement:"upright-bucky",buckyTilt:90})}>Tilt bucky 90° · table position</Button><Button size="sm" variant="outline" onClick={()=>patchEquipment({placement:"upright-bucky",buckyTilt:0})}>Return upright</Button></div>
         </div>
-        <div className="mt-auto flex flex-col gap-2 pt-4"><Button variant="solid" size="lg" className="w-full" onClick={enterRoom}>Enter room with this setup</Button><Button variant="ghost" className="w-full" onClick={()=>setScreen("library")}>Back to library</Button></div>
+        <div className="mt-auto flex flex-col gap-2 pt-4"><Button variant="solid" size="lg" className="w-full" disabled={!!specificity && (!aoiConfirmed || (needsSide && !sideChoice))} onClick={enterRoom}>Enter room with this setup</Button><Button variant="ghost" className="w-full" onClick={()=>setScreen("library")}>Back to library</Button></div>
       </main>
     </div>
   );
