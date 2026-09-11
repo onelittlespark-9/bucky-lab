@@ -20,5 +20,5 @@ export interface RoomEquipment { patientX:number; patientY:number; patientZ:numb
 /** The focal spot is a fixed tube specification. It is deliberately not a learner control. */
 export interface ExposureState { kvp:number; mas:number; grid:boolean; focalSpot:FocalSpot; marker:Marker; }
 export interface CriterionScore { id:string; label:string; grade:Grade; detail:string; weight:number; }
-export interface ExposureMetrics { ei:number; eiStatus:"under"|"optimal"|"over"; noise:number; contrast:number; saturation:number; dap:number; entranceDose:number; predictedEI:number; }
+export interface ExposureMetrics { ei:number; eiStatus:"under"|"optimal"|"over"; noise:number; contrast:number; saturation:number; dap:number; entranceDose:number; predictedEI:number; transmission:number; scatterFraction:number; attenuationIndex:number; superimpositionIndex:number; }
 export interface RadiographResult { metrics:ExposureMetrics; scores:CriterionScore[]; overall:number; overallGrade:Grade; width:number; height:number; dataUrl:string; }
