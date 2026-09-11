@@ -28,6 +28,7 @@ function latheTorso(width: number, depth: number, length: number, abdomen: numbe
 export function PatientModel() {
   const patientId = useSim((s) => s.patientId);
   const pose = useSim((s) => s.pose);
+  const equipment = useSim((s) => s.equipment);
   const showLandmarks = useSim((s) => s.showLandmarks);
   const setLandmarkCR = useSim((s) => s.setLandmarkCR);
   const projectionId = useSim((s) => s.projectionId);
@@ -46,16 +47,25 @@ export function PatientModel() {
   );
 
   const skin = patient.skin;
-  const erect = pose.recumbency === "erect";
   const yaw = (pose.rotationY * Math.PI) / 180;
-  const setup = projection.setup;
+  const place = equipment.placement;
+  const wall = place === "upright-bucky" || place === "standing" || place === "seated";
 
-  const groupPos: [number, number, number] = erect
-    ? setup === "wall"
-      ? [0, 0, -0.55]
-      : [0, 0, 0]
-    : [0, 0.92, 0];
-  const groupRot: [number, number, number] = erect ? [0, yaw, 0] : [-Math.PI / 2, yaw, 0];
+  const ox = equipment.patientX;
+  const oy = equipment.patientY;
+  const oz = equipment.patientZ;
+
+  let groupPos: [number, number, number];
+  let groupRot: [number, number, number];
+  if (wall) {
+    const baseZ = place === "upright-bucky" ? -0.55 : -0.35;
+    const baseY = place === "seated" ? -0.15 : 0;
+    groupPos = [ox, baseY + oy, baseZ + oz];
+    groupRot = [0, yaw, 0];
+  } else {
+    groupPos = [equipment.tableX + ox, equipment.tableHeight + 0.06 + oy, equipment.tableZ + oz];
+    groupRot = [-Math.PI / 2, yaw, 0];
+  }
 
   const shoulder = 0.22 * m.shoulder;
   const limbR = 0.045 * m.limb;
@@ -67,13 +77,16 @@ export function PatientModel() {
   const kyph = m.kyphosis * 0.35;
 
   const landmarks = LANDMARKS.filter(
-    (l) => l.y > 0 && !["3rd-mcp", "midcarpal", "elbow", "patella-apex", "medial-epicondyle-knee", "malleoli", "3rd-mt"].includes(l.id),
+    (l) =>
+      l.y > 0 &&
+      !["3rd-mcp", "midcarpal", "elbow", "patella-apex", "medial-epicondyle-knee", "malleoli", "3rd-mt"].includes(
+        l.id,
+      ),
   );
 
   return (
     <group position={groupPos} rotation={groupRot}>
       <group position={[0, 0, 0]} rotation={[kyph, 0, 0]}>
-        {/* pelvis origin at hips */}
         <group position={[0, h * 0.48, 0]}>
           <mesh geometry={torsoGeo} position={[0, 0, 0]} castShadow>
             <meshPhysicalMaterial color={skin} roughness={0.55} metalness={0} sheen={0.3} sheenColor={skin} />
@@ -82,21 +95,25 @@ export function PatientModel() {
             <meshLambertMaterial color={patient.gown} transparent opacity={0.92} />
           </mesh>
 
-          {/* breasts / chest volume */}
           {m.breast > 0.2 ? (
             <>
-              <mesh position={[-0.07 * m.torsoWidth, 0.42 * m.torsoLength, 0.09 * m.torsoDepth]} scale={[m.breast, m.breast, m.breast]}>
+              <mesh
+                position={[-0.07 * m.torsoWidth, 0.42 * m.torsoLength, 0.09 * m.torsoDepth]}
+                scale={[m.breast, m.breast, m.breast]}
+              >
                 <sphereGeometry args={[0.055, 16, 12]} />
                 <meshPhysicalMaterial color={skin} roughness={0.55} />
               </mesh>
-              <mesh position={[0.07 * m.torsoWidth, 0.42 * m.torsoLength, 0.09 * m.torsoDepth]} scale={[m.breast, m.breast, m.breast]}>
+              <mesh
+                position={[0.07 * m.torsoWidth, 0.42 * m.torsoLength, 0.09 * m.torsoDepth]}
+                scale={[m.breast, m.breast, m.breast]}
+              >
                 <sphereGeometry args={[0.055, 16, 12]} />
                 <meshPhysicalMaterial color={skin} roughness={0.55} />
               </mesh>
             </>
           ) : null}
 
-          {/* neck + head */}
           <group position={[0, 0.62 * m.torsoLength, kyph * 0.05]} rotation={[-chin * 0.3, 0, 0]}>
             <mesh position={[0, 0.05, 0]}>
               <cylinderGeometry args={[0.045, 0.055, 0.1, 16]} />
@@ -130,14 +147,13 @@ export function PatientModel() {
             </group>
           </group>
 
-          {/* arms */}
           {([-1, 1] as const).map((side) => (
             <group
               key={side}
               position={[side * shoulder, 0.5 * m.torsoLength, 0]}
               rotation={[0.15 - armRaise, 0, side * (0.15 + pose.shoulderRoll * 0.5)]}
             >
-              <mesh position={[0, -0.14, 0]} rotation={[0, 0, 0]}>
+              <mesh position={[0, -0.14, 0]}>
                 <capsuleGeometry args={[limbR, 0.22, 6, 12]} />
                 <meshPhysicalMaterial color={skin} roughness={0.55} />
               </mesh>
@@ -155,9 +171,12 @@ export function PatientModel() {
           ))}
         </group>
 
-        {/* legs */}
         {([-1, 1] as const).map((side) => (
-          <group key={side} position={[side * 0.09 * m.hip, h * 0.48, 0]} rotation={[0, side * hipInt, side * 0.04]}>
+          <group
+            key={side}
+            position={[side * 0.09 * m.hip, h * 0.48, 0]}
+            rotation={[0, side * hipInt, side * 0.04]}
+          >
             <mesh position={[0, -0.2, 0]}>
               <capsuleGeometry args={[limbR * 1.15, 0.32, 6, 12]} />
               <meshPhysicalMaterial color={skin} roughness={0.55} />
