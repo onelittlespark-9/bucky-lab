@@ -9,9 +9,10 @@ interface AtlasManifest { version: string; parts: AtlasPart[]; chunks: { url: st
 const MODEL_ROOT = "/models/human-atlas/";
 const ATLAS_HEIGHT_M = 1.7;
 
-type BoneRegion = "axial" | "scapula" | "clavicle" | "upperArm" | "forearm" | "hand" | "pelvis" | "thigh" | "lowerLeg" | "foot";
+type BoneRegion = "axial" | "scapula" | "clavicle" | "upperArm" | "forearm" | "hand" | "pelvis" | "thigh" | "lowerLeg" | "foot" | "rib";
 function regionFor(name: string): BoneRegion {
   const n = name.toLowerCase();
+  if (n.includes("rib") || n.includes("costal cartilage") || n.includes("costal cartilage")) return "rib";
   if (n.includes("scapula")) return "scapula";
   if (n.includes("clavicle")) return "clavicle";
   if (n.includes("humerus")) return "upperArm";
@@ -25,8 +26,6 @@ function regionFor(name: string): BoneRegion {
 }
 function sideFor(bounds: [number[], number[]]): -1 | 1 { return ((bounds[0][0] + bounds[1][0]) * 0.5) < 0 ? -1 : 1; }
 function pivotFor(region: BoneRegion, side: -1 | 1, center: THREE.Vector3, _H: number) {
-  // Use fixed anatomical joint centres rather than the mesh centre. This keeps a bone rigid
-  // around the same shoulder/elbow/hip/knee joint as its neighbouring bones.
   if (region === "scapula" || region === "clavicle" || region === "upperArm") return new THREE.Vector3(side * 0.19, 0.79, center.z);
   if (region === "forearm") return new THREE.Vector3(side * 0.31, 0.63, center.z);
   if (region === "hand") return new THREE.Vector3(side * 0.45, 0.48, center.z);
@@ -36,11 +35,45 @@ function pivotFor(region: BoneRegion, side: -1 | 1, center: THREE.Vector3, _H: n
   return new THREE.Vector3(0, 0, 0);
 }
 
+function createAnatomicalRibs() {
+  const root = new THREE.Group();
+  root.name = "Bucky-Lab-natural-rib-cage";
+  const material = new THREE.MeshStandardMaterial({ color: "#ded8c4", roughness: 0.78, metalness: 0.02, transparent: true, opacity: 0.32, side: THREE.DoubleSide, depthWrite: true });
+  // Ribs are deliberately generated as a three-dimensional basket rather than flat
+  // transverse strips. Posterior ends sit on the thoracic spine, sweep laterally,
+  // then turn anteriorly/downward. Ribs 8-10 form the costal arch and 11-12 remain floating.
+  for (let level = 1; level <= 12; level += 1) {
+    const y = 1.30 - (level - 1) * 0.044;
+    const sidePoints = (side: -1 | 1): V3[] => {
+      const posterior = [side * 0.052, y, -0.058] as V3;
+      const lateral = [side * (0.145 + (level <= 6 ? 0.010 : 0)), y - 0.004 - level * 0.001, 0.012] as V3;
+      const anterolateral = [side * (0.205 - Math.max(0, level - 7) * 0.012), y - 0.018, 0.060] as V3;
+      if (level <= 7) return [posterior, lateral, anterolateral, [side * 0.115, y - 0.035, 0.095], [side * 0.028, y - 0.048, 0.108]];
+      if (level <= 10) return [posterior, lateral, anterolateral, [side * 0.085, y - 0.032, 0.092]];
+      return [posterior, [side * 0.125, y - 0.008, 0.010], [side * 0.175, y - 0.018, 0.040], [side * 0.145, y - 0.028, 0.065]];
+    };
+    ([-1, 1] as const).forEach(side => {
+      const curve = new THREE.CatmullRomCurve3(sidePoints(side).map(p => new THREE.Vector3(...p)), false, "centripetal", 0.5);
+      const geometry = new THREE.TubeGeometry(curve, 24, level <= 10 ? 0.0062 : 0.0056, 8, false);
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.name = `Bucky Lab rib ${level}${side < 0 ? " left" : " right"}`;
+      mesh.userData.atlasRegion = "rib";
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      root.add(mesh);
+    });
+  }
+  return root;
+}
+
 async function loadAtlas(): Promise<THREE.Group> {
   const response = await fetch(`${MODEL_ROOT}atlas.json`, { cache: "force-cache" });
   if (!response.ok) throw new Error(`Human Atlas manifest failed to load (${response.status}).`);
   const atlas = (await response.json()) as AtlasManifest;
-  const skeleton = atlas.parts.filter(part => part.system === "skeletal");
+  // The source atlas ribs are excluded here because their imported orientation is not
+  // reliable for the simulator. The procedural cage above supplies the controlled,
+  // anatomically curved rib geometry used by positioning and exposure views.
+  const skeleton = atlas.parts.filter(part => part.system === "skeletal" && regionFor(part.name) !== "rib");
   if (!skeleton.length) throw new Error("Human Atlas contains no skeletal structures.");
   const root = new THREE.Group(); root.name = "BodyParts3D-Human-Atlas-Skeleton";
   const chunks = new Map<number, Array<{ part: AtlasPart; buffer: ArrayBuffer }>>();
@@ -66,6 +99,7 @@ async function loadAtlas(): Promise<THREE.Group> {
     mesh.userData.atlasRegion = region; mesh.userData.atlasSide = side; mesh.userData.atlasPivot = pivot;
     mesh.position.copy(pivot); mesh.castShadow = true; mesh.receiveShadow = true; root.add(mesh);
   }
+  root.add(createAnatomicalRibs());
   return root;
 }
 
@@ -91,8 +125,8 @@ function articulate(root: THREE.Group, pose: { shoulderRoll: number; armRaise: n
   root.children.forEach(object => {
     if (!(object instanceof THREE.Mesh)) return;
     const region = object.userData.atlasRegion as BoneRegion; const side = object.userData.atlasSide as -1 | 1; const pivot = object.userData.atlasPivot as THREE.Vector3;
-    object.rotation.set(0, 0, 0); object.position.copy(pivot);
-    if (region === "axial" || region === "pelvis") return;
+    object.rotation.set(0, 0, 0); if (pivot) object.position.copy(pivot);
+    if (region === "axial" || region === "pelvis" || region === "rib" || !pivot) return;
     if (region === "scapula") {
       const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, -side * shoulderAngle * 0.75, 0, "XYZ"));
       object.quaternion.copy(q); object.position.z = pivot.z + 0.035 * (shoulderAngle / THREE.MathUtils.degToRad(28)); object.position.x = pivot.x + side * 0.018 * (shoulderAngle / THREE.MathUtils.degToRad(28));
@@ -107,17 +141,15 @@ function articulate(root: THREE.Group, pose: { shoulderRoll: number; armRaise: n
     const elbowPivot = new THREE.Vector3(side * 0.31, 0.63, pivot.z);
     const wristPivot = new THREE.Vector3(side * 0.45, 0.48, pivot.z);
     const elbowQ = new THREE.Quaternion().setFromAxisAngle(zAxis, -side * elbowAngle);
-    if (region === "upperArm") {
-      object.quaternion.copy(shoulderQ); object.position.copy(pivot); transformPoint(object.position, shoulderPivot, shoulderQ); return;
-    }
+    if (region === "upperArm") { object.quaternion.copy(shoulderQ); transformPoint(object.position, shoulderPivot, shoulderQ); return; }
     if (region === "forearm") {
       const chainQ = shoulderQ.clone().multiply(elbowQ); const transformedElbow = elbowPivot.clone(); transformPoint(transformedElbow, shoulderPivot, shoulderQ);
-      object.quaternion.copy(chainQ); object.position.copy(pivot); transformPoint(object.position, shoulderPivot, shoulderQ); transformPoint(object.position, transformedElbow, elbowQ); return;
+      object.quaternion.copy(chainQ); transformPoint(object.position, shoulderPivot, shoulderQ); transformPoint(object.position, transformedElbow, elbowQ); return;
     }
     if (region === "hand") {
       const chainQ = shoulderQ.clone().multiply(elbowQ); const transformedWrist = wristPivot.clone(); const transformedElbow = elbowPivot.clone();
       transformPoint(transformedElbow, shoulderPivot, shoulderQ); transformPoint(transformedWrist, shoulderPivot, shoulderQ); transformPoint(transformedWrist, transformedElbow, elbowQ);
-      object.quaternion.copy(chainQ); object.position.copy(pivot); transformPoint(object.position, shoulderPivot, shoulderQ); transformPoint(object.position, transformedElbow, elbowQ); return;
+      object.quaternion.copy(chainQ); transformPoint(object.position, shoulderPivot, shoulderQ); transformPoint(object.position, transformedElbow, elbowQ); return;
     }
     if (region === "thigh" || region === "lowerLeg" || region === "foot") {
       const hipQ = new THREE.Quaternion().setFromAxisAngle(zAxis, side * hipAngle * 0.55);
