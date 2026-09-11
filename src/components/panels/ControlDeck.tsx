@@ -43,6 +43,8 @@ export function ControlDeck() {
   const showLightField = useSim((s) => s.showLightField);
   const setShowLightField = useSim((s) => s.setShowLightField);
   const setShowLandmarks = useSim((s) => s.setShowLandmarks);
+  const equipment = useSim((s) => s.equipment);
+  const patchEquipment = useSim((s) => s.patchEquipment);
   const mode = useSim((s) => s.mode);
   const patientId = useSim((s) => s.patientId);
   const projectionId = useSim((s) => s.projectionId);
@@ -72,6 +74,7 @@ export function ControlDeck() {
       <Tabs defaultValue="position" className="flex min-h-0 flex-1 flex-col">
         <TabsList>
           <TabsTrigger value="position">Position</TabsTrigger>
+          <TabsTrigger value="room">Room</TabsTrigger>
           <TabsTrigger value="beam">Beam</TabsTrigger>
           <TabsTrigger value="expose">Expose</TabsTrigger>
         </TabsList>
@@ -103,9 +106,6 @@ export function ControlDeck() {
             <Row label="Rotation" value={`${pose.rotationY.toFixed(0)}°`}>
               <Slider min={-90} max={90} step={1} value={[pose.rotationY]} onValueChange={([v]) => patchPose({ rotationY: v ?? 0 })} />
             </Row>
-            <Row label="Oblique" value={`${pose.oblique.toFixed(0)}°`}>
-              <Slider min={-45} max={45} step={1} value={[pose.oblique]} onValueChange={([v]) => patchPose({ oblique: v ?? 0 })} />
-            </Row>
             <Row label="Chin raise" value={`${(pose.chinUp * 100).toFixed(0)}%`}>
               <Slider min={0} max={1} step={0.05} value={[pose.chinUp]} onValueChange={([v]) => patchPose({ chinUp: v ?? 0 })} />
             </Row>
@@ -115,27 +115,71 @@ export function ControlDeck() {
             <Row label="Arm raise" value={`${(pose.armRaise * 100).toFixed(0)}%`}>
               <Slider min={0} max={1} step={0.05} value={[pose.armRaise]} onValueChange={([v]) => patchPose({ armRaise: v ?? 0 })} />
             </Row>
-            <Row label="Elbow flex" value={`${pose.elbowFlex.toFixed(0)}°`}>
-              <Slider min={0} max={140} step={1} value={[pose.elbowFlex]} onValueChange={([v]) => patchPose({ elbowFlex: v ?? 0 })} />
-            </Row>
             <Row label="Knee flex" value={`${pose.kneeFlex.toFixed(0)}°`}>
               <Slider min={0} max={120} step={1} value={[pose.kneeFlex]} onValueChange={([v]) => patchPose({ kneeFlex: v ?? 0 })} />
             </Row>
-            <Row label="Hip internal rot." value={`${pose.hipInternal.toFixed(0)}°`}>
-              <Slider min={0} max={30} step={1} value={[pose.hipInternal]} onValueChange={([v]) => patchPose({ hipInternal: v ?? 0 })} />
-            </Row>
-            <div className="flex gap-2">
-              <Button size="sm" variant={pose.breath === "inspiration" ? "default" : "outline"} onClick={() => patchPose({ breath: "inspiration" })}>
-                Inspiration
-              </Button>
-              <Button size="sm" variant={pose.breath === "expiration" ? "default" : "outline"} onClick={() => patchPose({ breath: "expiration" })}>
-                Expiration
-              </Button>
-            </div>
             {mode === "practice" ? (
               <Button size="sm" variant="outline" className="w-full" onClick={applyHandbook}>
-                Apply handbook pose &amp; centring
+                Apply handbook pose & centring
               </Button>
+            ) : null}
+          </TabsContent>
+
+          <TabsContent value="room" className="space-y-4">
+            <p className="text-xs text-muted">
+              Placement: <span className="text-fg">{equipment.placement}</span>. Move furniture and the patient so anatomy sits in the primary beam.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant={tube.lockedToDetector ? "default" : "outline"}
+                onClick={() => patchTube({ lockedToDetector: !tube.lockedToDetector })}
+              >
+                Tube {tube.lockedToDetector ? "LOCKED to detector" : "FREE"}
+              </Button>
+            </div>
+            <p className="text-[11px] text-muted">
+              Locked: tube tracks the bucky/table IR — slide the patient within the light field. Free: move tube independently via Beam tab CR controls.
+            </p>
+
+            <p className="text-[11px] uppercase tracking-wider text-muted">Patient in beam</p>
+            <Row label="Patient L/R (m)" value={equipment.patientX.toFixed(2)}>
+              <Slider min={-0.4} max={0.4} step={0.01} value={[equipment.patientX]} onValueChange={([v]) => patchEquipment({ patientX: v ?? 0 })} />
+            </Row>
+            <Row label="Patient up/down (m)" value={equipment.patientY.toFixed(2)}>
+              <Slider min={-0.5} max={0.5} step={0.01} value={[equipment.patientY]} onValueChange={([v]) => patchEquipment({ patientY: v ?? 0 })} />
+            </Row>
+            <Row label="Patient in/out (m)" value={equipment.patientZ.toFixed(2)}>
+              <Slider min={-0.4} max={0.4} step={0.01} value={[equipment.patientZ]} onValueChange={([v]) => patchEquipment({ patientZ: v ?? 0 })} />
+            </Row>
+
+            {equipment.placement === "table" ? (
+              <>
+                <p className="text-[11px] uppercase tracking-wider text-muted">Table</p>
+                <Row label="Table height (m)" value={equipment.tableHeight.toFixed(2)}>
+                  <Slider min={0.55} max={1.2} step={0.01} value={[equipment.tableHeight]} onValueChange={([v]) => patchEquipment({ tableHeight: v ?? 0.9 })} />
+                </Row>
+                <Row label="Table L/R (m)" value={equipment.tableX.toFixed(2)}>
+                  <Slider min={-0.5} max={0.5} step={0.01} value={[equipment.tableX]} onValueChange={([v]) => patchEquipment({ tableX: v ?? 0 })} />
+                </Row>
+                <Row label="Table long (m)" value={equipment.tableZ.toFixed(2)}>
+                  <Slider min={-0.6} max={0.6} step={0.01} value={[equipment.tableZ]} onValueChange={([v]) => patchEquipment({ tableZ: v ?? 0 })} />
+                </Row>
+              </>
+            ) : null}
+
+            {equipment.placement === "upright-bucky" ||
+            equipment.placement === "standing" ||
+            equipment.placement === "seated" ? (
+              <>
+                <p className="text-[11px] uppercase tracking-wider text-muted">Upright bucky</p>
+                <Row label="Bucky height (m)" value={equipment.buckyHeight.toFixed(2)}>
+                  <Slider min={0.4} max={1.8} step={0.01} value={[equipment.buckyHeight]} onValueChange={([v]) => patchEquipment({ buckyHeight: v ?? 1.1 })} />
+                </Row>
+                <Row label="Bucky tilt (°)" value={equipment.buckyTilt.toFixed(0)}>
+                  <Slider min={0} max={90} step={1} value={[equipment.buckyTilt]} onValueChange={([v]) => patchEquipment({ buckyTilt: v ?? 0 })} />
+                </Row>
+              </>
             ) : null}
           </TabsContent>
 
@@ -171,25 +215,6 @@ export function ControlDeck() {
             <Row label="Collimation H (cm)" value={tube.collimationH.toFixed(1)}>
               <Slider min={5} max={45} step={0.5} value={[tube.collimationH]} onValueChange={([v]) => patchTube({ collimationH: v ?? 20 })} />
             </Row>
-            {mode === "practice" ? (
-              <div className="space-y-2">
-                <p className="text-[11px] uppercase tracking-wider text-muted">Landmarks</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {LANDMARKS.filter((l) => l.y > 0).map((lm) => (
-                    <Button
-                      key={lm.id}
-                      size="sm"
-                      variant="outline"
-                      onClick={() =>
-                        setLandmarkCR(scaleLandmarkY(lm.y, patient.heightCm), lm.x * patient.morph.torsoWidth)
-                      }
-                    >
-                      {lm.label}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
           </TabsContent>
 
           <TabsContent value="expose" className="space-y-4">
@@ -241,9 +266,6 @@ export function ControlDeck() {
                 {exposing ? "Exposing" : "Expose"}
               </Button>
             </div>
-            <p className="text-[11px] text-muted">
-              Two-stage console: prepare spins the anode, then expose. Collimate before you press it.
-            </p>
           </TabsContent>
         </div>
       </Tabs>
