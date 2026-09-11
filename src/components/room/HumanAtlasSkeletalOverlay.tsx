@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { useSim } from "@/lib/sim/store";
 import { patientById } from "@/lib/sim/patients";
 import { patientKinematics, type V3 } from "@/lib/sim/patient-kinematics";
+import type { PlacementMode } from "@/lib/sim/types";
 
 interface AtlasPart { id: string; name: string; system: string; chunk: number; positions: number; normals: number; indices: number; vertexCount: number; indexCount: number; bounds: [number[], number[]]; }
 interface AtlasManifest { version: string; parts: AtlasPart[]; chunks: { url: string; bytes: number }[]; triangles: number; }
@@ -26,9 +27,6 @@ function regionFor(name: string): BoneRegion {
 }
 function sideFor(bounds: [number[], number[]]): -1 | 1 { return ((bounds[0][0] + bounds[1][0]) * 0.5) < 0 ? -1 : 1; }
 
-// Atlas geometry is authored at 1.7 m. These are only the mesh-local pivots used to
-// put each imported part into a stable local frame; actual patient joint centres are
-// supplied at pose time by patientKinematics below.
 function atlasPivotFor(region: BoneRegion, side: -1 | 1, center: THREE.Vector3) {
   if (region === "scapula" || region === "clavicle" || region === "upperArm") return new THREE.Vector3(side * 0.19, 0.79, center.z);
   if (region === "forearm") return new THREE.Vector3(side * 0.31, 0.63, center.z);
@@ -43,8 +41,7 @@ function createAnatomicalRibs() {
   const root = new THREE.Group();
   root.name = "Bucky-Lab-natural-rib-cage";
   const material = new THREE.MeshStandardMaterial({ color: "#ded8c4", roughness: 0.78, metalness: 0.02, transparent: true, opacity: 0.32, side: THREE.DoubleSide, depthWrite: true });
-  // Deliberately keep the cage inside the thoracic envelope. The previous cage was
-  // too wide and too tall, making the ribs visibly larger than the torso.
+  // Keep the cage inside the thoracic envelope. The old cage was too wide/tall.
   for (let level = 1; level <= 12; level += 1) {
     const y = 1.24 - (level - 1) * 0.038;
     const sidePoints = (side: -1 | 1): V3[] => {
@@ -114,10 +111,11 @@ function PatientTransform({ children }: { children: ReactNode }) {
   return <group position={groupPos} rotation={groupRot}><group rotation={[kyphosis, oblique, 0]} scale={scale}>{children}</group></group>;
 }
 
-function articulate(root: THREE.Group, pose: { shoulderRoll: number; armRaise: number; elbowFlex: number; hipInternal: number; kneeFlex: number }, patient: ReturnType<typeof patientById>, placement: Parameters<typeof useSim>[0] extends never ? never : any) {
-  const scale = patient.heightCm / 100 / ATLAS_HEIGHT_M;
+function articulate(root: THREE.Group, pose: { shoulderRoll: number; armRaise: number; elbowFlex: number; hipInternal: number; kneeFlex: number }, patient: ReturnType<typeof patientById>, placement: PlacementMode) {
+  const H = patient.heightCm / 100;
+  const scale = H / ATLAS_HEIGHT_M;
   const kin = patientKinematics({
-    H: patient.heightCm / 100,
+    H,
     s: 1,
     shoulder: patient.morph.shoulder,
     hip: patient.morph.hip,
