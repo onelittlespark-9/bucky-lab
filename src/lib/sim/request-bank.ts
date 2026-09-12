@@ -1,19 +1,21 @@
 import type { ImagingRequest } from "./requests";
 import { CASE_BANK } from "./case-bank";
 
-const chestCases: ImagingRequest[] = CASE_BANK.map((c) => ({
+const caseRequests: ImagingRequest[] = CASE_BANK.map(c => ({
   id: c.id,
   title: c.title,
   clinicalHistory: c.clinicalHistory,
   requestedProjections: c.projections,
-  requestedViewsLabel: c.projections.map((p) => p === "pa-chest" ? "PA chest" : p === "lat-chest" ? "left lateral chest" : p).join(" + "),
+  requestedViewsLabel: c.projections.map(p => ({
+    "pa-chest": "PA chest", "lat-chest": "left lateral chest", "ap-abdomen": "AP abdomen", "ap-pelvis": "AP pelvis", "ap-hip": "hip AP", "lat-cspine": "lateral C-spine", "ap-cspine": "AP C-spine", "ap-lumbar": "AP lumbar spine", "lat-lumbar": "lateral lumbar spine", "pa-hand": "PA hand", "pa-wrist": "PA wrist", "ap-elbow": "AP elbow", "ap-shoulder": "AP shoulder", "ap-knee": "AP knee", "lat-knee": "lateral knee", "dp-foot": "DP foot", "ap-ankle": "AP ankle", "lat-skull": "lateral skull",
+  } as Record<string, string>)[p] ?? p).join(" + "),
   requestedLaterality: null,
   correctLaterality: null,
   patientId: c.patientId,
   isValid: true,
   pathologyId: c.pathologyId,
-  region: "Thorax",
-  urgency: c.id === "chest-post-line" ? "urgent" : "routine",
+  region: c.region ?? (c.projections.some(p => p.includes("chest")) ? "Thorax" : "General radiography"),
+  urgency: c.id === "chest-post-line" ? "urgent" : c.title.includes("Emergency department") ? "stat" : c.title.includes("Inpatient") ? "urgent" : "routine",
 }));
 
 const additionalRequests: ImagingRequest[] = [
@@ -29,8 +31,8 @@ const additionalRequests: ImagingRequest[] = [
   { id: "abdomen-acute", title: "Abdomen — acute pain", clinicalHistory: "Abdominal distension, colicky pain and vomiting. Clinical concern for obstruction.", requestedProjections: ["ap-abdomen"], requestedViewsLabel: "AP abdomen", requestedLaterality: null, correctLaterality: null, patientId: "tomas", isValid: true, pathologyId: "none", region: "Abdomen", urgency: "urgent" },
   { id: "pelvis-trauma", title: "Pelvis — trauma", clinicalHistory: "Fall with pelvic pain and difficulty weight-bearing.", requestedProjections: ["ap-pelvis"], requestedViewsLabel: "AP pelvis", requestedLaterality: null, correctLaterality: null, patientId: "ruth", isValid: true, pathologyId: "femoral-neck-fracture", region: "Pelvis & hips", urgency: "urgent" },
   { id: "wrong-side-wrist", title: "Wrist — query laterality", clinicalHistory: "History states right wrist injury, but the request specifies the left wrist. Query before exposure.", requestedProjections: ["pa-wrist"], requestedViewsLabel: "Left wrist", requestedLaterality: "left", correctLaterality: "right", patientId: "amara", isValid: false, rejectionReason: "The clinical history identifies the right wrist. The request should be amended before exposure.", pathologyId: "distal-radius-fracture", region: "Upper limb", urgency: "urgent" },
+  { id: "chest-post-line-extra", title: "Post-procedure chest — line check", clinicalHistory: "Patient following central venous access insertion. Portable imaging requested to assess the line and exclude an immediate complication.", requestedProjections: ["pa-chest"], requestedViewsLabel: "PA chest", requestedLaterality: null, correctLaterality: null, patientId: "gordon", isValid: true, pathologyId: "none", region: "Thorax", urgency: "urgent" },
 ];
 
-export const REQUEST_BANK: ImagingRequest[] = [...chestCases, ...additionalRequests];
-
-export function requestFromBank(id: string) { return REQUEST_BANK.find((request) => request.id === id); }
+export const REQUEST_BANK: ImagingRequest[] = [...caseRequests, ...additionalRequests];
+export function requestFromBank(id: string) { return REQUEST_BANK.find(request => request.id === id); }
