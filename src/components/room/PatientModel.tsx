@@ -1,12 +1,21 @@
 import { HumanAtlasBodyOverlay } from "./HumanAtlasBodyOverlay";
+import { InternalAnatomy } from "./InternalAnatomy";
+import { HumanAtlasSkeletalOverlay } from "./HumanAtlasSkeletalOverlay";
 
 /**
- * Patient surface only.
+ * One patient, one scene-space rig, multiple anatomical layers.
  *
- * Positioning is deliberately landmark-free: the learner must use the
- * patient's visible anatomy rather than artificial dots/markers. Internal
- * anatomy is rendered by the exposure/result workflow, not on the patient.
+ * The layers are deliberately mounted together even when their visibility is
+ * off. This means skin, fat, muscle, organs and skeleton all inherit the same
+ * PatientRig placement/rotation and can be revealed later without spawning a
+ * second, independently positioned patient.
  */
 export function PatientModel() {
-  return <HumanAtlasBodyOverlay />;
+  return (
+    <group name="BuckyLab-cohesive-patient">
+      <HumanAtlasBodyOverlay />
+      <InternalAnatomy />
+      <HumanAtlasSkeletalOverlay />
+    </group>
+  );
 }
