@@ -4,7 +4,7 @@ import { patientById } from "@/lib/sim/patients";
 import { projectionById } from "@/lib/sim/projections";
 import { requestFromBank } from "@/lib/sim/request-bank";
 import { requestSpecificity } from "@/lib/sim/request-specificity";
-import { departmentForRequest, edModifiedViewsForRequest } from "@/lib/sim/departments";
+import { departmentForRequest, edModifiedViewsForRequest, type EDModifiedViewId } from "@/lib/sim/departments";
 import { poseForExtremityPlacement } from "@/lib/sim/extremity-kinematics";
 import type { PlacementMode } from "@/lib/sim/types";
 import { Button } from "@/components/ui/button";
@@ -39,19 +39,20 @@ export function SetupScreen() {
   const suggested: PlacementMode = projection.setup === "wall" ? "upright-bucky" : "table";
   const [sideChoice, setSideChoice] = useState<"left" | "right" | null>(specificity?.laterality === "left" || specificity?.laterality === "right" ? specificity.laterality : null);
   const [interviewStarted, setInterviewStarted] = useState(false); const [patientConfirmed, setPatientConfirmed] = useState<boolean | null>(null); const [aoiConfirmed, setAoiConfirmed] = useState(false);
-  const [mobility, setMobility] = useState<"standard" | "limited" | null>(null); const [modifiedView, setModifiedView] = useState("standard");
+  const [mobility, setMobility] = useState<"standard" | "limited" | null>(null); const [modifiedView, setModifiedView] = useState<EDModifiedViewId>("standard");
   const extremityExam = !!specificity && /hand|wrist|elbow|shoulder|knee|ankle|foot|hip/i.test(specificity.anatomy); const needsSide = !!specificity && specificity.laterality === "not specified" && extremityExam;
   const reply = request && specificity ? patientReply(request.clinicalHistory, specificity.anatomy) : "";
   const discrepancy = !!request && !request.isValid;
-  const edShoulder = department === "ed" && edViews.some(v => v.id === "seated-axial-shoulder");
 
   const enterRoom = () => {
     if (!specificity || !aoiConfirmed || (needsSide && !sideChoice) || patientConfirmed !== true) return;
-    const placement = modifiedView === "seated-axial-shoulder" ? "seated" : selected;
-    confirmSetup(placement); patchPose(poseForExtremityPlacement(projectionId, placement, equipment.buckyTilt, pose));
-    if (modifiedView === "seated-axial-shoulder") {
-      patchEquipment({ placement: "seated", buckyTilt: 45 });
-      patchTube({ angle: 45 });
+    const view = edViews.find(v => v.id === modifiedView);
+    const placement = view?.placement ?? selected;
+    confirmSetup(placement);
+    patchPose(poseForExtremityPlacement(projectionId, placement, view?.buckyTilt ?? equipment.buckyTilt, pose));
+    if (department === "ed" && mobility === "limited" && view && view.id !== "standard") {
+      patchEquipment({ placement, ...(view.buckyTilt !== undefined ? { buckyTilt: view.buckyTilt } : {}) });
+      if (view.tubeAngle !== undefined) patchTube({ angle: view.tubeAngle });
     }
   };
 
@@ -70,7 +71,7 @@ export function SetupScreen() {
         {patientConfirmed === true && <div className="mt-3 rounded-md border border-accent/30 bg-accent/5 p-3 text-xs"><p className="font-semibold text-fg">AOI confirmed</p><p className="mt-1 text-muted">{specificity.laterality} · {specificity.extent} · {specificity.anatomy}. {specificity.surface !== "not specified" ? `${specificity.surface} surface.` : "No surface has been specified — do not invent one."}</p></div>}
       </section>}
 
-      {department === "ed" && <section className="rounded-xl border border-red-500/25 bg-surface p-4"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-wider text-red-500">ED mobility check</p><h2 className="mt-1 text-base font-semibold">Can the patient safely achieve the standard position?</h2></div><Badge tone={mobility === "limited" ? "danger" : mobility === "standard" ? "ok" : "muted"}>{mobility === "limited" ? "Modified view" : mobility === "standard" ? "Standard view" : "Not assessed"}</Badge></div><p className="mt-2 text-sm leading-relaxed text-muted">In trauma, the patient's ability to move is part of the examination decision. Never force a painful shoulder, suspected fracture or immobilised patient into a textbook position.</p><div className="mt-3 flex flex-wrap gap-2"><Button size="sm" variant={mobility === "standard" ? "solid" : "outline"} onClick={() => { setMobility("standard"); setModifiedView("standard"); }}>Can move safely</Button><Button size="sm" variant={mobility === "limited" ? "solid" : "outline"} onClick={() => setMobility("limited")}>Movement limited / painful</Button></div>{mobility === "limited" && <div className="mt-4 space-y-2">{edViews.map(view => <button key={view.id} type="button" onClick={() => setModifiedView(view.id)} className={`w-full rounded-lg border px-4 py-3 text-left ${modifiedView === view.id ? "border-accent bg-accent/10" : "border-border hover:border-muted"}`}><div className="flex items-center justify-between gap-2"><span className="font-medium text-fg">{view.label}</span>{view.id === "seated-axial-shoulder" && <Badge tone="accent">Recommended when appropriate</Badge>}</div><p className="mt-1 text-xs leading-relaxed text-muted">{view.when}</p>{view.id !== "standard" && <div className="mt-2 grid gap-1 text-xs text-muted"><span><strong className="text-fg">Patient:</strong> {view.positioning}</span><span><strong className="text-fg">Tube:</strong> {view.tube}</span><span><strong className="text-fg">Bucky:</strong> {view.bucky}</span></div>}</button>)}</div>}</section>}
+      {department === "ed" && <section className="rounded-xl border border-red-500/25 bg-surface p-4"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-wider text-red-500">ED mobility check</p><h2 className="mt-1 text-base font-semibold">Can the patient safely achieve the standard position?</h2></div><Badge tone={mobility === "limited" ? "danger" : mobility === "standard" ? "ok" : "muted"}>{mobility === "limited" ? "Modified view" : mobility === "standard" ? "Standard view" : "Not assessed"}</Badge></div><p className="mt-2 text-sm leading-relaxed text-muted">In trauma, the patient's ability to move is part of the examination decision. Never force a painful shoulder, suspected fracture or immobilised patient into a textbook position.</p><div className="mt-3 flex flex-wrap gap-2"><Button size="sm" variant={mobility === "standard" ? "solid" : "outline"} onClick={() => { setMobility("standard"); setModifiedView("standard"); }}>Can move safely</Button><Button size="sm" variant={mobility === "limited" ? "solid" : "outline"} onClick={() => setMobility("limited")}>Movement limited / painful</Button></div>{mobility === "limited" && <div className="mt-4 space-y-2">{edViews.map(view => <button key={view.id} type="button" onClick={() => setModifiedView(view.id)} className={`w-full rounded-lg border px-4 py-3 text-left ${modifiedView === view.id ? "border-accent bg-accent/10" : "border-border hover:border-muted"}`}><div className="flex items-center justify-between gap-2"><span className="font-medium text-fg">{view.label}</span>{view.id !== "standard" && view.id === "seated-axial-shoulder" && <Badge tone="accent">Example modified view</Badge>}</div><p className="mt-1 text-xs leading-relaxed text-muted">{view.when}</p>{view.id !== "standard" && <div className="mt-2 grid gap-1 text-xs text-muted"><span><strong className="text-fg">Patient:</strong> {view.positioning}</span><span><strong className="text-fg">Tube:</strong> {view.tube}</span><span><strong className="text-fg">Detector:</strong> {view.bucky}</span><span><strong className="text-fg">Safety:</strong> {view.safety}</span></div>}</button>)}</div>}</section>}
 
       <section className="rounded-xl border border-border bg-surface p-4"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted">Patient presentation</p><p className="mt-1 text-sm leading-relaxed text-muted">Choose how the patient will be presented. The suggested setup is a starting point, not a restriction.</p><div className="mt-3 flex items-center gap-2 text-xs text-muted"><span>Typical setup</span><Badge tone="accent">{suggested === "upright-bucky" ? "Upright bucky" : "Table"}</Badge></div><div className="mt-3 flex flex-col gap-2">{OPTIONS.map(opt => { const active = selected === opt.id; return <button key={opt.id} type="button" onClick={() => patchEquipment({ placement: opt.id, buckyTilt: opt.id === "upright-bucky" ? 0 : equipment.buckyTilt })} className={`rounded-lg border px-4 py-3 text-left transition-colors ${active ? "border-accent bg-accent/10" : "border-border bg-surface hover:border-muted"}`}><div className="flex items-center justify-between gap-2"><span className="font-medium text-fg">{opt.title}</span><span className="text-[11px] text-muted">{opt.badge}</span></div><p className="mt-1 text-xs leading-relaxed text-muted">{opt.detail}</p></button>; })}</div></section>
 
