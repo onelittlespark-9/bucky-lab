@@ -26,9 +26,6 @@ function pathsToOD(p: Paths, kvp: number): number {
     + muFromHU(3000, kvp) * p.metal;
 }
 
-// Reference radiographs are not composited into the generated image. The
-// anatomy gallery is used as an anatomical/landmark reference; the simulator
-// generates its own projection from the patient model and acquisition physics.
 export function preloadRadiographAssets(_projections: Projection[]) { /* no-op */ }
 
 function localCoords(projection: Projection, patient: Patient, pose: SimPose, px: number, py: number, w: number, h: number, tube: TubeState, geometry: ReturnType<typeof projectionGeometry>): { x: number; y: number } {
@@ -36,12 +33,18 @@ function localCoords(projection: Projection, patient: Patient, pose: SimPose, px
   const cmY = ((py + 0.5) / h - 0.5) * tube.collimationH / geometry.magnification;
   const angle = (tube.angle * Math.PI) / 180;
   const angleShift = Math.tan(angle) * geometry.oidCm;
-  const rotation = (pose.rotationY * Math.PI) / 180;
   const oblique = (pose.oblique * Math.PI) / 180;
-  const rx = cmX * Math.cos(rotation) + cmY * Math.sin(rotation) * 0.12;
   const ry = cmY * Math.cos(oblique) - cmX * Math.sin(oblique) * 0.18 - angleShift;
-  if (projection.anatomy === "torso-ap" || projection.anatomy === "torso-lat" || projection.anatomy === "cspine-lat" || projection.anatomy === "shoulder-ap") return { x: tube.crX + rx, y: tube.crY + ry };
-  if (projection.anatomy === "skull-lat") return { x: rx, y: ry + (tube.crY - 10) * 0.4 };
+
+  // A lateral detector's horizontal axis is the patient's AP dimension. The old
+  // mapping rotated detector X into detector Y, collapsing the chest into a thin
+  // vertical strip and producing the grossly distorted lateral radiograph.
+  const lateral = projection.anatomy === "torso-lat" || projection.anatomy === "cspine-lat" || projection.anatomy === "skull-lat";
+  if (lateral) return { x: tube.crX + cmX, y: tube.crY + ry };
+
+  const rotation = (pose.rotationY * Math.PI) / 180;
+  const rx = cmX * Math.cos(rotation);
+  if (projection.anatomy === "torso-ap" || projection.anatomy === "shoulder-ap") return { x: tube.crX + rx, y: tube.crY + ry };
   return { x: rx + tube.crX * 0.15, y: ry + (tube.crY - projection.cr.y) * 0.25 };
 }
 
@@ -66,48 +69,20 @@ function addPacemaker(paths: Paths, x: number, y: number, projection: Projection
   paths.metal += (generator + lead1 + lead2) * 14;
 }
 
-/** Detect frames that are clinically unusable (full saturation, empty field, or severe banding). */
 function assertFrameQuality(signal: Float32Array, width: number, height: number, satFraction: number, mean: number): void {
   const n = width * height;
   if (n < 100) throw new Error("Render failed — detector matrix is too small.");
-
-  // Extreme saturation (the pure-white frames you saw)
   if (satFraction > 0.55) {
-    throw new Error(
-      `Render failed — image is severely over-exposed (${Math.round(satFraction * 100)}% of pixels saturated). ` +
-      "Reduce kVp / mAs or use ‘Load standard technique’ before exposing again."
-    );
+    throw new Error(`Render failed — image is severely over-exposed (${Math.round(satFraction * 100)}% of pixels saturated). Reduce kVp / mAs or use ‘Load standard technique’ before exposing again.`);
   }
+  if (!Number.isFinite(mean) || mean < 0.05) throw new Error("Render failed — almost no signal reached the detector (mean signal ≈ 0). Check collimation, patient positioning and exposure factors.");
+  if (mean > 5000) throw new Error("Render failed — detector signal is unphysically high. Exposure factors or geometry are outside the valid simulation range.");
 
-  // Near-zero or absurd mean signal
-  if (!Number.isFinite(mean) || mean < 0.05) {
-    throw new Error(
-      "Render failed — almost no signal reached the detector (mean signal ≈ 0). " +
-      "Check collimation, patient positioning and exposure factors."
-    );
-  }
-  if (mean > 5000) {
-    throw new Error(
-      "Render failed — detector signal is unphysically high. " +
-      "Exposure factors or geometry are outside the valid simulation range."
-    );
-  }
-
-  // Very low spatial variance → flat / empty / banded image
   let variance = 0;
-  for (let i = 0; i < n; i++) {
-    const d = signal[i]! - mean;
-    variance += d * d;
-  }
+  for (let i = 0; i < n; i++) { const d = signal[i]! - mean; variance += d * d; }
   variance /= n;
-  if (variance < 0.8) {
-    throw new Error(
-      "Render failed — image has almost no anatomical structure (near-zero variance). " +
-      "This usually means the anatomy sampler or atlas projection returned empty data."
-    );
-  }
+  if (variance < 0.8) throw new Error("Render failed — image has almost no anatomical structure (near-zero variance). This usually means the anatomy sampler or atlas projection returned empty data.");
 
-  // Horizontal banding heuristic: compare row-to-row mean differences
   const rowMeans = new Float32Array(height);
   for (let y = 0; y < height; y++) {
     let rowSum = 0;
@@ -115,15 +90,8 @@ function assertFrameQuality(signal: Float32Array, width: number, height: number,
     rowMeans[y] = rowSum / width;
   }
   let largeRowJumps = 0;
-  for (let y = 1; y < height; y++) {
-    if (Math.abs(rowMeans[y]! - rowMeans[y - 1]!) > mean * 0.35) largeRowJumps++;
-  }
-  if (largeRowJumps > height * 0.18) {
-    throw new Error(
-      "Render failed — strong horizontal banding detected. " +
-      "This indicates a geometry / coordinate-mapping or atlas depth-buffer error."
-    );
-  }
+  for (let y = 1; y < height; y++) if (Math.abs(rowMeans[y]! - rowMeans[y - 1]!) > mean * 0.35) largeRowJumps++;
+  if (largeRowJumps > height * 0.18) throw new Error("Render failed — strong horizontal banding detected. This indicates a geometry / coordinate-mapping or atlas depth-buffer error.");
 }
 
 export async function renderRadiograph(args: {
@@ -144,10 +112,7 @@ export async function renderRadiograph(args: {
     const aspect = tube.collimationW / tube.collimationH;
     const height = args.height ?? 768;
     const width = args.width ?? Math.round(height * aspect);
-
-    if (width < 64 || height < 64 || width > 2048 || height > 2048) {
-      throw new Error(`Render failed — invalid detector size ${width}×${height}.`);
-    }
+    if (width < 64 || height < 64 || width > 2048 || height > 2048) throw new Error(`Render failed — invalid detector size ${width}×${height}.`);
 
     const kvp = exposure.kvp;
     const grid = exposure.grid;
@@ -158,20 +123,10 @@ export async function renderRadiograph(args: {
     const seed = hashPatient(patient.id);
     const ctx: SampleCtx = { patient, projection, pose, seed };
 
-    // Atlas is the preferred bone source. Failures are caught and reported clearly.
     let atlasOD: Float32Array | null = null;
     let atlasError: string | null = null;
     try {
-      atlasOD = await atlasBoneOpticalDensity({
-        patient,
-        projection,
-        pose,
-        tube,
-        exposureKvp: kvp,
-        width,
-        height,
-        geometry,
-      });
+      atlasOD = await atlasBoneOpticalDensity({ patient, projection, pose, tube, exposureKvp: kvp, width, height, geometry });
     } catch (err) {
       atlasError = err instanceof Error ? err.message : String(err);
       console.warn("[Bucky Lab] Atlas bone projection failed:", atlasError);
@@ -180,15 +135,11 @@ export async function renderRadiograph(args: {
 
     const signal = new Float32Array(width * height);
     let sum = 0;
-
     for (let py = 0; py < height; py++) {
       for (let px = 0; px < width; px++) {
         const { x, y } = localCoords(projection, patient, pose, px, py, width, height, tube, geometry);
         const paths = sampleAnatomy(x, y, ctx);
-        if (hasAtlas) {
-          paths.bone = 0;
-          paths.cortical = 0;
-        }
+        if (hasAtlas) { paths.bone = 0; paths.cortical = 0; }
         if (projection.anatomy === "torso-ap" || projection.anatomy === "torso-lat") {
           addSharedTissueLayers(paths, x, y, patient, pose);
           addSharedOrganPaths(paths, x, y, patient, pose);
@@ -197,9 +148,8 @@ export async function renderRadiograph(args: {
 
         const softOd = pathsToOD(paths, kvp) * (hasAtlas ? (0.65 + thickness / 45) : (0.55 + thickness / 40));
         const atlasOd = atlasOD?.[py * width + px] ?? 0;
-        let od = Math.max(0.01, softOd + atlasOd + pathologyDelta(pathologyId, x, y, projection));
+        const od = Math.max(0.01, softOd + atlasOd + pathologyDelta(pathologyId, x, y, projection));
         const T = Math.exp(-od);
-
         const boneMask = atlasOd > 0.012 || paths.bone > 0.3 || paths.cortical > 0.15 ? 1 : 0;
         const trabFine = (fbm(x * 3.2, y * 3.2, seed + 31) - 0.5) * 0.018;
         const trabCoarse = (fbm(x * 0.9, y * 0.9, seed + 37) - 0.5) * 0.012;
@@ -207,9 +157,7 @@ export async function renderRadiograph(args: {
         const anatomicalTexture = 1 + boneMask * (trabFine + trabCoarse) + softVar;
         const scat = I0 * scatterFrac * (0.5 + 0.5 * (paths.soft + paths.lung > 0 ? 1 : 0.15));
         let sig = I0 * T * anatomicalTexture + scat;
-        if (paths.air > 20 && paths.soft < 0.2 && atlasOd < 0.01 && paths.bone < 0.2) {
-          sig = I0 * 1.02 + scat * 0.12;
-        }
+        if (paths.air > 20 && paths.soft < 0.2 && atlasOd < 0.01 && paths.bone < 0.2) sig = I0 * 1.02 + scat * 0.12;
         signal[py * width + px] = sig;
         sum += sig;
       }
@@ -218,8 +166,6 @@ export async function renderRadiograph(args: {
     const n = width * height;
     const mean = sum / n;
     const well = 280;
-
-    // First quality gate on the raw signal before expensive tone-mapping
     let satEstimate = 0;
     for (let i = 0; i < n; i++) if (signal[i]! > well) satEstimate++;
     assertFrameQuality(signal, width, height, satEstimate / n, mean);
@@ -268,9 +214,7 @@ export async function renderRadiograph(args: {
       if (nx > 0) { contrastAcc += Math.abs(v - img.data[(i - 1) * 4]!); contrastN++; }
     }
 
-    // Final quality gate after tone-mapping
     assertFrameQuality(signal, width, height, sat / n, mean);
-
     const markerLetter = exposure.marker === "L" || exposure.marker === "R" ? exposure.marker : "R";
     stampMarker(img, width, height, markerLetter, Math.round(width * 0.08), Math.round(height * 0.12));
     g.putImageData(img, 0, 0);
@@ -281,17 +225,10 @@ export async function renderRadiograph(args: {
     const overall = scores.reduce((a, c) => a + c.weight * gradeNum(c.grade), 0) / scores.reduce((a, c) => a + c.weight, 0);
     const overallGrade = overall >= 0.85 ? "excellent" : overall >= 0.62 ? "acceptable" : "repeat";
 
-    // Soft warning when atlas failed but procedural path still produced a usable image
-    if (atlasError && !hasAtlas) {
-      console.warn(
-        "[Bucky Lab] Radiograph generated with procedural bone only. Atlas error was:\n" + atlasError
-      );
-    }
-
+    if (atlasError && !hasAtlas) console.warn("[Bucky Lab] Radiograph generated with procedural bone only. Atlas error was:\n" + atlasError);
     return { metrics, scores, overall, overallGrade, width, height, dataUrl };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    // Re-throw with a consistent prefix so the UI can recognise render failures
     if (message.startsWith("Render failed")) throw err;
     throw new Error(`Render failed — ${message}`);
   }
