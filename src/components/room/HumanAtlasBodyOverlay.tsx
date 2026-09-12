@@ -34,8 +34,11 @@ function rotateAround(point:THREE.Vector3,pivot:THREE.Vector3,quaternion:THREE.Q
 
 function deformSkin(root:THREE.Group,patient:ReturnType<typeof patientById>,pose:ReturnType<typeof useSim.getState>["pose"]){
   const H=patient.heightCm/100,scale=H/ATLAS_HEIGHT_M;
-  const kin=patientKinematics({H,s:1,shoulder:patient.morph.shoulder,hip:patient.morph.hip,limb:patient.morph.limb,elbowFlex:pose.elbowFlex,hipInternal:pose.hipInternal,armRaise:pose.armRaise,armSide:pose.armSide,shoulderRoll:pose.shoulderRoll,kneeFlex:pose.kneeFlex,projectionId:"pa-chest",placement:"table",buckyTilt:0});
-  const yAxis=new THREE.Vector3(0,1,0);
+  const kin=patientKinematics({H,s:1,shoulder:patient.morph.shoulder,hip:patient.morph.hip,limb:patient.morph.limb,elbowFlex:pose.elbowFlex,hipInternal:pose.hipInternal,armRaise:pose.armRaise,armSide:pose.armSide,shoulderRoll:pose.shoulderRoll,armRotation:pose.armRotation,forearmRotation:pose.forearmRotation,kneeFlex:pose.kneeFlex,projectionId:"pa-chest",placement:"table",buckyTilt:0});
+  // The atlas is supplied in a relaxed, arms-down anatomical reference pose.
+  // Use -Y as the neutral limb axis so opening an exam does not apply an
+  // artificial 180-degree flip to otherwise correctly positioned arms.
+  const neutralArmAxis=new THREE.Vector3(0,-1,0);
   root.traverse(object=>{
     if(!(object instanceof THREE.Mesh))return;
     const attribute=object.geometry.getAttribute("position"),base=object.userData.basePositions as Float32Array|undefined;if(!base)return;
@@ -46,14 +49,14 @@ function deformSkin(root:THREE.Group,patient:ReturnType<typeof patientById>,pose
       const shoulderPivot=new THREE.Vector3(...arm.shoulder),elbowPivot=new THREE.Vector3(...arm.elbow);
       const upperDir=new THREE.Vector3(...arm.elbow).sub(new THREE.Vector3(...arm.shoulder)).normalize();
       const forearmDir=new THREE.Vector3(...arm.wrist).sub(new THREE.Vector3(...arm.elbow)).normalize();
-      const upperQ=new THREE.Quaternion().setFromUnitVectors(yAxis,upperDir),forearmQ=new THREE.Quaternion().setFromUnitVectors(yAxis,forearmDir);
+      const upperQ=new THREE.Quaternion().setFromUnitVectors(neutralArmAxis,upperDir),forearmQ=new THREE.Quaternion().setFromUnitVectors(neutralArmAxis,forearmDir);
       const ax=Math.abs(p.x);
       const shoulderEnvelope=smoothstep(.13*scale,.22*scale,ax)*smoothstep(.63*H,.70*H,p.y)*(1-smoothstep(.75*H,.80*H,p.y));
       const upperArm=smoothstep(.17*scale,.26*scale,ax)*smoothstep(.56*H,.68*H,p.y)*(1-smoothstep(.68*H,.78*H,p.y));
       const forearm=smoothstep(.23*scale,.33*scale,ax)*smoothstep(.41*H,.59*H,p.y)*(1-smoothstep(.57*H,.64*H,p.y));
       if(active&&upperArm>.001){rotateAround(p,shoulderPivot,upperQ);p.lerp(original,1-upperArm);}else if(active&&forearm>.001){const transformedElbow=elbowPivot.clone();rotateAround(p,shoulderPivot,upperQ);rotateAround(transformedElbow,shoulderPivot,upperQ);rotateAround(p,transformedElbow,forearmQ);p.lerp(original,1-forearm);}else if(active&&shoulderEnvelope>.001){rotateAround(p,shoulderPivot,upperQ);p.lerp(original,1-shoulderEnvelope);}
       const hipEnvelope=smoothstep(.10*scale,.18*scale,ax),thigh=hipEnvelope*smoothstep(.32*H,.40*H,p.y)*(1-smoothstep(.45*H,.55*H,p.y)),lowerLeg=hipEnvelope*smoothstep(.06*H,.20*H,p.y)*(1-smoothstep(.22*H,.31*H,p.y));
-      if(thigh>.001){const leg=kin.legs[side<0?0:1],q=new THREE.Quaternion().setFromUnitVectors(yAxis,new THREE.Vector3(...leg.knee).sub(new THREE.Vector3(...leg.hip)).normalize());rotateAround(p,new THREE.Vector3(...leg.hip),q);p.lerp(original,1-thigh);}else if(lowerLeg>.001){const leg=kin.legs[side<0?0:1],hipQ=new THREE.Quaternion().setFromUnitVectors(yAxis,new THREE.Vector3(...leg.knee).sub(new THREE.Vector3(...leg.hip)).normalize()),kneeQ=new THREE.Quaternion().setFromUnitVectors(yAxis,new THREE.Vector3(...leg.ankle).sub(new THREE.Vector3(...leg.knee)).normalize()),transformedKnee=new THREE.Vector3(...leg.knee);rotateAround(p,new THREE.Vector3(...leg.hip),hipQ);rotateAround(transformedKnee,new THREE.Vector3(...leg.hip),hipQ);rotateAround(p,transformedKnee,kneeQ);p.lerp(original,1-lowerLeg);}
+      if(thigh>.001){const leg=kin.legs[side<0?0:1],q=new THREE.Quaternion().setFromUnitVectors(neutralArmAxis,new THREE.Vector3(...leg.knee).sub(new THREE.Vector3(...leg.hip)).normalize());rotateAround(p,new THREE.Vector3(...leg.hip),q);p.lerp(original,1-thigh);}else if(lowerLeg>.001){const leg=kin.legs[side<0?0:1],hipQ=new THREE.Quaternion().setFromUnitVectors(neutralArmAxis,new THREE.Vector3(...leg.knee).sub(new THREE.Vector3(...leg.hip)).normalize()),kneeQ=new THREE.Quaternion().setFromUnitVectors(neutralArmAxis,new THREE.Vector3(...leg.ankle).sub(new THREE.Vector3(...leg.knee)).normalize()),transformedKnee=new THREE.Vector3(...leg.knee);rotateAround(p,new THREE.Vector3(...leg.hip),hipQ);rotateAround(transformedKnee,new THREE.Vector3(...leg.hip),hipQ);rotateAround(p,transformedKnee,kneeQ);p.lerp(original,1-lowerLeg);}
       target[i]=p.x;target[i+1]=p.y;target[i+2]=p.z;
     }
     attribute.needsUpdate=true;object.geometry.computeVertexNormals();object.geometry.computeBoundingSphere();
