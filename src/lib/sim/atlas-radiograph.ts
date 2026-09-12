@@ -170,7 +170,7 @@ export async function atlasBoneOpticalDensity(args:{patient:Patient;projection:P
       const thickness=renderMeshThickness(scene,atlas.root,atlas.meshes,mesh,camera,renderer,renderTarget,frontMaterial,backMaterial,rw,rh),hu=materialHU(region,projection),muTrab=muFromHU(hu.trabecular,exposureKvp),muCort=muFromHU(hu.cortical,exposureKvp),gain=chest?chestRegionGain(region):1,cap=chest?chestThicknessCap(region):12;
       for(let i=0;i<low.length;i++){
         const raw=thickness[i]!;if(raw<=0)continue;
-        const t=Math.min(raw,cap),shellCm=Math.min(t*.16,chest?.06:.22),corticalPath=Math.min(t,shellCm*2),trabPath=Math.max(0,t-corticalPath);
+        const t=Math.min(raw,cap),shellCm=Math.min(t*.16,chest ? .06 : .22),corticalPath=Math.min(t,shellCm*2),trabPath=Math.max(0,t-corticalPath);
         low[i]+=(corticalPath*muCort+trabPath*muTrab)*gain;
       }
     }
