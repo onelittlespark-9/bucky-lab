@@ -14,7 +14,8 @@ type Side=-1|1;
 
 function regionFor(name:string):string {
   const n=name.toLowerCase();
-  if(n.includes("rib")||n.includes("costal"))return"rib";
+  if(n.includes("cartilage"))return"other";
+  if(n.includes("rib")||(n.includes("costal")&&!n.includes("cartilage")))return"rib";
   if(n.includes("scapula"))return"scapula";
   if(n.includes("clavicle"))return"clavicle";
   if(n.includes("humerus"))return"humerus";
@@ -26,7 +27,7 @@ function regionFor(name:string):string {
   if(n.includes("pelvis")||n.includes("ilium")||n.includes("ischium")||n.includes("pubis")||n.includes("sacrum"))return"pelvis";
   if(n.includes("vertebra")||n.includes("spine")||n.includes("sternum")||n.includes("coccyx"))return"axial";
   if(n.includes("skull")||n.includes("mandible")||n.includes("maxilla")||n.includes("zygomatic")||n.includes("temporal")||n.includes("frontal")||n.includes("parietal"))return"skull";
-  return"axial";
+  return"other";
 }
 function sideFor(bounds:[number[],number[]]):Side{return((bounds[0][0]+bounds[1][0])*.5)<0?-1:1;}
 
@@ -57,6 +58,7 @@ async function loadAtlas():Promise<AtlasScene>{
     mesh.name=`Atlas radiograph ${part.name}`;
     mesh.userData.atlasRegion=regionFor(part.name);
     mesh.userData.atlasSide=sideFor(part.bounds);
+    mesh.userData.atlasName=part.name.toLowerCase();
     mesh.userData.atlasCenter=[center.x,center.y,center.z] as V3;
     root.add(mesh);meshes.push(mesh);
   }
@@ -94,10 +96,10 @@ function articulate(root:THREE.Group,meshes:THREE.Mesh[],pose:SimPose,patient:Pa
 function materialHU(region:string,projection:Projection){
   const chest=projection.id==="pa-chest"||projection.id==="lat-chest";
   if(chest){
-    if(region==="rib")return{trabecular:170,cortical:560};
-    if(region==="clavicle")return{trabecular:220,cortical:650};
-    if(region==="scapula")return{trabecular:150,cortical:460};
-    if(region==="axial")return{trabecular:170,cortical:560};
+    if(region==="rib")return{trabecular:155,cortical:520};
+    if(region==="clavicle")return{trabecular:210,cortical:620};
+    if(region==="scapula")return{trabecular:140,cortical:430};
+    if(region==="axial")return{trabecular:145,cortical:500};
   }
   if(region==="skull")return{trabecular:650,cortical:1250};if(region==="pelvis")return{trabecular:500,cortical:1150};if(region==="rib"||region==="scapula"||region==="clavicle")return{trabecular:450,cortical:1050};if(region==="axial")return{trabecular:projection.id.includes("lumbar")?500:450,cortical:1050};if(region==="femur"||region==="lowerleg")return{trabecular:550,cortical:1250};if(region==="humerus"||region==="forearm")return{trabecular:500,cortical:1150};if(region==="hand"||region==="foot")return{trabecular:450,cortical:1000};return{trabecular:500,cortical:1100};
 }
@@ -120,8 +122,8 @@ function renderMeshThickness(scene:THREE.Scene,root:THREE.Group,meshes:THREE.Mes
   return out;
 }
 function regionsForProjection(p:Projection){if(p.id==="pa-chest"||p.id==="lat-chest")return["axial","rib","scapula","clavicle"];return["axial","rib","scapula","clavicle","skull","pelvis","femur","lowerleg","humerus","forearm","hand","foot"];}
-function chestRegionGain(region:string){if(region==="rib")return 0.30;if(region==="axial")return 0.14;if(region==="clavicle")return 0.28;if(region==="scapula")return 0.035;return 0.4;}
-function chestThicknessCap(region:string){if(region==="rib")return 0.58;if(region==="axial")return 0.9;if(region==="clavicle")return 0.75;if(region==="scapula")return 0.35;return 1.5;}
+function chestRegionGain(region:string){if(region==="rib")return 0.26;if(region==="axial")return 0.08;if(region==="clavicle")return 0.22;if(region==="scapula")return 0.025;return 0.35;}
+function chestThicknessCap(region:string){if(region==="rib")return 0.52;if(region==="axial")return 0.62;if(region==="clavicle")return 0.68;if(region==="scapula")return 0.30;return 1.2;}
 function ribBounds(root:THREE.Group,meshes:THREE.Mesh[]):THREE.Box3|null{
   root.updateMatrixWorld(true);
   const box=new THREE.Box3();let found=false;
@@ -130,10 +132,13 @@ function ribBounds(root:THREE.Group,meshes:THREE.Mesh[]):THREE.Box3|null{
 }
 function chestMeshAllowed(mesh:THREE.Mesh,projection:Projection,ribs:THREE.Box3|null){
   const region=mesh.userData.atlasRegion as string;
+  const name=(mesh.userData.atlasName as string)||"";
+  if(name.includes("cartilage"))return false;
   if(projection.id==="pa-chest"&&region==="scapula")return false;
+  if(projection.id==="pa-chest"&&region==="axial"&&!name.includes("vertebra")&&!name.includes("spine"))return false;
   if((projection.id==="pa-chest"||projection.id==="lat-chest")&&region==="axial"&&ribs){
     const b=new THREE.Box3().setFromObject(mesh),c=b.getCenter(new THREE.Vector3());
-    return c.y>=ribs.min.y-0.025&&c.y<=ribs.max.y+0.025;
+    return c.y>=ribs.min.y-0.015&&c.y<=ribs.max.y+0.015;
   }
   return true;
 }
@@ -148,13 +153,7 @@ export async function atlasBoneOpticalDensity(args:{patient:Patient;projection:P
     const rw=Math.min(448,Math.max(224,width)),rh=Math.min(448,Math.max(224,height));
     const chest=projection.id==="pa-chest"||projection.id==="lat-chest",ribs=ribBounds(atlas.root,atlas.meshes);
     let target:THREE.Vector3;
-    if(chest&&ribs){
-      target=ribs.getCenter(new THREE.Vector3());
-      target.x=0;
-    }else{
-      const targetYcm=projection.cr.y*patient.heightCm/170,targetXcm=projection.cr.x,targetY=patient.heightCm/100-targetYcm/100;
-      target=new THREE.Vector3(targetXcm/100,targetY,0);
-    }
+    if(chest&&ribs){target=ribs.getCenter(new THREE.Vector3());target.x=0;}else{const targetYcm=projection.cr.y*patient.heightCm/170,targetXcm=projection.cr.x,targetY=patient.heightCm/100-targetYcm/100;target=new THREE.Vector3(targetXcm/100,targetY,0);}
     const lateral=projection.anatomy==="torso-lat"||projection.anatomy==="cspine-lat"||projection.anatomy==="skull-lat";
     const camera=new THREE.OrthographicCamera(0,1,1,0,.01,5),halfW=tube.collimationW/geometry.magnification/200,halfH=tube.collimationH/geometry.magnification/200;
     camera.left=-halfW;camera.right=halfW;camera.top=halfH;camera.bottom=-halfH;
@@ -171,11 +170,11 @@ export async function atlasBoneOpticalDensity(args:{patient:Patient;projection:P
       const thickness=renderMeshThickness(scene,atlas.root,atlas.meshes,mesh,camera,renderer,renderTarget,frontMaterial,backMaterial,rw,rh),hu=materialHU(region,projection),muTrab=muFromHU(hu.trabecular,exposureKvp),muCort=muFromHU(hu.cortical,exposureKvp),gain=chest?chestRegionGain(region):1,cap=chest?chestThicknessCap(region):12;
       for(let i=0;i<low.length;i++){
         const raw=thickness[i]!;if(raw<=0)continue;
-        const t=Math.min(raw,cap),shellCm=Math.min(t*.18,chest ? .08 : .22),corticalPath=Math.min(t,shellCm*2),trabPath=Math.max(0,t-corticalPath);
+        const t=Math.min(raw,cap),shellCm=Math.min(t*.16,chest?.06:.22),corticalPath=Math.min(t,shellCm*2),trabPath=Math.max(0,t-corticalPath);
         low[i]+=(corticalPath*muCort+trabPath*muTrab)*gain;
       }
     }
-    if(chest)for(let i=0;i<low.length;i++)low[i]=Math.min(low[i]!,0.34);
+    if(chest)for(let i=0;i<low.length;i++)low[i]=Math.min(low[i]!,0.27);
     for(const m of atlas.meshes)m.visible=true;scene.overrideMaterial=null;renderer.dispose();renderTarget.dispose();frontMaterial.dispose();backMaterial.dispose();
     const full=new Float32Array(width*height);
     for(let y=0;y<height;y++){const sy=y/Math.max(1,height-1)*(rh-1),y0=Math.floor(sy),y1=Math.min(rh-1,y0+1),fy=sy-y0;for(let x=0;x<width;x++){const sx=x/Math.max(1,width-1)*(rw-1),x0=Math.floor(sx),x1=Math.min(rw-1,x0+1),fx=sx-x0,a=low[y0*rw+x0]!,b=low[y0*rw+x1]!,c=low[y1*rw+x0]!,d=low[y1*rw+x1]!;full[y*width+x]=a*(1-fx)*(1-fy)+b*fx*(1-fy)+c*(1-fx)*fy+d*fx*fy;}}
