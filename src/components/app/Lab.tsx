@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, FlaskConical } from "lucide-react";
 import { useSim } from "@/lib/sim/store";
 import { ControlDeck } from "@/components/panels/ControlDeck";
 import { RadiographViewer } from "@/components/viewer/RadiographViewer";
@@ -24,5 +24,5 @@ export function Lab() {
 
 function TopBar() {
   const patientId = useSim(s => s.patientId); const projectionId = useSim(s => s.projectionId); const patient = patientById(patientId); const projection = projectionById(projectionId);
-  return <header className="flex items-center gap-3 border-b border-border bg-surface px-3 py-2"><Link to="/cases"><Button variant="ghost" size="sm" className="gap-1.5"><ArrowLeft className="size-4" />Library</Button></Link><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{projection.shortName}</p><p className="truncate text-[11px] text-muted">{patient.name} · {patient.habitus} · {patient.heightCm} cm</p></div><Badge>{projection.setup}</Badge></header>;
+  return <header className="flex items-center gap-3 border-b border-border bg-surface px-3 py-2"><Link to="/cases"><Button variant="ghost" size="sm" className="gap-1.5"><ArrowLeft className="size-4" />Library</Button></Link><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{projection.shortName}</p><p className="truncate text-[11px] text-muted">{patient.name} · {patient.habitus} · {patient.heightCm} cm</p></div><Link to="/test-exposure"><Button variant="outline" size="sm" className="gap-1.5"><FlaskConical className="size-4" />Test bench</Button></Link><Badge>{projection.setup}</Badge></header>;
 }
