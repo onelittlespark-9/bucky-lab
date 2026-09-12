@@ -66,126 +66,254 @@ function addPacemaker(paths: Paths, x: number, y: number, projection: Projection
   paths.metal += (generator + lead1 + lead2) * 14;
 }
 
-export async function renderRadiograph(args: { patient: Patient; projection: Projection; pose: SimPose; tube: TubeState; exposure: ExposureState; pathologyId?: PathologyId; caseId?: string | null; width?: number; height?: number; }): Promise<RadiographResult> {
-  const { patient, projection, pose, tube, exposure, pathologyId = "none", caseId } = args;
-  const simCase = caseById(caseId);
-  const aspect = tube.collimationW / tube.collimationH;
-  const height = args.height ?? 768;
-  const width = args.width ?? Math.round(height * aspect);
-  const kvp = exposure.kvp;
-  const grid = exposure.grid;
-  const geometry = projectionGeometry(projection, tube, pose, exposure.focalSpot);
-  const I0 = incidentFluence(kvp, exposure.mas, tube.sid, grid);
-  const thickness = partThickness(patient, projection);
-  const scatterFrac = fieldScatter(tube.collimationW, tube.collimationH, thickness, grid);
-  const seed = hashPatient(patient.id);
-  const ctx: SampleCtx = { patient, projection, pose, seed };
-
-  // The atlas is the bone source of truth. Procedural bone is disabled when
-  // atlas projection succeeds so the image cannot contain duplicated/offset
-  // bone shapes from two independent anatomy systems.
-  const atlasOD = await atlasBoneOpticalDensity({ patient, projection, pose, tube, exposureKvp: kvp, width, height, geometry });
-  const hasAtlas = atlasOD !== null;
-  const signal = new Float32Array(width * height);
-  let sum = 0;
-
-  for (let py = 0; py < height; py++) for (let px = 0; px < width; px++) {
-    const { x, y } = localCoords(projection, patient, pose, px, py, width, height, tube, geometry);
-    const paths = sampleAnatomy(x, y, ctx);
-    if (hasAtlas) {
-      paths.bone = 0;
-      paths.cortical = 0;
-    }
-    if (projection.anatomy === "torso-ap" || projection.anatomy === "torso-lat") {
-      addSharedTissueLayers(paths, x, y, patient, pose);
-      addSharedOrganPaths(paths, x, y, patient, pose);
-      addPacemaker(paths, x, y, projection, simCase?.device === "pacemaker");
-    }
-
-    const softOd = pathsToOD(paths, kvp) * (hasAtlas ? (0.65 + thickness / 45) : (0.55 + thickness / 40));
-    const atlasOd = atlasOD?.[py * width + px] ?? 0;
-    let od = Math.max(0.01, softOd + atlasOd + pathologyDelta(pathologyId, x, y, projection));
-    const T = Math.exp(-od);
-
-    // Keep anatomical texture extremely low amplitude. Radiographs should show
-    // continuous anatomical structures, not procedural speckle or line noise.
-    const boneMask = atlasOd > 0.012 || paths.bone > 0.3 || paths.cortical > 0.15 ? 1 : 0;
-    const trabFine = (fbm(x * 3.2, y * 3.2, seed + 31) - 0.5) * 0.018;
-    const trabCoarse = (fbm(x * 0.9, y * 0.9, seed + 37) - 0.5) * 0.012;
-    const softVar = (fbm(x * 0.45, y * 0.45, seed + 11) - 0.5) * 0.018 * (paths.soft > 1 ? 1 : 0);
-    const anatomicalTexture = 1 + boneMask * (trabFine + trabCoarse) + softVar;
-    const scat = I0 * scatterFrac * (0.5 + 0.5 * (paths.soft + paths.lung > 0 ? 1 : 0.15));
-    let sig = I0 * T * anatomicalTexture + scat;
-    if (paths.air > 20 && paths.soft < 0.2 && atlasOd < 0.01 && paths.bone < 0.2) sig = I0 * 1.02 + scat * 0.12;
-    signal[py * width + px] = sig;
-    sum += sig;
-  }
-
+/** Detect frames that are clinically unusable (full saturation, empty field, or severe banding). */
+function assertFrameQuality(signal: Float32Array, width: number, height: number, satFraction: number, mean: number): void {
   const n = width * height;
-  const mean = sum / n;
-  const well = 280;
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const g = canvas.getContext("2d")!;
-  const img = g.createImageData(width, height);
-  let sat = 0, noiseAcc = 0, contrastAcc = 0, contrastN = 0;
-  const logMean = Math.log(mean + 1e-5);
-  const contrastScale = clamp((kvp - 45) / 80, 0, 1);
-  const windowW = 1.7 + contrastScale * 2.2;
-  const windowL = logMean + (mean > 100 ? 0.15 : mean < 10 ? -0.25 : 0);
-  // Detector noise is deliberately subtle. The previous gain could turn low
-  // signal areas into conspicuous grain, which made the image look synthetic.
-  const noiseGain = 0.08 + 0.38 / Math.sqrt(Math.max(0.5, mean / 40));
-  const blurRadius = clamp(Math.round(geometry.geometricUnsharpnessMm * 1.25), 0, 3);
-  const blurWeight = blurRadius > 0 ? Math.min(0.28, geometry.geometricUnsharpnessMm * 0.11) : 0;
+  if (n < 100) throw new Error("Render failed — detector matrix is too small.");
 
-  for (let i = 0; i < n; i++) {
-    let sig = signal[i]!;
-    const nx = i % width, ny = (i / width) | 0;
-    if (blurRadius > 0 && nx > blurRadius && nx < width - blurRadius - 1) {
-      let neighbour = 0, count = 0;
-      for (let dx = 1; dx <= blurRadius; dx++) {
-        const falloff = 1 / (dx + 1);
-        neighbour += (signal[i - dx]! + signal[i + dx]!) * falloff;
-        count += 2 * falloff;
-      }
-      if (count > 0) sig = sig * (1 - blurWeight) + (neighbour / count) * blurWeight;
-    }
-    const sigma = noiseGain / Math.sqrt(Math.max(0.5, sig));
-    const nse = (fbm(nx * 0.42, ny * 0.42, seed + 4) - 0.5) * 2 * sigma * 3;
-    sig = Math.max(0, sig + nse);
-    noiseAcc += Math.abs(nse);
-    if (sig > well) { sig = well; sat += 1; }
-    const L = Math.log(sig + 1e-5);
-    let d = 1 - clamp((L - windowL) / windowW + 0.5, 0, 1);
-    if (kvp >= 100) d = 0.08 + d * 0.84;
-    else if (kvp <= 55) d = clamp(d < 0.5 ? d * 0.9 : 0.5 + (d - 0.5) * 1.1, 0, 1);
-    let tone = clamp(d, 0, 1);
-    tone = tone * tone * (3 - 2 * tone);
-    const v = Math.round(clamp(tone, 0, 1) * 255), o = i * 4;
-    img.data[o] = v; img.data[o + 1] = v; img.data[o + 2] = v; img.data[o + 3] = 255;
-    if (nx > 0) { contrastAcc += Math.abs(v - img.data[(i - 1) * 4]!); contrastN++; }
+  // Extreme saturation (the pure-white frames you saw)
+  if (satFraction > 0.55) {
+    throw new Error(
+      `Render failed — image is severely over-exposed (${Math.round(satFraction * 100)}% of pixels saturated). ` +
+      "Reduce kVp / mAs or use ‘Load standard technique’ before exposing again."
+    );
   }
 
-  // The side marker is part of the radiographic image. A projection-centre
-  // crosshair is not, so it is intentionally omitted from the final image.
-  const markerLetter = exposure.marker === "L" || exposure.marker === "R" ? exposure.marker : "R";
-  stampMarker(img, width, height, markerLetter, Math.round(width * 0.08), Math.round(height * 0.12));
-  g.putImageData(img, 0, 0);
-  const dataUrl = canvas.toDataURL("image/png");
-  const metrics = buildMetrics(mean, noiseAcc / n, contrastN ? contrastAcc / contrastN / 255 : 0, sat / n, patient, projection, exposure, tube);
-  const scores = scoreExposure({ patient, projection, pose, tube, exposure, metrics });
-  const overall = scores.reduce((a, c) => a + c.weight * gradeNum(c.grade), 0) / scores.reduce((a, c) => a + c.weight, 0);
-  const overallGrade = overall >= 0.85 ? "excellent" : overall >= 0.62 ? "acceptable" : "repeat";
-  return { metrics, scores, overall, overallGrade, width, height, dataUrl };
+  // Near-zero or absurd mean signal
+  if (!Number.isFinite(mean) || mean < 0.05) {
+    throw new Error(
+      "Render failed — almost no signal reached the detector (mean signal ≈ 0). " +
+      "Check collimation, patient positioning and exposure factors."
+    );
+  }
+  if (mean > 5000) {
+    throw new Error(
+      "Render failed — detector signal is unphysically high. " +
+      "Exposure factors or geometry are outside the valid simulation range."
+    );
+  }
+
+  // Very low spatial variance → flat / empty / banded image
+  let variance = 0;
+  for (let i = 0; i < n; i++) {
+    const d = signal[i]! - mean;
+    variance += d * d;
+  }
+  variance /= n;
+  if (variance < 0.8) {
+    throw new Error(
+      "Render failed — image has almost no anatomical structure (near-zero variance). " +
+      "This usually means the anatomy sampler or atlas projection returned empty data."
+    );
+  }
+
+  // Horizontal banding heuristic: compare row-to-row mean differences
+  const rowMeans = new Float32Array(height);
+  for (let y = 0; y < height; y++) {
+    let rowSum = 0;
+    for (let x = 0; x < width; x++) rowSum += signal[y * width + x]!;
+    rowMeans[y] = rowSum / width;
+  }
+  let largeRowJumps = 0;
+  for (let y = 1; y < height; y++) {
+    if (Math.abs(rowMeans[y]! - rowMeans[y - 1]!) > mean * 0.35) largeRowJumps++;
+  }
+  if (largeRowJumps > height * 0.18) {
+    throw new Error(
+      "Render failed — strong horizontal banding detected. " +
+      "This indicates a geometry / coordinate-mapping or atlas depth-buffer error."
+    );
+  }
 }
 
-function gradeNum(g: "excellent" | "acceptable" | "repeat"): number { return g === "excellent" ? 1 : g === "acceptable" ? 0.7 : 0.25; }
+export async function renderRadiograph(args: {
+  patient: Patient;
+  projection: Projection;
+  pose: SimPose;
+  tube: TubeState;
+  exposure: ExposureState;
+  pathologyId?: PathologyId;
+  caseId?: string | null;
+  width?: number;
+  height?: number;
+}): Promise<RadiographResult> {
+  const { patient, projection, pose, tube, exposure, pathologyId = "none", caseId } = args;
+
+  try {
+    const simCase = caseById(caseId);
+    const aspect = tube.collimationW / tube.collimationH;
+    const height = args.height ?? 768;
+    const width = args.width ?? Math.round(height * aspect);
+
+    if (width < 64 || height < 64 || width > 2048 || height > 2048) {
+      throw new Error(`Render failed — invalid detector size ${width}×${height}.`);
+    }
+
+    const kvp = exposure.kvp;
+    const grid = exposure.grid;
+    const geometry = projectionGeometry(projection, tube, pose, exposure.focalSpot);
+    const I0 = incidentFluence(kvp, exposure.mas, tube.sid, grid);
+    const thickness = partThickness(patient, projection);
+    const scatterFrac = fieldScatter(tube.collimationW, tube.collimationH, thickness, grid);
+    const seed = hashPatient(patient.id);
+    const ctx: SampleCtx = { patient, projection, pose, seed };
+
+    // Atlas is the preferred bone source. Failures are caught and reported clearly.
+    let atlasOD: Float32Array | null = null;
+    let atlasError: string | null = null;
+    try {
+      atlasOD = await atlasBoneOpticalDensity({
+        patient,
+        projection,
+        pose,
+        tube,
+        exposureKvp: kvp,
+        width,
+        height,
+        geometry,
+      });
+    } catch (err) {
+      atlasError = err instanceof Error ? err.message : String(err);
+      console.warn("[Bucky Lab] Atlas bone projection failed:", atlasError);
+    }
+    const hasAtlas = atlasOD !== null;
+
+    const signal = new Float32Array(width * height);
+    let sum = 0;
+
+    for (let py = 0; py < height; py++) {
+      for (let px = 0; px < width; px++) {
+        const { x, y } = localCoords(projection, patient, pose, px, py, width, height, tube, geometry);
+        const paths = sampleAnatomy(x, y, ctx);
+        if (hasAtlas) {
+          paths.bone = 0;
+          paths.cortical = 0;
+        }
+        if (projection.anatomy === "torso-ap" || projection.anatomy === "torso-lat") {
+          addSharedTissueLayers(paths, x, y, patient, pose);
+          addSharedOrganPaths(paths, x, y, patient, pose);
+          addPacemaker(paths, x, y, projection, simCase?.device === "pacemaker");
+        }
+
+        const softOd = pathsToOD(paths, kvp) * (hasAtlas ? (0.65 + thickness / 45) : (0.55 + thickness / 40));
+        const atlasOd = atlasOD?.[py * width + px] ?? 0;
+        let od = Math.max(0.01, softOd + atlasOd + pathologyDelta(pathologyId, x, y, projection));
+        const T = Math.exp(-od);
+
+        const boneMask = atlasOd > 0.012 || paths.bone > 0.3 || paths.cortical > 0.15 ? 1 : 0;
+        const trabFine = (fbm(x * 3.2, y * 3.2, seed + 31) - 0.5) * 0.018;
+        const trabCoarse = (fbm(x * 0.9, y * 0.9, seed + 37) - 0.5) * 0.012;
+        const softVar = (fbm(x * 0.45, y * 0.45, seed + 11) - 0.5) * 0.018 * (paths.soft > 1 ? 1 : 0);
+        const anatomicalTexture = 1 + boneMask * (trabFine + trabCoarse) + softVar;
+        const scat = I0 * scatterFrac * (0.5 + 0.5 * (paths.soft + paths.lung > 0 ? 1 : 0.15));
+        let sig = I0 * T * anatomicalTexture + scat;
+        if (paths.air > 20 && paths.soft < 0.2 && atlasOd < 0.01 && paths.bone < 0.2) {
+          sig = I0 * 1.02 + scat * 0.12;
+        }
+        signal[py * width + px] = sig;
+        sum += sig;
+      }
+    }
+
+    const n = width * height;
+    const mean = sum / n;
+    const well = 280;
+
+    // First quality gate on the raw signal before expensive tone-mapping
+    let satEstimate = 0;
+    for (let i = 0; i < n; i++) if (signal[i]! > well) satEstimate++;
+    assertFrameQuality(signal, width, height, satEstimate / n, mean);
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const g = canvas.getContext("2d");
+    if (!g) throw new Error("Render failed — could not obtain 2D canvas context.");
+
+    const img = g.createImageData(width, height);
+    let sat = 0, noiseAcc = 0, contrastAcc = 0, contrastN = 0;
+    const logMean = Math.log(mean + 1e-5);
+    const contrastScale = clamp((kvp - 45) / 80, 0, 1);
+    const windowW = 1.7 + contrastScale * 2.2;
+    const windowL = logMean + (mean > 100 ? 0.15 : mean < 10 ? -0.25 : 0);
+    const noiseGain = 0.08 + 0.38 / Math.sqrt(Math.max(0.5, mean / 40));
+    const blurRadius = clamp(Math.round(geometry.geometricUnsharpnessMm * 1.25), 0, 3);
+    const blurWeight = blurRadius > 0 ? Math.min(0.28, geometry.geometricUnsharpnessMm * 0.11) : 0;
+
+    for (let i = 0; i < n; i++) {
+      let sig = signal[i]!;
+      const nx = i % width, ny = (i / width) | 0;
+      if (blurRadius > 0 && nx > blurRadius && nx < width - blurRadius - 1) {
+        let neighbour = 0, count = 0;
+        for (let dx = 1; dx <= blurRadius; dx++) {
+          const falloff = 1 / (dx + 1);
+          neighbour += (signal[i - dx]! + signal[i + dx]!) * falloff;
+          count += 2 * falloff;
+        }
+        if (count > 0) sig = sig * (1 - blurWeight) + (neighbour / count) * blurWeight;
+      }
+      const sigma = noiseGain / Math.sqrt(Math.max(0.5, sig));
+      const nse = (fbm(nx * 0.42, ny * 0.42, seed + 4) - 0.5) * 2 * sigma * 3;
+      sig = Math.max(0, sig + nse);
+      noiseAcc += Math.abs(nse);
+      if (sig > well) { sig = well; sat += 1; }
+      const L = Math.log(sig + 1e-5);
+      let d = 1 - clamp((L - windowL) / windowW + 0.5, 0, 1);
+      if (kvp >= 100) d = 0.08 + d * 0.84;
+      else if (kvp <= 55) d = clamp(d < 0.5 ? d * 0.9 : 0.5 + (d - 0.5) * 1.1, 0, 1);
+      let tone = clamp(d, 0, 1);
+      tone = tone * tone * (3 - 2 * tone);
+      const v = Math.round(clamp(tone, 0, 1) * 255), o = i * 4;
+      img.data[o] = v; img.data[o + 1] = v; img.data[o + 2] = v; img.data[o + 3] = 255;
+      if (nx > 0) { contrastAcc += Math.abs(v - img.data[(i - 1) * 4]!); contrastN++; }
+    }
+
+    // Final quality gate after tone-mapping
+    assertFrameQuality(signal, width, height, sat / n, mean);
+
+    const markerLetter = exposure.marker === "L" || exposure.marker === "R" ? exposure.marker : "R";
+    stampMarker(img, width, height, markerLetter, Math.round(width * 0.08), Math.round(height * 0.12));
+    g.putImageData(img, 0, 0);
+    const dataUrl = canvas.toDataURL("image/png");
+
+    const metrics = buildMetrics(mean, noiseAcc / n, contrastN ? contrastAcc / contrastN / 255 : 0, sat / n, patient, projection, exposure, tube);
+    const scores = scoreExposure({ patient, projection, pose, tube, exposure, metrics });
+    const overall = scores.reduce((a, c) => a + c.weight * gradeNum(c.grade), 0) / scores.reduce((a, c) => a + c.weight, 0);
+    const overallGrade = overall >= 0.85 ? "excellent" : overall >= 0.62 ? "acceptable" : "repeat";
+
+    // Soft warning when atlas failed but procedural path still produced a usable image
+    if (atlasError && !hasAtlas) {
+      console.warn(
+        "[Bucky Lab] Radiograph generated with procedural bone only. Atlas error was:\n" + atlasError
+      );
+    }
+
+    return { metrics, scores, overall, overallGrade, width, height, dataUrl };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // Re-throw with a consistent prefix so the UI can recognise render failures
+    if (message.startsWith("Render failed")) throw err;
+    throw new Error(`Render failed — ${message}`);
+  }
+}
+
+function gradeNum(g: "excellent" | "acceptable" | "repeat"): number {
+  return g === "excellent" ? 1 : g === "acceptable" ? 0.7 : 0.25;
+}
+
 function stampMarker(img: ImageData, w: number, h: number, letter: "L" | "R", x: number, y: number) {
   const glyph = letter === "L" ? L_GLYPH : R_GLYPH, scale = 5;
-  const put = (px: number, py: number, r: number, gg: number, b: number) => { if (px < 0 || py < 0 || px >= w || py >= h) return; const i = (py * w + px) * 4; img.data[i] = r; img.data[i + 1] = gg; img.data[i + 2] = b; img.data[i + 3] = 255; };
-  for (let gy = 0; gy < glyph.length; gy++) for (let gx = 0; gx < glyph[gy]!.length; gx++) if (glyph[gy]![gx]) for (let sy = 0; sy < scale; sy++) for (let sx = 0; sx < scale; sx++) put(x + gx * scale + sx, y + gy * scale + sy, 245, 245, 245);
+  const put = (px: number, py: number, r: number, gg: number, b: number) => {
+    if (px < 0 || py < 0 || px >= w || py >= h) return;
+    const i = (py * w + px) * 4;
+    img.data[i] = r; img.data[i + 1] = gg; img.data[i + 2] = b; img.data[i + 3] = 255;
+  };
+  for (let gy = 0; gy < glyph.length; gy++)
+    for (let gx = 0; gx < glyph[gy]!.length; gx++)
+      if (glyph[gy]![gx])
+        for (let sy = 0; sy < scale; sy++)
+          for (let sx = 0; sx < scale; sx++)
+            put(x + gx * scale + sx, y + gy * scale + sy, 245, 245, 245);
 }
 const L_GLYPH = [[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,1,1,1,1]];
 const R_GLYPH = [[1,1,1,1,0],[1,0,0,0,1],[1,1,1,1,0],[1,0,1,0,0],[1,0,0,1,0]];
