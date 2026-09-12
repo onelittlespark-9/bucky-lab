@@ -5,7 +5,6 @@ import { PROJECTIONS } from "@/lib/sim/projections";
 import { patientById } from "@/lib/sim/patients";
 import { useSim } from "@/lib/sim/store";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 
 const TEST_PATIENT = "amara";
 
@@ -38,9 +37,6 @@ export function TestExposure() {
   async function test(projectionId: string) {
     setSelected(projectionId);
     setProjection(projectionId);
-    // Deliberately use the handbook geometry rather than the interactive room.
-    // This page is a renderer benchmark: positioning, centring and collimation
-    // are locked to the projection definition before exposure.
     setTimeout(async () => {
       applyHandbook();
       patchExposure({ marker: null });
@@ -58,7 +54,7 @@ export function TestExposure() {
           <h1 className="text-base font-semibold">Radiograph renderer test bench</h1>
           <p className="text-xs text-muted">Perfect reference positioning · fixed collimation · one-click exposure</p>
         </div>
-        <Badge variant="outline">TEMPORARY</Badge>
+        <span className="rounded border border-border px-2 py-1 text-[10px] font-semibold tracking-wide text-muted">TEMPORARY</span>
       </header>
 
       <main className="mx-auto grid max-w-7xl gap-5 p-4 lg:grid-cols-[minmax(0,1fr)_420px]">
