@@ -11,10 +11,9 @@ import { caseById } from "./case-bank";
 import type { PathologyId } from "./requests";
 
 /**
- * Hounsfield-derived material model used by the projection renderer.
- * HU is a CT calibration scale (air=-1000, water=0). It is used here as a
- * standardized material-density proxy and converted to a diagnostic-energy
- * linear attenuation coefficient before Beer-Lambert projection.
+ * Projection material model. HU is used only as a reproducible material-density
+ * proxy; the displayed image is formed from Beer-Lambert attenuation rather
+ * than drawing anatomical outlines onto the detector.
  */
 function pathsToOD(p: Paths, kvp: number): number {
   return muFromHU(-1000, kvp) * p.air
@@ -27,10 +26,10 @@ function pathsToOD(p: Paths, kvp: number): number {
     + muFromHU(3000, kvp) * p.metal;
 }
 
-// Reference radiographs are deliberately not part of image generation. The
-// clinical gallery is a visual/landmark reference, while every image is now
-// independently generated from anatomy + physics.
-export function preloadRadiographAssets(_projections: Projection[]) { /* no-op: no reference-image textures */ }
+// Reference radiographs are not composited into the generated image. The
+// anatomy gallery is used as an anatomical/landmark reference; the simulator
+// generates its own projection from the patient model and acquisition physics.
+export function preloadRadiographAssets(_projections: Projection[]) { /* no-op */ }
 
 function localCoords(projection: Projection, patient: Patient, pose: SimPose, px: number, py: number, w: number, h: number, tube: TubeState, geometry: ReturnType<typeof projectionGeometry>): { x: number; y: number } {
   const cmX = ((px + 0.5) / w - 0.5) * tube.collimationW / geometry.magnification;
@@ -82,8 +81,9 @@ export async function renderRadiograph(args: { patient: Patient; projection: Pro
   const seed = hashPatient(patient.id);
   const ctx: SampleCtx = { patient, projection, pose, seed };
 
-  // The atlas is now the bone source of truth. If it cannot load, retain the
-  // old procedural bone as a safe fallback rather than producing a blank image.
+  // The atlas is the bone source of truth. Procedural bone is disabled when
+  // atlas projection succeeds so the image cannot contain duplicated/offset
+  // bone shapes from two independent anatomy systems.
   const atlasOD = await atlasBoneOpticalDensity({ patient, projection, pose, tube, exposureKvp: kvp, width, height, geometry });
   const hasAtlas = atlasOD !== null;
   const signal = new Float32Array(width * height);
@@ -93,8 +93,6 @@ export async function renderRadiograph(args: { patient: Patient; projection: Pro
     const { x, y } = localCoords(projection, patient, pose, px, py, width, height, tube, geometry);
     const paths = sampleAnatomy(x, y, ctx);
     if (hasAtlas) {
-      // Remove the old capsule/ellipse bone geometry. Soft tissue and organs
-      // remain procedural, but bone now comes exclusively from the atlas.
       paths.bone = 0;
       paths.cortical = 0;
     }
@@ -106,22 +104,19 @@ export async function renderRadiograph(args: { patient: Patient; projection: Pro
 
     const softOd = pathsToOD(paths, kvp) * (hasAtlas ? (0.65 + thickness / 45) : (0.55 + thickness / 40));
     const atlasOd = atlasOD?.[py * width + px] ?? 0;
-    let od = softOd + atlasOd;
-    od = Math.max(0.01, od + pathologyDelta(pathologyId, x, y, projection));
-    let T = Math.exp(-od);
+    let od = Math.max(0.01, softOd + atlasOd + pathologyDelta(pathologyId, x, y, projection));
+    const T = Math.exp(-od);
 
-    // HU-derived atlas attenuation is now the dominant structural signal. A
-    // subtle deterministic trabecular modulation is applied only where the
-    // atlas has projected bone thickness, avoiding the previous rod-like lines.
+    // Keep anatomical texture extremely low amplitude. Radiographs should show
+    // continuous anatomical structures, not procedural speckle or line noise.
     const boneMask = atlasOd > 0.012 || paths.bone > 0.3 || paths.cortical > 0.15 ? 1 : 0;
-    const trabFine = (fbm(x * 4.1, y * 4.1, seed + 31) - 0.5) * 0.055;
-    const trabCoarse = (fbm(x * 1.35, y * 1.35, seed + 37) - 0.5) * 0.035;
-    const softVar = (fbm(x * 0.6, y * 0.6, seed + 11) - 0.5) * 0.065 * (paths.soft > 1 ? 1 : 0);
-    const trabecula = 1 + boneMask * (trabFine + trabCoarse) + softVar;
-    const microTexture = (fbm(x * 11.5, y * 11.5, seed + 97) - 0.5) * 0.018 * clamp(paths.soft / 3, 0, 1);
+    const trabFine = (fbm(x * 3.2, y * 3.2, seed + 31) - 0.5) * 0.018;
+    const trabCoarse = (fbm(x * 0.9, y * 0.9, seed + 37) - 0.5) * 0.012;
+    const softVar = (fbm(x * 0.45, y * 0.45, seed + 11) - 0.5) * 0.018 * (paths.soft > 1 ? 1 : 0);
+    const anatomicalTexture = 1 + boneMask * (trabFine + trabCoarse) + softVar;
     const scat = I0 * scatterFrac * (0.5 + 0.5 * (paths.soft + paths.lung > 0 ? 1 : 0.15));
-    let sig = I0 * T * trabecula * (1 + microTexture) + scat;
-    if (paths.air > 20 && paths.soft < 0.2 && atlasOd < 0.01 && paths.bone < 0.2) sig = I0 * 1.05 + scat * 0.2;
+    let sig = I0 * T * anatomicalTexture + scat;
+    if (paths.air > 20 && paths.soft < 0.2 && atlasOd < 0.01 && paths.bone < 0.2) sig = I0 * 1.02 + scat * 0.12;
     signal[py * width + px] = sig;
     sum += sig;
   }
@@ -137,16 +132,18 @@ export async function renderRadiograph(args: { patient: Patient; projection: Pro
   let sat = 0, noiseAcc = 0, contrastAcc = 0, contrastN = 0;
   const logMean = Math.log(mean + 1e-5);
   const contrastScale = clamp((kvp - 45) / 80, 0, 1);
-  const windowW = 1.55 + contrastScale * 2.4;
-  const windowL = logMean + (mean > 100 ? 0.2 : mean < 10 ? -0.35 : 0);
-  const noiseGain = 0.35 + 1.8 / Math.sqrt(Math.max(0.25, mean / 40));
-  const blurRadius = clamp(Math.round(geometry.geometricUnsharpnessMm * 1.7), 0, 4);
-  const blurWeight = blurRadius > 0 ? Math.min(0.42, geometry.geometricUnsharpnessMm * 0.16) : 0;
+  const windowW = 1.7 + contrastScale * 2.2;
+  const windowL = logMean + (mean > 100 ? 0.15 : mean < 10 ? -0.25 : 0);
+  // Detector noise is deliberately subtle. The previous gain could turn low
+  // signal areas into conspicuous grain, which made the image look synthetic.
+  const noiseGain = 0.08 + 0.38 / Math.sqrt(Math.max(0.5, mean / 40));
+  const blurRadius = clamp(Math.round(geometry.geometricUnsharpnessMm * 1.25), 0, 3);
+  const blurWeight = blurRadius > 0 ? Math.min(0.28, geometry.geometricUnsharpnessMm * 0.11) : 0;
 
   for (let i = 0; i < n; i++) {
     let sig = signal[i]!;
     const nx = i % width, ny = (i / width) | 0;
-    if (blurRadius > 0 && nx > 0 && nx < width - 1) {
+    if (blurRadius > 0 && nx > blurRadius && nx < width - blurRadius - 1) {
       let neighbour = 0, count = 0;
       for (let dx = 1; dx <= blurRadius; dx++) {
         const falloff = 1 / (dx + 1);
@@ -155,18 +152,15 @@ export async function renderRadiograph(args: { patient: Patient; projection: Pro
       }
       if (count > 0) sig = sig * (1 - blurWeight) + (neighbour / count) * blurWeight;
     }
-    const sigma = noiseGain / Math.sqrt(Math.max(0.35, sig));
-    const nse = (fbm(nx * 0.85, ny * 0.85, seed + 4) - 0.5) * 2 * sigma * 10;
+    const sigma = noiseGain / Math.sqrt(Math.max(0.5, sig));
+    const nse = (fbm(nx * 0.42, ny * 0.42, seed + 4) - 0.5) * 2 * sigma * 3;
     sig = Math.max(0, sig + nse);
     noiseAcc += Math.abs(nse);
     if (sig > well) { sig = well; sat += 1; }
     const L = Math.log(sig + 1e-5);
     let d = 1 - clamp((L - windowL) / windowW + 0.5, 0, 1);
     if (kvp >= 100) d = 0.08 + d * 0.84;
-    else if (kvp <= 55) {
-      d = d < 0.5 ? d * 0.85 : 0.5 + (d - 0.5) * 1.15;
-      d = clamp(d, 0, 1);
-    }
+    else if (kvp <= 55) d = clamp(d < 0.5 ? d * 0.9 : 0.5 + (d - 0.5) * 1.1, 0, 1);
     let tone = clamp(d, 0, 1);
     tone = tone * tone * (3 - 2 * tone);
     const v = Math.round(clamp(tone, 0, 1) * 255), o = i * 4;
@@ -174,9 +168,10 @@ export async function renderRadiograph(args: { patient: Patient; projection: Pro
     if (nx > 0) { contrastAcc += Math.abs(v - img.data[(i - 1) * 4]!); contrastN++; }
   }
 
+  // The side marker is part of the radiographic image. A projection-centre
+  // crosshair is not, so it is intentionally omitted from the final image.
   const markerLetter = exposure.marker === "L" || exposure.marker === "R" ? exposure.marker : "R";
   stampMarker(img, width, height, markerLetter, Math.round(width * 0.08), Math.round(height * 0.12));
-  drawCrosshair(img, width, height, width / 2, height / 2);
   g.putImageData(img, 0, 0);
   const dataUrl = canvas.toDataURL("image/png");
   const metrics = buildMetrics(mean, noiseAcc / n, contrastN ? contrastAcc / contrastN / 255 : 0, sat / n, patient, projection, exposure, tube);
@@ -191,14 +186,6 @@ function stampMarker(img: ImageData, w: number, h: number, letter: "L" | "R", x:
   const glyph = letter === "L" ? L_GLYPH : R_GLYPH, scale = 5;
   const put = (px: number, py: number, r: number, gg: number, b: number) => { if (px < 0 || py < 0 || px >= w || py >= h) return; const i = (py * w + px) * 4; img.data[i] = r; img.data[i + 1] = gg; img.data[i + 2] = b; img.data[i + 3] = 255; };
   for (let gy = 0; gy < glyph.length; gy++) for (let gx = 0; gx < glyph[gy]!.length; gx++) if (glyph[gy]![gx]) for (let sy = 0; sy < scale; sy++) for (let sx = 0; sx < scale; sx++) put(x + gx * scale + sx, y + gy * scale + sy, 245, 245, 245);
-}
-function drawCrosshair(img: ImageData, w: number, h: number, cx: number, cy: number) {
-  const len = Math.round(Math.min(w, h) * 0.04);
-  for (let d = -len; d <= len; d++) {
-    const x = Math.round(cx + d), y = Math.round(cy + d);
-    if (x >= 0 && x < w) { const i = (Math.round(cy) * w + x) * 4; img.data[i] = 245; img.data[i + 1] = 245; img.data[i + 2] = 245; }
-    if (y >= 0 && y < h) { const i = (y * w + Math.round(cx)) * 4; img.data[i] = 245; img.data[i + 1] = 245; img.data[i + 2] = 245; }
-  }
 }
 const L_GLYPH = [[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,1,1,1,1]];
 const R_GLYPH = [[1,1,1,1,0],[1,0,0,0,1],[1,1,1,1,0],[1,0,1,0,0],[1,0,0,1,0]];
