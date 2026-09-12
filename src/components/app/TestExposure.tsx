@@ -19,10 +19,14 @@ const GROUPS = [
 ];
 
 export function TestExposure() {
-  const setProjection = useSim(s => s.setProjection);
+  const startExam = useSim(s => s.startExam);
   const applyHandbook = useSim(s => s.applyHandbook);
+  const applySuggestedFactors = useSim(s => s.applySuggestedFactors);
   const patchExposure = useSim(s => s.patchExposure);
   const expose = useSim(s => s.expose);
+  const exposure = useSim(s => s.exposure);
+  const tube = useSim(s => s.tube);
+  const pose = useSim(s => s.pose);
   const result = useSim(s => s.result);
   const exposing = useSim(s => s.exposing);
   const error = useSim(s => s.error);
@@ -36,33 +40,47 @@ export function TestExposure() {
 
   async function test(projectionId: string) {
     setSelected(projectionId);
-    setProjection(projectionId);
-    setTimeout(async () => {
-      applyHandbook();
-      patchExposure({ marker: null });
-      await expose();
-    }, 0);
+
+    // Build every renderer test from a clean, pathology-free benchmark exam.
+    // startExam resets the patient, projection, equipment placement, pathology and base technique.
+    startExam(projectionId, TEST_PATIENT);
+
+    // Apply the exact handbook pose/CR/SID/collimation and then the patient-specific
+    // optimised exposure factors. The projection definition remains the source of truth
+    // for whether a grid is required and for focal-spot selection.
+    applyHandbook();
+    applySuggestedFactors();
+
+    // Keep the renderer benchmark free from a marker overlay so anatomy can be inspected
+    // without obscuration. This does not alter positioning or exposure physics.
+    patchExposure({ marker: null });
+
+    await expose();
   }
+
+  const selectedProjection = selected ? PROJECTIONS.find(p => p.id === selected) : undefined;
 
   return (
     <div className="min-h-dvh bg-bg text-foreground">
       <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-border bg-surface/95 px-4 py-3 backdrop-blur">
         <Link to="/cases">
-          <Button variant="ghost" size="sm" className="gap-1.5"><ArrowLeft className="size-4" />Library</Button>
+          <Button variant="ghost" size="sm" className="gap-1.5"><ArrowLeft className="size-4" />Case library</Button>
         </Link>
         <div className="min-w-0 flex-1">
           <h1 className="text-base font-semibold">Radiograph renderer test bench</h1>
-          <p className="text-xs text-muted">Perfect reference positioning · fixed collimation · one-click exposure</p>
+          <p className="text-xs text-muted">Gold-standard positioning · optimised exposure · correct grid/SID/collimation · one-click image</p>
         </div>
-        <span className="rounded border border-border px-2 py-1 text-[10px] font-semibold tracking-wide text-muted">TEMPORARY</span>
+        <span className="rounded border border-border px-2 py-1 text-[10px] font-semibold tracking-wide text-muted">TEST MODE</span>
       </header>
 
       <main className="mx-auto grid max-w-7xl gap-5 p-4 lg:grid-cols-[minmax(0,1fr)_420px]">
         <section className="rounded-xl border border-border bg-panel p-4">
           <div className="mb-4 rounded-lg border border-border bg-surface p-3 text-sm">
-            <div className="font-medium">Benchmark patient</div>
-            <div className="mt-1 text-xs text-muted">{patient.name} · {patient.habitus} · {patient.heightCm} cm · no pathology</div>
-            <div className="mt-2 text-xs text-muted">Each button resets the projection, applies the defined handbook position and CR, locks the defined SID and collimation, then exposes immediately.</div>
+            <div className="font-medium">Fixed benchmark patient</div>
+            <div className="mt-1 text-xs text-muted">{patient.name} · {patient.habitus} · {patient.heightCm} cm · pathology disabled</div>
+            <div className="mt-2 text-xs leading-5 text-muted">
+              Every button starts a fresh benchmark exam and automatically applies the defined handbook patient position, detector setup, central ray, tube angle, SID, collimation, grid requirement, focal spot and patient-adjusted exposure factors before exposing.
+            </div>
           </div>
 
           <div className="space-y-5">
@@ -76,13 +94,18 @@ export function TestExposure() {
                       <Button
                         key={projection.id}
                         variant={selected === projection.id ? "default" : "outline"}
-                        className="h-auto min-h-16 justify-between gap-3 px-3 py-2 text-left"
+                        className="h-auto min-h-20 justify-between gap-3 px-3 py-2 text-left"
                         disabled={exposing}
                         onClick={() => void test(projection.id)}
                       >
                         <span className="min-w-0">
                           <span className="block truncate text-sm font-medium">{projection.name}</span>
-                          <span className="mt-0.5 block text-[11px] opacity-70">{projection.sidCm} cm · {projection.collimationW} × {projection.collimationH} cm · {projection.kvp} kVp</span>
+                          <span className="mt-0.5 block text-[11px] opacity-70">
+                            {projection.sidCm} cm SID · {projection.collimationW} × {projection.collimationH} cm
+                          </span>
+                          <span className="mt-0.5 block text-[11px] opacity-70">
+                            {projection.grid ? "Grid" : "No grid"} · {projection.kvp} kVp · {projection.mas} mAs reference
+                          </span>
                         </span>
                         <Zap className={`size-4 shrink-0 ${active ? "animate-pulse" : ""}`} />
                       </Button>
@@ -96,27 +119,41 @@ export function TestExposure() {
 
         <aside className="rounded-xl border border-border bg-panel p-4 lg:sticky lg:top-20 lg:h-fit">
           <h2 className="font-semibold">Test result</h2>
-          {selected ? (
+          {selectedProjection ? (
             <div className="mt-3 space-y-3 text-sm">
               <div className="rounded-lg border border-border bg-surface p-3">
-                <div className="font-medium">{PROJECTIONS.find(p => p.id === selected)?.name}</div>
+                <div className="font-medium">{selectedProjection.name}</div>
                 <div className="mt-1 text-xs text-muted">{exposing ? "Exposing…" : result ? "Exposure complete" : "Preparing…"}</div>
               </div>
+
               {result?.dataUrl ? (
                 <div className="overflow-hidden rounded-lg border border-border bg-black">
-                  <img src={result.dataUrl} alt="Test radiograph" className="block h-auto w-full" />
+                  <img src={result.dataUrl} alt={`${selectedProjection.name} benchmark radiograph`} className="block h-auto w-full" />
                 </div>
               ) : null}
+
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="rounded border border-border p-2"><span className="text-muted">kVp</span><div className="font-semibold">{exposure.kvp}</div></div>
+                <div className="rounded border border-border p-2"><span className="text-muted">mAs</span><div className="font-semibold">{exposure.mas}</div></div>
+                <div className="rounded border border-border p-2"><span className="text-muted">Grid</span><div className="font-semibold">{exposure.grid ? "Applied" : "Not required"}</div></div>
+                <div className="rounded border border-border p-2"><span className="text-muted">Focal spot</span><div className="font-semibold capitalize">{exposure.focalSpot}</div></div>
+                <div className="rounded border border-border p-2"><span className="text-muted">SID</span><div className="font-semibold">{tube.sid} cm</div></div>
+                <div className="rounded border border-border p-2"><span className="text-muted">Tube angle</span><div className="font-semibold">{tube.angle}°</div></div>
+                <div className="rounded border border-border p-2"><span className="text-muted">Collimation</span><div className="font-semibold">{tube.collimationW} × {tube.collimationH} cm</div></div>
+                <div className="rounded border border-border p-2"><span className="text-muted">Breathing</span><div className="font-semibold capitalize">{pose.breath}</div></div>
+              </div>
+
               {result ? (
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div className="rounded border border-border p-2"><span className="text-muted">Overall</span><div className="font-semibold">{Math.round(result.overall)}/100</div></div>
                   <div className="rounded border border-border p-2"><span className="text-muted">EI</span><div className="font-semibold">{Math.round(result.metrics.ei)}</div></div>
                 </div>
               ) : null}
+
               {error ? <div className="rounded border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">{error}</div> : null}
             </div>
           ) : (
-            <p className="mt-2 text-xs text-muted">Choose an anatomical area above. No room setup or positioning interaction is required.</p>
+            <p className="mt-2 text-xs text-muted">Choose any projection. The simulator will create the optimal benchmark setup automatically; no patient or room setup is required.</p>
           )}
         </aside>
       </main>
