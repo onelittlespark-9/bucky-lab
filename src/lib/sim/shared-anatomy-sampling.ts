@@ -5,11 +5,19 @@ import { SHARED_ORGANS, scaleAnatomyCm } from "./anatomy-structures";
 
 /**
  * Projection-specific attenuation anatomy shared with the 3D patient model.
- * The goal is a radiographic appearance: broad tissue gradients, superimposed
- * organs, fine vascular/parenchymal variation and thin cortical structures,
- * rather than isolated geometric shapes.
+ * Soft-tissue and organ attenuation is always added here. Synthetic bone is a
+ * fallback only: when the Human Atlas projection is available, ribs and spine
+ * must come from that single 3D source of truth rather than being painted over
+ * it a second time in detector space.
  */
-export function addSharedOrganPaths(paths: Paths, x: number, y: number, patient: Patient, pose: SimPose) {
+export function addSharedOrganPaths(
+  paths: Paths,
+  x: number,
+  y: number,
+  patient: Patient,
+  pose: SimPose,
+  includeSyntheticBone = true,
+) {
   const scale = patient.heightCm / 170;
   const rotation = (pose.rotationY * Math.PI) / 180;
   const xr = x * Math.cos(rotation) - y * 0.002 * Math.sin(rotation);
@@ -39,39 +47,38 @@ export function addSharedOrganPaths(paths: Paths, x: number, y: number, patient:
     }
   }
 
-  // Vertebral bodies and posterior elements. Keep the spine visible, but let
-  // the atlas provide the detailed cortical outline when it is available.
-  for (let i = 0; i < 17; i++) {
-    const level = 22 + i * 3.7;
-    const vy = scaleAnatomyCm(level, patient.heightCm);
-    const body = softEllipse(x, y, 0, vy, scale * 1.15, scale * 1.05, 0, 0.18);
-    paths.bone += body * 3.4;
-    paths.cortical += body * 0.34;
-    const pedicle = softEllipse(x, y, -1.65 * scale, vy + 0.05, scale * 0.28, scale * 0.34, 0, 0.2);
-    paths.bone += pedicle * 1.15;
-  }
+  if (includeSyntheticBone) {
+    // Fallback spine used only when the 3D atlas is unavailable.
+    for (let i = 0; i < 17; i++) {
+      const level = 22 + i * 3.7;
+      const vy = scaleAnatomyCm(level, patient.heightCm);
+      const body = softEllipse(x, y, 0, vy, scale * 1.15, scale * 1.05, 0, 0.18);
+      paths.bone += body * 3.4;
+      paths.cortical += body * 0.34;
+      const pedicle = softEllipse(x, y, -1.65 * scale, vy + 0.05, scale * 0.28, scale * 0.34, 0, 0.2);
+      paths.bone += pedicle * 1.15;
+    }
 
-  // Anatomical rib arcs. Each rib is represented by several short overlapping
-  // curved segments: posterior ribs are steeper/stronger, the lateral arc turns
-  // inferiorly, and the anterior end fades rather than forming straight rods.
-  for (let i = 0; i < 12; i++) {
-    const ry = scaleAnatomyCm(27 + i * 2.55, patient.heightCm);
-    const length = (13.2 - i * 0.42) * patient.morph.torsoWidth;
-    const rise = scale * (1.15 + i * 0.045);
-    for (const side of [-1, 1] as const) {
-      const posteriorX = side * 2.35 * scale;
-      const lateralX = side * length;
-      const anteriorX = side * (length * 0.70);
-      const posteriorY = ry - rise * 0.15;
-      const lateralY = ry + rise;
-      const anteriorY = ry + rise * 0.58;
-      const rib =
-        softCapsule(x, y, posteriorX, posteriorY, side * (length * 0.42), ry + rise * 0.68, 0.19, 0.30) * 0.50 +
-        softCapsule(x, y, side * (length * 0.42), ry + rise * 0.68, lateralX, lateralY, 0.17, 0.31) * 0.46 +
-        softCapsule(x, y, lateralX, lateralY, side * (length * 0.88), ry + rise * 0.80, 0.15, 0.32) * 0.34 +
-        softCapsule(x, y, side * (length * 0.88), ry + rise * 0.80, anteriorX, anteriorY, 0.13, 0.34) * 0.24;
-      paths.cortical += rib;
-      paths.bone += rib * 0.28;
+    // Fallback rib arcs. These are never composited over the Human Atlas.
+    for (let i = 0; i < 12; i++) {
+      const ry = scaleAnatomyCm(27 + i * 2.55, patient.heightCm);
+      const length = (13.2 - i * 0.42) * patient.morph.torsoWidth;
+      const rise = scale * (1.15 + i * 0.045);
+      for (const side of [-1, 1] as const) {
+        const posteriorX = side * 2.35 * scale;
+        const lateralX = side * length;
+        const anteriorX = side * (length * 0.70);
+        const posteriorY = ry - rise * 0.15;
+        const lateralY = ry + rise;
+        const anteriorY = ry + rise * 0.58;
+        const rib =
+          softCapsule(x, y, posteriorX, posteriorY, side * (length * 0.42), ry + rise * 0.68, 0.19, 0.30) * 0.50 +
+          softCapsule(x, y, side * (length * 0.42), ry + rise * 0.68, lateralX, lateralY, 0.17, 0.31) * 0.46 +
+          softCapsule(x, y, lateralX, lateralY, side * (length * 0.88), ry + rise * 0.80, 0.15, 0.32) * 0.34 +
+          softCapsule(x, y, side * (length * 0.88), ry + rise * 0.80, anteriorX, anteriorY, 0.13, 0.34) * 0.24;
+        paths.cortical += rib;
+        paths.bone += rib * 0.28;
+      }
     }
   }
 
@@ -80,8 +87,6 @@ export function addSharedOrganPaths(paths: Paths, x: number, y: number, patient:
   paths.soft += softEllipse(x, y, -0.4, scaleAnatomyCm(31, patient.heightCm), 3.5 * scale, 7.8 * scale, 0, 0.2) * 1.25;
   paths.soft += softEllipse(x, y, -4.6 * patient.morph.torsoWidth, scaleAnatomyCm(27.5, patient.heightCm), 2.7 * scale, 3.0 * scale, 0.12, 0.2) * 0.9;
 
-  // Hilar contours. The right hilum is normally slightly lower than the left;
-  // both should be broad vascular densities rather than isolated "hills".
   const hilumY = scaleAnatomyCm(35, patient.heightCm);
   for (const side of [-1, 1] as const) {
     const hx = side * 3.5 * patient.morph.torsoWidth;
@@ -93,8 +98,6 @@ export function addSharedOrganPaths(paths: Paths, x: number, y: number, patient:
     paths.soft += softCapsule(x, y, side * 6.0, scaleAnatomyCm(41.5, patient.heightCm), side * 9.0, scaleAnatomyCm(52, patient.heightCm), 0.18, 0.38) * 0.25;
   }
 
-  // Diaphragmatic contours: right hemidiaphragm sits slightly higher than left
-  // and the lateral ends fall into visible costophrenic angles.
   const diaphragmBase = scaleAnatomyCm(49, patient.heightCm) + (pose.breath === "inspiration" ? -3.0 : 1.0);
   const right = diaphragmBase - scale * 0.9;
   const left = diaphragmBase + scale * 0.3;
@@ -104,8 +107,6 @@ export function addSharedOrganPaths(paths: Paths, x: number, y: number, patient:
   paths.soft += softCapsule(x, y, 3.0 * patient.morph.torsoWidth, right - 0.5, 8.0 * patient.morph.torsoWidth, right, 0.48, 0.36) * 0.84;
   paths.soft += softCapsule(x, y, 8.0 * patient.morph.torsoWidth, right, 12.5 * patient.morph.torsoWidth, right + 1.2, 0.52, 0.36) * 0.70;
 
-  // Low-amplitude lung texture only. Vascular paths above carry the useful
-  // radiographic detail; random grain should not be mistaken for anatomy.
   const lungTexture = (fbm(x * 1.55, y * 1.55, seed + 47) - 0.5) * 0.10;
   const fineTexture = (fbm(x * 6.4, y * 6.4, seed + 53) - 0.5) * 0.035;
   paths.soft += Math.max(0, paths.lung) * Math.max(0, lungTexture);
