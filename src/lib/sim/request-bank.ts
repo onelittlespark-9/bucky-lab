@@ -1,14 +1,14 @@
 import type { ImagingRequest } from "./requests";
 import { CASE_BANK } from "./case-bank";
 
+const PROJECTION_LABELS: Record<string, string> = { "pa-chest": "PA chest", "lat-chest": "left lateral chest", "ap-abdomen": "AP abdomen", "ap-pelvis": "AP pelvis", "ap-hip": "hip AP", "lat-cspine": "lateral C-spine", "ap-cspine": "AP C-spine", "ap-lumbar": "AP lumbar spine", "lat-lumbar": "lateral lumbar spine", "pa-hand": "PA hand", "pa-wrist": "PA wrist", "ap-elbow": "AP elbow", "ap-shoulder": "AP shoulder", "ap-knee": "AP knee", "lat-knee": "lateral knee", "dp-foot": "DP foot", "ap-ankle": "AP ankle", "lat-skull": "lateral skull" };
+
 const caseRequests: ImagingRequest[] = CASE_BANK.map(c => ({
   id: c.id,
   title: c.title,
   clinicalHistory: c.clinicalHistory,
   requestedProjections: c.projections,
-  requestedViewsLabel: c.projections.map(p => ({
-    "pa-chest": "PA chest", "lat-chest": "left lateral chest", "ap-abdomen": "AP abdomen", "ap-pelvis": "AP pelvis", "ap-hip": "hip AP", "lat-cspine": "lateral C-spine", "ap-cspine": "AP C-spine", "ap-lumbar": "AP lumbar spine", "lat-lumbar": "lateral lumbar spine", "pa-hand": "PA hand", "pa-wrist": "PA wrist", "ap-elbow": "AP elbow", "ap-shoulder": "AP shoulder", "ap-knee": "AP knee", "lat-knee": "lateral knee", "dp-foot": "DP foot", "ap-ankle": "AP ankle", "lat-skull": "lateral skull",
-  } as Record<string, string>)[p] ?? p).join(" + "),
+  requestedViewsLabel: c.projections.map(p => PROJECTION_LABELS[p] ?? p).join(" + "),
   requestedLaterality: null,
   correctLaterality: null,
   patientId: c.patientId,
@@ -31,7 +31,6 @@ const additionalRequests: ImagingRequest[] = [
   { id: "abdomen-acute", title: "Abdomen — acute pain", clinicalHistory: "Abdominal distension, colicky pain and vomiting. Clinical concern for obstruction.", requestedProjections: ["ap-abdomen"], requestedViewsLabel: "AP abdomen", requestedLaterality: null, correctLaterality: null, patientId: "tomas", isValid: true, pathologyId: "none", region: "Abdomen", urgency: "urgent" },
   { id: "pelvis-trauma", title: "Pelvis — trauma", clinicalHistory: "Fall with pelvic pain and difficulty weight-bearing.", requestedProjections: ["ap-pelvis"], requestedViewsLabel: "AP pelvis", requestedLaterality: null, correctLaterality: null, patientId: "ruth", isValid: true, pathologyId: "femoral-neck-fracture", region: "Pelvis & hips", urgency: "urgent" },
   { id: "wrong-side-wrist", title: "Wrist — query laterality", clinicalHistory: "History states right wrist injury, but the request specifies the left wrist. Query before exposure.", requestedProjections: ["pa-wrist"], requestedViewsLabel: "Left wrist", requestedLaterality: "left", correctLaterality: "right", patientId: "amara", isValid: false, rejectionReason: "The clinical history identifies the right wrist. The request should be amended before exposure.", pathologyId: "distal-radius-fracture", region: "Upper limb", urgency: "urgent" },
-  { id: "chest-post-line-extra", title: "Post-procedure chest — line check", clinicalHistory: "Patient following central venous access insertion. Portable imaging requested to assess the line and exclude an immediate complication.", requestedProjections: ["pa-chest"], requestedViewsLabel: "PA chest", requestedLaterality: null, correctLaterality: null, patientId: "gordon", isValid: true, pathologyId: "none", region: "Thorax", urgency: "urgent" },
 ];
 
 export const REQUEST_BANK: ImagingRequest[] = [...caseRequests, ...additionalRequests];
