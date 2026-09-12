@@ -37,26 +37,65 @@ function deformSkin(root:THREE.Group,patient:ReturnType<typeof patientById>,pose
   const H=patient.heightCm/100,scale=H/ATLAS_HEIGHT_M;
   root.scale.setScalar(scale);
   const kin=patientKinematics({H,s:1,shoulder:patient.morph.shoulder,hip:patient.morph.hip,limb:patient.morph.limb,elbowFlex:pose.elbowFlex,hipInternal:pose.hipInternal,armRaise:pose.armRaise,armSide:pose.armSide,shoulderRoll:pose.shoulderRoll,armRotation:pose.armRotation,forearmRotation:pose.forearmRotation,kneeFlex:pose.kneeFlex,projectionId:"pa-chest",placement:"table",buckyTilt:0});
-  const neutralArmAxis=new THREE.Vector3(0,-1,0),neutralLegAxis=new THREE.Vector3(0,1,0);
+  // Atlas is in a standing neutral frame: arms and legs point down from the
+  // shoulder/hip. The previous +Y leg axis inverted the femur/tibia rotation.
+  const neutralArmAxis=new THREE.Vector3(0,-1,0),neutralLegAxis=new THREE.Vector3(0,-1,0);
   root.traverse(object=>{
     if(!(object instanceof THREE.Mesh))return;
     const attribute=object.geometry.getAttribute("position"),base=object.userData.basePositions as Float32Array|undefined;if(!base)return;
     const target=attribute.array as Float32Array;
     for(let i=0;i<target.length;i+=3){
-      const original=new THREE.Vector3(base[i],base[i+1],base[i+2]),p=original.clone(),side: -1|1=p.x<0?-1:1,sideName=side<0?"left":"right";
+      const original=new THREE.Vector3(base[i],base[i+1],base[i+2]),p=original.clone(),side:-1|1=p.x<0?-1:1,sideName=side<0?"left":"right";
       const arm=kin.arms[side<0?0:1],active=pose.armSide==null||pose.armSide===sideName;
-      const shoulderPivot=localPoint(arm.shoulder,scale),elbowPivot=localPoint(arm.elbow,scale);
+      const shoulderPivot=localPoint(arm.shoulder,scale),elbowPivot=localPoint(arm.elbow,scale),wristPivot=localPoint(arm.wrist,scale);
       const upperDir=new THREE.Vector3(...arm.elbow).sub(new THREE.Vector3(...arm.shoulder)).normalize();
       const forearmDir=new THREE.Vector3(...arm.wrist).sub(new THREE.Vector3(...arm.elbow)).normalize();
       const upperQ=new THREE.Quaternion().setFromUnitVectors(neutralArmAxis,upperDir),forearmQ=new THREE.Quaternion().setFromUnitVectors(neutralArmAxis,forearmDir);
       const ax=Math.abs(p.x);
       const shoulderEnvelope=smoothstep(.13,.22,ax)*smoothstep(.63*H/scale,.70*H/scale,p.y)*(1-smoothstep(.75*H/scale,.80*H/scale,p.y));
-      const upperArm=smoothstep(.17,.26,ax)*smoothstep(.56*H/scale,.68*H/scale,p.y)*(1-smoothstep(.68*H/scale,.78*H/scale,p.y));
-      const forearm=smoothstep(.23,.33,ax)*smoothstep(.41*H/scale,.59*H/scale,p.y)*(1-smoothstep(.57*H/scale,.64*H/scale,p.y));
-      if(active&&upperArm>.001){rotateAround(p,shoulderPivot,upperQ);p.lerp(original,1-upperArm);}else if(active&&forearm>.001){const transformedElbow=elbowPivot.clone();rotateAround(p,shoulderPivot,upperQ);rotateAround(transformedElbow,shoulderPivot,upperQ);rotateAround(p,transformedElbow,forearmQ);p.lerp(original,1-forearm);}else if(active&&shoulderEnvelope>.001){rotateAround(p,shoulderPivot,upperQ);p.lerp(original,1-shoulderEnvelope);}
+      const upperArm=smoothstep(.17,.26,ax)*smoothstep(.55*H/scale,.68*H/scale,p.y)*(1-smoothstep(.67*H/scale,.78*H/scale,p.y));
+      const forearm=smoothstep(.20,.32,ax)*smoothstep(.39*H/scale,.59*H/scale,p.y)*(1-smoothstep(.56*H/scale,.65*H/scale,p.y));
+      const hand=smoothstep(.20,.31,ax)*smoothstep(.29*H/scale,.43*H/scale,p.y)*(1-smoothstep(.38*H/scale,.47*H/scale,p.y));
+      if(active&&hand>.001){
+        rotateAround(p,shoulderPivot,upperQ);
+        const transformedElbow=elbowPivot.clone();rotateAround(transformedElbow,shoulderPivot,upperQ);
+        rotateAround(p,transformedElbow,forearmQ);
+        const transformedWrist=wristPivot.clone();rotateAround(transformedWrist,shoulderPivot,upperQ);rotateAround(transformedWrist,transformedElbow,forearmQ);
+        const handQ=new THREE.Quaternion(...arm.handQuaternion);
+        rotateAround(p,transformedWrist,handQ);
+        p.lerp(original,1-hand);
+      }else if(active&&forearm>.001){
+        rotateAround(p,shoulderPivot,upperQ);
+        const transformedElbow=elbowPivot.clone();rotateAround(transformedElbow,shoulderPivot,upperQ);
+        rotateAround(p,transformedElbow,forearmQ);
+        p.lerp(original,1-forearm);
+      }else if(active&&upperArm>.001){
+        rotateAround(p,shoulderPivot,upperQ);p.lerp(original,1-upperArm);
+      }else if(active&&shoulderEnvelope>.001){
+        rotateAround(p,shoulderPivot,upperQ);p.lerp(original,1-shoulderEnvelope);
+      }
+
       const leg=kin.legs[side<0?0:1],hipPivot=localPoint(leg.hip,scale),kneePivot=localPoint(leg.knee,scale),anklePivot=localPoint(leg.ankle,scale);
-      const hipEnvelope=smoothstep(.10,.18,ax),thigh=hipEnvelope*smoothstep(.32*H/scale,.40*H/scale,p.y)*(1-smoothstep(.45*H/scale,.55*H/scale,p.y)),lowerLeg=hipEnvelope*smoothstep(.06*H/scale,.20*H/scale,p.y)*(1-smoothstep(.22*H/scale,.31*H/scale,p.y));
-      if(thigh>.001){const q=new THREE.Quaternion().setFromUnitVectors(neutralLegAxis,new THREE.Vector3(...leg.knee).sub(new THREE.Vector3(...leg.hip)).normalize());rotateAround(p,hipPivot,q);p.lerp(original,1-thigh);}else if(lowerLeg>.001){const hipQ=new THREE.Quaternion().setFromUnitVectors(neutralLegAxis,new THREE.Vector3(...leg.knee).sub(new THREE.Vector3(...leg.hip)).normalize()),kneeQ=new THREE.Quaternion().setFromUnitVectors(neutralLegAxis,new THREE.Vector3(...leg.ankle).sub(new THREE.Vector3(...leg.knee)).normalize());rotateAround(p,hipPivot,hipQ);const transformedKnee=kneePivot.clone();rotateAround(transformedKnee,hipPivot,hipQ);rotateAround(p,transformedKnee,kneeQ);p.lerp(original,1-lowerLeg);}else if(Math.abs(p.y)<.08*H/scale){rotateAround(p,anklePivot,new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),pose.hipInternal*Math.PI/180*.08));}
+      const hipQ=new THREE.Quaternion().setFromUnitVectors(neutralLegAxis,new THREE.Vector3(...leg.knee).sub(new THREE.Vector3(...leg.hip)).normalize());
+      const kneeQ=new THREE.Quaternion().setFromUnitVectors(neutralLegAxis,new THREE.Vector3(...leg.ankle).sub(new THREE.Vector3(...leg.knee)).normalize());
+      const thigh=smoothstep(.09,.17,ax)*smoothstep(.30*H/scale,.40*H/scale,p.y)*(1-smoothstep(.43*H/scale,.55*H/scale,p.y));
+      const lowerLeg=smoothstep(.09,.18,ax)*smoothstep(.055*H/scale,.22*H/scale,p.y)*(1-smoothstep(.20*H/scale,.31*H/scale,p.y));
+      const foot=smoothstep(.08,.19,ax)*(1-smoothstep(.09*H/scale,.20*H/scale,p.y));
+      if(foot>.001){
+        rotateAround(p,hipPivot,hipQ);
+        const transformedKnee=kneePivot.clone();rotateAround(transformedKnee,hipPivot,hipQ);
+        rotateAround(p,transformedKnee,kneeQ);
+        const transformedAnkle=anklePivot.clone();rotateAround(transformedAnkle,hipPivot,hipQ);rotateAround(transformedAnkle,transformedKnee,kneeQ);
+        p.sub(transformedAnkle).add(localPoint(leg.ankle,scale));
+        p.lerp(original,1-foot);
+      }else if(lowerLeg>.001){
+        rotateAround(p,hipPivot,hipQ);
+        const transformedKnee=kneePivot.clone();rotateAround(transformedKnee,hipPivot,hipQ);
+        rotateAround(p,transformedKnee,kneeQ);
+        p.lerp(original,1-lowerLeg);
+      }else if(thigh>.001){
+        rotateAround(p,hipPivot,hipQ);p.lerp(original,1-thigh);
+      }
       target[i]=p.x;target[i+1]=p.y;target[i+2]=p.z;
     }
     attribute.needsUpdate=true;object.geometry.computeVertexNormals();object.geometry.computeBoundingSphere();
