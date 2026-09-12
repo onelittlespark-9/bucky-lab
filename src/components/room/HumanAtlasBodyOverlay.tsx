@@ -31,12 +31,13 @@ async function loadBodySurface():Promise<THREE.Group>{
 
 function smoothstep(edge0:number,edge1:number,x:number){const t=THREE.MathUtils.clamp((x-edge0)/(edge1-edge0),0,1);return t*t*(3-2*t);}
 function rotateAround(point:THREE.Vector3,pivot:THREE.Vector3,quaternion:THREE.Quaternion){point.sub(pivot).applyQuaternion(quaternion).add(pivot);}
+function localPoint(p:[number,number,number],scale:number){return new THREE.Vector3(p[0]/scale,p[1]/scale,p[2]/scale);}
 
 function deformSkin(root:THREE.Group,patient:ReturnType<typeof patientById>,pose:ReturnType<typeof useSim.getState>["pose"]){
   const H=patient.heightCm/100,scale=H/ATLAS_HEIGHT_M;
+  root.scale.setScalar(scale);
   const kin=patientKinematics({H,s:1,shoulder:patient.morph.shoulder,hip:patient.morph.hip,limb:patient.morph.limb,elbowFlex:pose.elbowFlex,hipInternal:pose.hipInternal,armRaise:pose.armRaise,armSide:pose.armSide,shoulderRoll:pose.shoulderRoll,armRotation:pose.armRotation,forearmRotation:pose.forearmRotation,kneeFlex:pose.kneeFlex,projectionId:"pa-chest",placement:"table",buckyTilt:0});
-  const neutralArmAxis=new THREE.Vector3(0,-1,0);
-  const neutralLegAxis=new THREE.Vector3(0,1,0);
+  const neutralArmAxis=new THREE.Vector3(0,-1,0),neutralLegAxis=new THREE.Vector3(0,1,0);
   root.traverse(object=>{
     if(!(object instanceof THREE.Mesh))return;
     const attribute=object.geometry.getAttribute("position"),base=object.userData.basePositions as Float32Array|undefined;if(!base)return;
@@ -44,17 +45,18 @@ function deformSkin(root:THREE.Group,patient:ReturnType<typeof patientById>,pose
     for(let i=0;i<target.length;i+=3){
       const original=new THREE.Vector3(base[i],base[i+1],base[i+2]),p=original.clone(),side: -1|1=p.x<0?-1:1,sideName=side<0?"left":"right";
       const arm=kin.arms[side<0?0:1],active=pose.armSide==null||pose.armSide===sideName;
-      const shoulderPivot=new THREE.Vector3(...arm.shoulder),elbowPivot=new THREE.Vector3(...arm.elbow);
+      const shoulderPivot=localPoint(arm.shoulder,scale),elbowPivot=localPoint(arm.elbow,scale);
       const upperDir=new THREE.Vector3(...arm.elbow).sub(new THREE.Vector3(...arm.shoulder)).normalize();
       const forearmDir=new THREE.Vector3(...arm.wrist).sub(new THREE.Vector3(...arm.elbow)).normalize();
       const upperQ=new THREE.Quaternion().setFromUnitVectors(neutralArmAxis,upperDir),forearmQ=new THREE.Quaternion().setFromUnitVectors(neutralArmAxis,forearmDir);
       const ax=Math.abs(p.x);
-      const shoulderEnvelope=smoothstep(.13*scale,.22*scale,ax)*smoothstep(.63*H,.70*H,p.y)*(1-smoothstep(.75*H,.80*H,p.y));
-      const upperArm=smoothstep(.17*scale,.26*scale,ax)*smoothstep(.56*H,.68*H,p.y)*(1-smoothstep(.68*H,.78*H,p.y));
-      const forearm=smoothstep(.23*scale,.33*scale,ax)*smoothstep(.41*H,.59*H,p.y)*(1-smoothstep(.57*H,.64*H,p.y));
+      const shoulderEnvelope=smoothstep(.13,.22,ax)*smoothstep(.63*H/scale,.70*H/scale,p.y)*(1-smoothstep(.75*H/scale,.80*H/scale,p.y));
+      const upperArm=smoothstep(.17,.26,ax)*smoothstep(.56*H/scale,.68*H/scale,p.y)*(1-smoothstep(.68*H/scale,.78*H/scale,p.y));
+      const forearm=smoothstep(.23,.33,ax)*smoothstep(.41*H/scale,.59*H/scale,p.y)*(1-smoothstep(.57*H/scale,.64*H/scale,p.y));
       if(active&&upperArm>.001){rotateAround(p,shoulderPivot,upperQ);p.lerp(original,1-upperArm);}else if(active&&forearm>.001){const transformedElbow=elbowPivot.clone();rotateAround(p,shoulderPivot,upperQ);rotateAround(transformedElbow,shoulderPivot,upperQ);rotateAround(p,transformedElbow,forearmQ);p.lerp(original,1-forearm);}else if(active&&shoulderEnvelope>.001){rotateAround(p,shoulderPivot,upperQ);p.lerp(original,1-shoulderEnvelope);}
-      const hipEnvelope=smoothstep(.10*scale,.18*scale,ax),thigh=hipEnvelope*smoothstep(.32*H,.40*H,p.y)*(1-smoothstep(.45*H,.55*H,p.y)),lowerLeg=hipEnvelope*smoothstep(.06*H,.20*H,p.y)*(1-smoothstep(.22*H,.31*H,p.y));
-      if(thigh>.001){const leg=kin.legs[side<0?0:1],q=new THREE.Quaternion().setFromUnitVectors(neutralLegAxis,new THREE.Vector3(...leg.knee).sub(new THREE.Vector3(...leg.hip)).normalize());rotateAround(p,new THREE.Vector3(...leg.hip),q);p.lerp(original,1-thigh);}else if(lowerLeg>.001){const leg=kin.legs[side<0?0:1],hipQ=new THREE.Quaternion().setFromUnitVectors(neutralLegAxis,new THREE.Vector3(...leg.knee).sub(new THREE.Vector3(...leg.hip)).normalize()),kneeQ=new THREE.Quaternion().setFromUnitVectors(neutralLegAxis,new THREE.Vector3(...leg.ankle).sub(new THREE.Vector3(...leg.knee)).normalize()),transformedKnee=new THREE.Vector3(...leg.knee);rotateAround(p,new THREE.Vector3(...leg.hip),hipQ);rotateAround(transformedKnee,new THREE.Vector3(...leg.hip),hipQ);rotateAround(p,transformedKnee,kneeQ);p.lerp(original,1-lowerLeg);}
+      const leg=kin.legs[side<0?0:1],hipPivot=localPoint(leg.hip,scale),kneePivot=localPoint(leg.knee,scale),anklePivot=localPoint(leg.ankle,scale);
+      const hipEnvelope=smoothstep(.10,.18,ax),thigh=hipEnvelope*smoothstep(.32*H/scale,.40*H/scale,p.y)*(1-smoothstep(.45*H/scale,.55*H/scale,p.y)),lowerLeg=hipEnvelope*smoothstep(.06*H/scale,.20*H/scale,p.y)*(1-smoothstep(.22*H/scale,.31*H/scale,p.y));
+      if(thigh>.001){const q=new THREE.Quaternion().setFromUnitVectors(neutralLegAxis,new THREE.Vector3(...leg.knee).sub(new THREE.Vector3(...leg.hip)).normalize());rotateAround(p,hipPivot,q);p.lerp(original,1-thigh);}else if(lowerLeg>.001){const hipQ=new THREE.Quaternion().setFromUnitVectors(neutralLegAxis,new THREE.Vector3(...leg.knee).sub(new THREE.Vector3(...leg.hip)).normalize()),kneeQ=new THREE.Quaternion().setFromUnitVectors(neutralLegAxis,new THREE.Vector3(...leg.ankle).sub(new THREE.Vector3(...leg.knee)).normalize());rotateAround(p,hipPivot,hipQ);const transformedKnee=kneePivot.clone();rotateAround(transformedKnee,hipPivot,hipQ);rotateAround(p,transformedKnee,kneeQ);p.lerp(original,1-lowerLeg);}else if(Math.abs(p.y)<.08*H/scale){rotateAround(p,anklePivot,new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),pose.hipInternal*Math.PI/180*.08));}
       target[i]=p.x;target[i+1]=p.y;target[i+2]=p.z;
     }
     attribute.needsUpdate=true;object.geometry.computeVertexNormals();object.geometry.computeBoundingSphere();
