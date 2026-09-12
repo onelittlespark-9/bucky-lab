@@ -17,4 +17,55 @@ function foot(x:number,y:number,c:SampleCtx):Paths{const p=E();extremityBase(p,c
 function ankle(x:number,y:number,c:SampleCtx):Paths{const p=E();extremityBase(p,c,x,y);addBone(p,softCapsule(x,y,-1.15,-8.5,-1,.8,1.05,.13)*5.3+softCapsule(x,y,1.15,-8.3,1.1,.6,.72,.13)*4.4);addBone(p,softEllipse(x,y,0,1.6,2.8,1.5,0,.15)*5+softEllipse(x,y,-2.25,1.1,.95,1.55,0,.15)*4+softEllipse(x,y,2.1,1,.85,1.45,0,.15)*3.6);const j=softEllipse(x,y,0,.65,2,.35,0,.2);p.bone*=1-j*.72;return p}
 function cspine(x:number,y:number,c:SampleCtx):Paths{const p=E();p.soft=4;for(let i=0;i<7;i++){const yy=14+i*2.2;addBone(p,softEllipse(x,y,0,yy,1.15,.82,0,.12)*4.8);p.cortical+=rimEllipse(x,y,0,yy,1.1,.78,.35,.12);addBone(p,softEllipse(x,y,-1.9,yy,.75,.8,0,.18)*1.8);const d=softEllipse(x,y,0,yy+1.08,1,.18,0,.15);p.bone*=1-d*.55;p.soft+=d*.35}p.soft+=softEllipse(x,y,2.6,18,2.2,7.5,0,.2);p.air+=softCapsule(x,y,1.5,12,1.5,22,.55,.25)*3;return p}
 function skull(x:number,y:number,c:SampleCtx):Paths{const p=E(),o=softEllipse(x,y,0,-1,11.5,10.5,0,.1),i=softEllipse(x,y,.2,-.7,9.7,8.9,0,.12);p.soft=3;addBone(p,o*3+i*1.8);p.cortical+=rimEllipse(x,y,0,-1,11.5,10.5,.65)*3.2+rimEllipse(x,y,.2,-.7,9.8,8.9,.5)*1.5;addBone(p,softEllipse(x,y,2.8,3.7,4.4,3,.25,.13)*2.5+softEllipse(x,y,4.5,6,4.8,2.7,.38,.13)*2);for(const q of[[3,2,2.7,2],[5.2,1.5,2,1.4],[2.8,5.2,1.8,1.4]]as const){const a=softEllipse(x,y,q[0],q[1],q[2],q[3],0,.18);p.air+=a*5.5;p.bone*=1-a*.4}return p}
-export function sampleAnatomy(x:number,y:number,c:SampleCtx):Paths{switch(c.projection.anatomy){case"torso-ap":return torso(x,y,c);case"torso-lat":return torso(x,y,c,true);case"cspine-lat":return cspine(x,y,c);case"skull-lat":return skull(x,y,c);case"hand-pa":return hand(x,y,c);case"wrist-pa":return wrist(x,y,c);case"elbow-ap":return elbow(x,y,c);case"shoulder-ap":return shoulder(x,y,c);case"knee-ap":return knee(x,y,c);case"knee-lat":return knee(x,y,c,true);case"foot-dp":return foot(x,y,c);case"ankle-ap":return ankle(x,y,c);default:return torso(x,y,c)}}
+function pelvis(x:number,y:number,c:SampleCtx):Paths{
+  const p=E(),{patient,pose,seed}=c,k=s(patient);
+  const cy=sy(78,patient),hipW=patient.morph.hip;
+  const env=softEllipse(x,y,0,cy,18.5*hipW,16.5*k,0,.08);
+  if(env<.015){p.air=42;return p}
+  p.soft=3.8*env;p.fat=(patient.habitus==="hypersthenic"?3.8:patient.habitus==="asthenic"?1.1:2.2)*env;
+  p.soft+=(fbm(x*.55,y*.55,seed+19)-.5)*.35*env;
+  for(const side of[-1,1]){
+    const sx=side*8.2*hipW,wing=softEllipse(x,y,sx,sy(70.5,patient),9.2*hipW,8.2*k,side*.12,.11);
+    addBone(p,wing*2.8);p.cortical+=rimEllipse(x,y,sx,sy(70.5,patient),9.15*hipW,8.15*k,.72)*2.1;
+    const crest=softCapsule(x,y,side*1.5,sy(64.8,patient),side*16.2*hipW,sy(66.8,patient),.72,.16);
+    addBone(p,crest*3.4);p.cortical+=crest*.9;
+    const ischium=softCapsule(x,y,side*5.8,sy(78,patient),side*8.2,sy(89.5,patient),2.1,.14);
+    addBone(p,ischium*2.8);p.cortical+=ischium*.8;
+  }
+  addBone(p,softEllipse(x,y,0,sy(77.2,patient),4.5,9.4*k,0,.12)*3.4);p.cortical+=rimEllipse(x,y,0,sy(77.2,patient),4.45,9.35*k,.62)*1.7;
+  for(let i=0;i<3;i++)for(const side of[-1,1])p.air+=softEllipse(x,y,side*(1.8+i*.45),sy(73.7+i*2.3,patient),.72,.62,0,.18)*2.2;
+  for(const side of[-1,1]){const si=softCapsule(x,y,side*4.5,sy(67.8,patient),side*5.4,sy(77.5,patient),.32,.12);p.soft+=si*.7;p.bone*=1-si*.12;}
+  for(const side of[-1,1]){
+    const ax=side*6.1*hipW;addBone(p,softEllipse(x,y,ax,sy(79.2,patient),4.5*hipW,4.4*k,side*.08,.12)*2.7);p.cortical+=rimEllipse(x,y,ax,sy(79.2,patient),4.45*hipW,4.35*k,.62)*1.8;
+    const joint=softEllipse(x,y,ax,sy(80.2,patient),2.75*hipW,2.55*k,0,.12);p.bone*=1-joint*.72;p.soft+=joint*.18;
+    const of=softEllipse(x,y,side*6.5*hipW,sy(84.2,patient),3.0*hipW,4.0*k,side*.08,.1);p.air+=of*5.5;p.bone*=1-of*.72;
+  }
+  addBone(p,softEllipse(x,y,0,sy(84.8,patient),2.5,1.9,0,.14)*3.8);p.cortical+=rimEllipse(x,y,0,sy(84.8,patient),2.45,1.85,.65)*1.4;
+  for(const side of[-1,1]){const upper=softCapsule(x,y,side*1.2,sy(84,patient),side*6.4,sy(82.7,patient),1.15,.14),lower=softCapsule(x,y,side*1.5,sy(86.5,patient),side*6.7,sy(89,patient),1.05,.14);addBone(p,upper*2.5+lower*2.2);p.cortical+=(upper+lower)*.55;}
+  const sym=softEllipse(x,y,0,sy(86.1,patient),.42,2.1,0,.18);p.soft+=sym*1.4;p.bone*=1-sym*.85;
+  const hipAngle=((pose.hipInternal||0)*Math.PI)/180;
+  for(const side of[-1,1]){
+    const hx=side*6.3*hipW,hy=sy(79.8,patient),head=softEllipse(x,y,hx,hy,3.0*hipW,3.0*k,0,.1);addBone(p,head*3.7);p.cortical+=rimEllipse(x,y,hx,hy,2.95*hipW,2.95*k,.65)*1.8;
+    const neckLen=4.8*hipW,dx=side*Math.cos(hipAngle)*neckLen,dy=Math.sin(hipAngle)*neckLen,neck=softCapsule(x,y,hx,hy,hx+dx,hy+dy,1.45,.12);addBone(p,neck*3.2);p.cortical+=neck*.7;
+    const trocX=hx+side*3.0*hipW,trocY=sy(84.5,patient),gt=softEllipse(x,y,trocX,trocY,2.4*hipW,2.7*k,0,.12);addBone(p,gt*3.1);p.cortical+=rimEllipse(x,y,trocX,trocY,2.35*hipW,2.65*k,.62)*1.3;
+    const shaft=softCapsule(x,y,hx+side*4.0*hipW,sy(84,patient),hx+side*4.3*hipW,sy(101,patient),2.15,.12);addBone(p,shaft*3.0);p.cortical+=shaft*.7;
+    addBone(p,softEllipse(x,y,hx+side*1.7*hipW,sy(87.3,patient),1.25,1.55,0,.13)*2.1);
+  }
+  p.gas+=softEllipse(x,y,-8,sy(73,patient),2.8,1.8,.15,.2)*1.8;p.gas+=softEllipse(x,y,8.5,sy(77,patient),2.5,1.7,-.2,.2)*1.5;
+  return p;
+}
+function hip(x:number,y:number,c:SampleCtx):Paths{
+  const p=E(),{patient,pose,seed}=c,k=s(patient),side=c.projection.laterality==="right"?-1:1;
+  const cx=side*8.0*patient.morph.hip,cy=sy(82,patient),env=softEllipse(x,y,cx,cy,10.5*patient.morph.hip,13*k,0,.08);
+  if(env<.015){p.air=42;return p}
+  p.soft=4.2*env;p.fat=(patient.habitus==="hypersthenic"?3.5:1.8)*env;p.soft+=(fbm(x*.7,y*.7,seed+27)-.5)*.3*env;
+  const a=((pose.hipInternal||0)*Math.PI)/180,head=softEllipse(x,y,cx,cy,3.15*patient.morph.hip,3.15*k,0,.1);addBone(p,head*3.8);p.cortical+=rimEllipse(x,y,cx,cy,3.08*patient.morph.hip,3.08*k,.66)*1.9;
+  const len=5.1*patient.morph.hip,dx=side*Math.cos(a)*len,dy=Math.sin(a)*len,neck=softCapsule(x,y,cx,cy,cx+dx,cy+dy,1.5,.12);addBone(p,neck*3.4);p.cortical+=neck*.75;
+  const acet=softEllipse(x,y,cx-side*1.7*patient.morph.hip,cy,4.8*patient.morph.hip,4.6*k,0,.11);addBone(p,acet*2.6);p.cortical+=rimEllipse(x,y,cx-side*1.7*patient.morph.hip,cy,4.7*patient.morph.hip,4.5*k,.65)*1.7;
+  const joint=softEllipse(x,y,cx-side*1.0,cy,2.75*patient.morph.hip,2.55*k,0,.12);p.bone*=1-joint*.78;p.soft+=joint*.2;
+  const gt=softEllipse(x,y,cx+side*3.1*patient.morph.hip,sy(86,patient),2.55*patient.morph.hip,2.8*k,0,.12);addBone(p,gt*3.1);p.cortical+=rimEllipse(x,y,cx+side*3.1*patient.morph.hip,sy(86,patient),2.48*patient.morph.hip,2.72*k,.62)*1.35;
+  addBone(p,softEllipse(x,y,cx+side*1.5*patient.morph.hip,sy(88.5,patient),1.3,1.55,0,.13)*2.2);
+  const shaft=softCapsule(x,y,cx+side*4.0*patient.morph.hip,sy(86,patient),cx+side*4.4*patient.morph.hip,sy(104,patient),2.25,.12);addBone(p,shaft*3.2);p.cortical+=shaft*.75;
+  p.gas+=softEllipse(x,y,cx-side*4.5,sy(77,patient),2.2,1.5,.2,.2)*1.5;return p;
+}
+export function sampleAnatomy(x:number,y:number,c:SampleCtx):Paths{if(c.projection.id==="ap-pelvis")return pelvis(x,y,c);if(c.projection.id==="ap-hip")return hip(x,y,c);switch(c.projection.anatomy){case"torso-ap":return torso(x,y,c);case"torso-lat":return torso(x,y,c,true);case"cspine-lat":return cspine(x,y,c);case"skull-lat":return skull(x,y,c);case"hand-pa":return hand(x,y,c);case"wrist-pa":return wrist(x,y,c);case"elbow-ap":return elbow(x,y,c);case"shoulder-ap":return shoulder(x,y,c);case"knee-ap":return knee(x,y,c);case"knee-lat":return knee(x,y,c,true);case"foot-dp":return foot(x,y,c);case"ankle-ap":return ankle(x,y,c);default:return torso(x,y,c)}}
