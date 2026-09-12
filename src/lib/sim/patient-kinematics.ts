@@ -1,98 +1,36 @@
+import * as THREE from "three";
 import type { ArmSide, PlacementMode } from "./types";
 import { extremityPlacement } from "./extremity-kinematics";
 
 export type V3 = [number, number, number];
 export type Side = -1 | 1;
+export interface PatientKinematicsInput { H:number; s:number; shoulder:number; hip:number; limb:number; elbowFlex:number; hipInternal:number; armRaise:number; armSide?:ArmSide; armRotation:number; forearmRotation:number; shoulderRoll:number; kneeFlex:number; projectionId:string; placement:PlacementMode; buckyTilt:number; }
+export interface ArmChain { shoulder:V3; upper:V3; elbow:V3; wrist:V3; hand:V3; upperDirection:V3; forearmDirection:V3; handQuaternion:[number,number,number,number]; }
+export interface LegChain { hip:V3; thigh:V3; knee:V3; calf:V3; ankle:V3; foot:V3; }
 
-export interface PatientKinematicsInput {
-  H: number;
-  s: number;
-  shoulder: number;
-  hip: number;
-  limb: number;
-  elbowFlex: number;
-  hipInternal: number;
-  armRaise: number;
-  armSide?: ArmSide;
-  shoulderRoll: number;
-  kneeFlex: number;
-  projectionId: string;
-  placement: PlacementMode;
-  buckyTilt: number;
-}
-
-export interface ArmChain { shoulder: V3; upper: V3; elbow: V3; wrist: V3; hand: V3; }
-export interface LegChain { hip: V3; thigh: V3; knee: V3; calf: V3; ankle: V3; foot: V3; }
-
-/** One source of truth for visible skin, soft tissue and skeleton joint centres. */
-export function patientKinematics(input: PatientKinematicsInput) {
-  const { H, s, shoulder, hip, limb, projectionId, placement, buckyTilt } = input;
-  const Y = { shoulder: 0.75 * H, waist: 0.59 * H, pelvis: 0.47 * H, knee: 0.245 * H, ankle: 0.055 * H };
-  const shoulderWidth = 0.195 * shoulder * s;
-  const hipGap = 0.085 * hip * s;
-  const intent = extremityPlacement(projectionId, placement, buckyTilt);
-  const target = intent.target;
-  const detectorExtremity = intent.onDetector;
-  const upperLimbExam = /hand|wrist|elbow|shoulder/.test(`${projectionId} ${target ?? ""}`.toLowerCase());
-  const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
-
-  const arms = ([-1, 1] as const).map((side): ArmChain => {
-    const shoulderPoint: V3 = [side * shoulderWidth, Y.shoulder, 0];
-    const sideName: ArmSide = side < 0 ? "left" : "right";
-    const selected = !upperLimbExam || input.armSide == null || input.armSide === sideName;
-    const raise = selected ? clamp(input.armRaise, 0, 1) : 0;
-    const elbowFlex = selected ? clamp(input.elbowFlex, 0, 140) : 0;
-    const shoulderRoll = selected ? input.shoulderRoll : 0;
-
-    // armRaise is an actual shoulder elevation, not a vertical translation.
-    // 0 = arm alongside the trunk; 1 = arm elevated above horizontal.
-    const raiseAngle = raise * Math.PI * (115 / 180);
-    const flex = elbowFlex * Math.PI / 180;
-    const upperLength = 0.18 * limb * s;
-    const forearmLength = 0.17 * limb * s;
-    const handLength = 0.06 * s;
-    const rollZ = 0.018 * s * Math.sin(clamp(shoulderRoll, 0, 1) * Math.PI / 2);
-
-    const upper: V3 = [
-      shoulderPoint[0] + side * upperLength * Math.sin(raiseAngle),
-      shoulderPoint[1] - upperLength * Math.cos(raiseAngle),
-      shoulderPoint[2] + rollZ,
-    ];
-    // Elbow flexion bends the forearm from the upper-arm direction while
-    // preserving continuity at the elbow. 0° therefore gives a straight arm.
-    const forearmAngle = raiseAngle - flex;
-    const elbowPoint: V3 = upper;
-    const forearm: V3 = [
-      side * forearmLength * Math.sin(forearmAngle),
-      -forearmLength * Math.cos(forearmAngle),
-      0.012 * s * Math.sin(flex),
-    ];
-    const wrist: V3 = [elbowPoint[0] + forearm[0], elbowPoint[1] + forearm[1], elbowPoint[2] + forearm[2]];
-    const hand: V3 = [wrist[0] + side * handLength * Math.sin(forearmAngle), wrist[1] - handLength * Math.cos(forearmAngle), wrist[2]];
-
-    if (detectorExtremity && intent.side === side) {
-      const flatten = Math.min(1, Math.abs(buckyTilt) / 90);
-      wrist[1] += 0.025 * s * flatten;
-      wrist[2] += 0.055 * s * flatten;
-      hand[1] += 0.025 * s * flatten;
-      hand[2] += 0.055 * s * flatten;
-    }
-
-    return { shoulder: shoulderPoint, upper, elbow: elbowPoint, wrist, hand };
+/** One source of truth for the articulated patient. Table, detector and patient transforms are deliberately separate. */
+export function patientKinematics(input:PatientKinematicsInput){
+  const {H,s,shoulder,hip,limb,projectionId,placement,buckyTilt}=input;
+  const Y={shoulder:.75*H,waist:.59*H,pelvis:.47*H,knee:.245*H,ankle:.055*H};
+  const shoulderWidth=.195*shoulder*s, hipGap=.085*hip*s, intent=extremityPlacement(projectionId,placement,buckyTilt), target=intent.target, detectorExtremity=intent.onDetector;
+  const upperLimbExam=/hand|wrist|elbow|shoulder/.test(`${projectionId} ${target??""}`.toLowerCase());
+  const clamp=(v:number,min:number,max:number)=>Math.max(min,Math.min(max,v));
+  const arms=([-1,1] as const).map((side):ArmChain=>{
+    const shoulderPoint:V3=[side*shoulderWidth,Y.shoulder,0],sideName:ArmSide=side<0?"left":"right",selected=!upperLimbExam||input.armSide==null||input.armSide===sideName;
+    const raise=selected?clamp(input.armRaise,0,1):0,elbowFlex=selected?clamp(input.elbowFlex,0,140):0,armRotation=selected?clamp(input.armRotation,-90,90):0,forearmRotation=selected?clamp(input.forearmRotation,-90,90):0;
+    const raiseAngle=raise*Math.PI*(115/180), flex=elbowFlex*Math.PI/180, axial=armRotation*Math.PI/180, upperLength=.18*limb*s, forearmLength=.17*limb*s, handLength=.06*s;
+    const radialX=Math.sin(raiseAngle)*Math.cos(axial), radialZ=Math.sin(raiseAngle)*Math.sin(axial);
+    const upper:V3=[shoulderPoint[0]+side*upperLength*radialX,shoulderPoint[1]-upperLength*Math.cos(raiseAngle),shoulderPoint[2]+upperLength*radialZ];
+    const forearmAngle=raiseAngle-flex, forearmRadialX=Math.sin(forearmAngle)*Math.cos(axial), forearmRadialZ=Math.sin(forearmAngle)*Math.sin(axial);
+    const elbowPoint:V3=upper;
+    const wrist:V3=[elbowPoint[0]+side*forearmLength*forearmRadialX,elbowPoint[1]-forearmLength*Math.cos(forearmAngle),elbowPoint[2]+forearmLength*forearmRadialZ];
+    const handDir:V3=[side*Math.sin(forearmAngle)*Math.cos(axial),-Math.cos(forearmAngle),Math.sin(forearmAngle)*Math.sin(axial)];
+    const hand:V3=[wrist[0]+side*handLength*handDir[0],wrist[1]+handLength*handDir[1],wrist[2]+handLength*handDir[2]];
+    if(detectorExtremity&&intent.side===side){const flatten=Math.min(1,Math.abs(buckyTilt)/90);wrist[1]+=.025*s*flatten;wrist[2]+=.055*s*flatten;hand[1]+=.025*s*flatten;hand[2]+=.055*s*flatten;}
+    const axis=new THREE.Vector3(...handDir).normalize(),q=new THREE.Quaternion().setFromAxisAngle(axis,forearmRotation*Math.PI/180);
+    return {shoulder:shoulderPoint,upper,elbow:elbowPoint,wrist,hand,upperDirection:[upper[0]-shoulderPoint[0],upper[1]-shoulderPoint[1],upper[2]-shoulderPoint[2]],forearmDirection:[wrist[0]-elbowPoint[0],wrist[1]-elbowPoint[1],wrist[2]-elbowPoint[2]],handQuaternion:[q.x,q.y,q.z,q.w]};
   });
-
-  const hipInternal = input.hipInternal * Math.PI / 180;
-  const kneeFlex = clamp(input.kneeFlex, 0, 135) * Math.PI / 180;
-  const legs = ([-1, 1] as const).map((side): LegChain => {
-    const hipPoint: V3 = [side * hipGap, Y.pelvis - 0.01 * s, 0];
-    const thigh: V3 = [side * (hipGap + 0.008 * s), Y.knee + 0.12 * H, side * 0.008 * s * Math.sin(hipInternal)];
-    const knee: V3 = [side * (hipGap + 0.006 * s), Y.knee, side * 0.012 * s];
-    const calfLength = 0.12 * H;
-    const calf: V3 = [knee[0], knee[1] - calfLength * Math.cos(kneeFlex), knee[2] + side * calfLength * Math.sin(kneeFlex) + 0.008 * s];
-    const ankle: V3 = [calf[0], calf[1] - 0.02 * H * Math.cos(kneeFlex), calf[2] + side * 0.02 * H * Math.sin(kneeFlex)];
-    const foot: V3 = [ankle[0], ankle[1] - 0.012 * s, ankle[2] + 0.045 * s];
-    return { hip: hipPoint, thigh, knee, calf, ankle, foot };
-  });
-
-  return { Y, shoulderWidth, hipGap, arms, legs, detectorExtremity, target };
+  const hipInternal=input.hipInternal*Math.PI/180,kneeFlex=clamp(input.kneeFlex,0,135)*Math.PI/180;
+  const legs=([-1,1] as const).map((side):LegChain=>{const hipPoint:V3=[side*hipGap,Y.pelvis-.01*s,0],thigh:V3=[side*(hipGap+.008*s),Y.knee+.12*H,side*.008*s*Math.sin(hipInternal)],knee:V3=[side*(hipGap+.006*s),Y.knee,side*.012*s],calfLength=.12*H,calf:V3=[knee[0],knee[1]-calfLength*Math.cos(kneeFlex),knee[2]+side*calfLength*Math.sin(kneeFlex)+.008*s],ankle:V3=[calf[0],calf[1]-.02*H*Math.cos(kneeFlex),calf[2]+side*.02*H*Math.sin(kneeFlex)],foot:V3=[ankle[0],ankle[1]-.012*s,ankle[2]+.045*s];return{hip:hipPoint,thigh,knee,calf,ankle,foot};});
+  return {Y,shoulderWidth,hipGap,arms,legs,detectorExtremity,target};
 }
