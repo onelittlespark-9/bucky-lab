@@ -48,8 +48,6 @@ export function patientKinematics(input: PatientKinematicsInput) {
 
     const raiseAngle = raise * Math.PI * (115 / 180);
     const flex = elbowFlex * Math.PI / 180;
-    // Shoulder roll is a modest scapulohumeral/internal-rotation contribution;
-    // it should not behave like an unconstrained Euler rotation.
     const axial = (armRotation + shoulderRoll * 24) * Math.PI / 180;
     const upperLength = .18 * limb * s;
     const forearmLength = .17 * limb * s;
@@ -110,24 +108,29 @@ export function patientKinematics(input: PatientKinematicsInput) {
   const kneeFlex = clamp(input.kneeFlex, 0, 135) * Math.PI / 180;
   const legs = ([-1, 1] as const).map((side): LegChain => {
     const hipPoint: V3 = [side * hipGap, Y.pelvis - .01 * s, 0];
+    // Anatomical landmarks: the knee is the end of the femur and the ankle is
+    // the end of the tibia/fibula. The intermediate points are kept on the
+    // same continuous chain so there are no artificial gaps in the legs.
     const thigh: V3 = [
-      side * (hipGap + .008 * s),
-      Y.knee + .12 * H,
-      side * .008 * s * Math.sin(hipInternal),
+      side * (hipGap + .004 * s),
+      (Y.pelvis + Y.knee) * .5,
+      side * .004 * s * Math.sin(hipInternal),
     ];
     const knee: V3 = [side * (hipGap + .006 * s), Y.knee, side * .012 * s * Math.sin(hipInternal)];
-    const calfLength = .12 * H;
+    const thighLength = Y.pelvis - Y.knee;
+    const calfLength = Y.knee - Y.ankle;
     const calf: V3 = [
       knee[0],
-      knee[1] - calfLength * Math.cos(kneeFlex),
-      knee[2] + side * calfLength * Math.sin(kneeFlex) + .008 * s,
+      knee[1] - calfLength * .5 * Math.cos(kneeFlex),
+      knee[2] + side * calfLength * .5 * Math.sin(kneeFlex),
     ];
     const ankle: V3 = [
-      calf[0],
-      calf[1] - .02 * H * Math.cos(kneeFlex),
-      calf[2] + side * .02 * H * Math.sin(kneeFlex),
+      knee[0],
+      knee[1] - calfLength * Math.cos(kneeFlex),
+      knee[2] + side * calfLength * Math.sin(kneeFlex),
     ];
-    const foot: V3 = [ankle[0], ankle[1] - .012 * s, ankle[2] + .045 * s];
+    const foot: V3 = [ankle[0], ankle[1] - .018 * s, ankle[2] + .065 * s];
+    void thighLength;
     return { hip: hipPoint, thigh, knee, calf, ankle, foot };
   });
 
