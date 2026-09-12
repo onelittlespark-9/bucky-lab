@@ -23,12 +23,10 @@ export function refineRadiographicAnatomy(paths: Paths, x: number, y: number, pa
     softEllipse(x, y, 0, 0, 7.5 * scale, 10 * scale, 0, 0.15),
     softEllipse(x, y, 0, 1.5 * scale, 6 * scale, 8 * scale, 0, 0.15),
   );
-  paths.soft += softEnvelope * (0.45 + Math.max(0, patient.thickness.limb - 2) * 0.12);
+  paths.soft += softEnvelope * (0.45 + Math.max(0, patient.thickness.extremity - 2) * 0.12);
   paths.fat += softEnvelope * (patient.habitus === "hypersthenic" ? 0.75 : patient.habitus === "asthenic" ? 0.2 : 0.45);
 
   if (a === "hand-pa") {
-    // Phalanges: three distinct phalangeal segments per digit, tapered toward
-    // the fingertip, with cortical margins and small interphalangeal spaces.
     for (let digit = 0; digit < 5; digit++) {
       const bx = -3.3 + digit * 1.62;
       const lengths = digit === 0 ? [2.4, 2.2] : [2.0, 1.9, 1.55];
@@ -41,12 +39,10 @@ export function refineRadiographicAnatomy(paths: Paths, x: number, y: number, pa
         paths.cortical += rimEllipse(x, y, bx, y0 + len * 0.5, taper + 0.08, len * 0.52, 0, 0.18) * 0.95;
         y0 += len + 0.25;
       }
-      // Joint gaps are radiolucent and should remain visible between phalanges.
       const joint = softEllipse(x, y, bx, y0 - 0.2, 0.62, 0.18, 0, 0.15);
       paths.bone *= Math.max(0.78, 1 - joint * 0.55);
       paths.soft += joint * 0.2;
     }
-    // Distal radius/ulna and carpal rows.
     paths.bone += softCapsule(x, y, -2.5, -7.5, -2.1, -1.7, 0.62, 0.14) * 4.4;
     paths.bone += softCapsule(x, y, 2.2, -7.2, 1.7, -1.7, 0.5, 0.14) * 3.8;
     for (let row = 0; row < 2; row++) for (let c = 0; c < 4; c++) {
@@ -57,7 +53,6 @@ export function refineRadiographicAnatomy(paths: Paths, x: number, y: number, pa
   }
 
   if (a === "wrist-pa") {
-    // Eight carpals with recognisable spacing plus the distal forearm.
     for (let row = 0; row < 2; row++) for (let c = 0; c < 4; c++) {
       const cx = -2.45 + c * 1.62 + (row ? 0.25 : 0);
       const cy = -2.7 + row * 1.45;
@@ -71,8 +66,6 @@ export function refineRadiographicAnatomy(paths: Paths, x: number, y: number, pa
   }
 
   if (a === "elbow-ap") {
-    // Distal humerus: trochlea/capitellum separated by a subtle joint space;
-    // proximal radius and ulna with the olecranon contour.
     paths.bone += softCapsule(x, y, 0, -7.5, 0, -1.0, 1.55, 0.13) * 5.2;
     paths.cortical += rimEllipse(x, y, 0, -4.2, 1.45, 3.1, 0.25, 0.16) * 1.3;
     paths.bone += softEllipse(x, y, -1.8, 0.2, 1.45, 1.25, 0, 0.18) * 5.4;
@@ -86,8 +79,6 @@ export function refineRadiographicAnatomy(paths: Paths, x: number, y: number, pa
   }
 
   if (a === "shoulder-ap") {
-    // True shoulder silhouette: humeral head, glenoid region, acromion and
-    // distal clavicle rather than a single circular block.
     paths.bone += softEllipse(x, y, 0, 0.2, 3.25, 3.25, 0, 0.12) * 5.4;
     paths.cortical += rimEllipse(x, y, 0, 0.2, 3.15, 3.1, 0.6, 0.12) * 1.5;
     paths.bone += softCapsule(x, y, 0, 2.0, 0, 10.5, 1.2, 0.14) * 4.6;
@@ -101,7 +92,6 @@ export function refineRadiographicAnatomy(paths: Paths, x: number, y: number, pa
 
   if (a === "knee-ap" || a === "knee-lat") {
     const lateral = a === "knee-lat";
-    // Distal femoral condyles, tibial plateau, fibular head and patella.
     const fy = lateral ? -0.8 : -0.1;
     paths.bone += softCapsule(x, y, lateral ? 0.7 : -0.7, -8.5, lateral ? 0.6 : -0.5, fy, lateral ? 2.0 : 1.7, 0.13) * 5.8;
     paths.bone += softEllipse(x, y, lateral ? 0.2 : -1.7, 0, lateral ? 2.4 : 1.65, 1.45, 0, 0.15) * 5.5;
@@ -116,8 +106,6 @@ export function refineRadiographicAnatomy(paths: Paths, x: number, y: number, pa
   }
 
   if (a === "foot-dp") {
-    // Metatarsals, phalanges and tarsal architecture. The first ray is wider
-    // and the lesser toes taper distally as on a real DP foot.
     for (let i = 0; i < 5; i++) {
       const bx = -3.25 + i * 1.62;
       const width = i === 0 ? 0.48 : 0.36;
@@ -137,7 +125,6 @@ export function refineRadiographicAnatomy(paths: Paths, x: number, y: number, pa
   }
 
   if (a === "ankle-ap") {
-    // Distal tibia/fibula, talus and malleoli with the ankle mortise left open.
     paths.bone += softCapsule(x, y, -1.15, -8.5, -1.0, 0.8, 1.05, 0.13) * 5.3;
     paths.bone += softCapsule(x, y, 1.15, -8.3, 1.1, 0.6, 0.72, 0.13) * 4.4;
     paths.bone += softEllipse(x, y, 0, 1.6, 2.8, 1.5, 0, 0.15) * 5.0;
@@ -150,8 +137,6 @@ export function refineRadiographicAnatomy(paths: Paths, x: number, y: number, pa
   }
 
   if (a === "cspine-lat") {
-    // Cervical bodies with disc spaces, posterior elements and prevertebral
-    // soft tissue. This is intentionally denser than the old seven blobs.
     for (let i = 0; i < 7; i++) {
       const cy = 14 + i * 2.2;
       paths.bone += softEllipse(x, y, 0, cy, 1.15, 0.82, 0, 0.12) * 4.8;
@@ -167,7 +152,6 @@ export function refineRadiographicAnatomy(paths: Paths, x: number, y: number, pa
   }
 
   if (a === "skull-lat") {
-    // Inner/outer cortical tables, cranial vault, facial bones and air spaces.
     const outer = softEllipse(x, y, 0, -1, 11.5, 10.5, 0, 0.10);
     const inner = softEllipse(x, y, 0.2, -0.7, 9.7, 8.9, 0, 0.12);
     paths.bone += outer * 2.8 + inner * 1.6;
@@ -184,7 +168,6 @@ export function refineRadiographicAnatomy(paths: Paths, x: number, y: number, pa
     return;
   }
 
-  // Small residual trabecular variation prevents large uniform white regions.
   if (paths.bone > 0.15) {
     paths.bone *= 1 + fine * 0.08;
     paths.cortical += Math.max(0, texture) * 0.18;
