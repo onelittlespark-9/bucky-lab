@@ -16,7 +16,7 @@ export function addSharedOrganPaths(
   y: number,
   patient: Patient,
   pose: SimPose,
-  includeSyntheticBone = true,
+  includeSyntheticBone = false,
 ) {
   const scale = patient.heightCm / 170;
   const rotation = (pose.rotationY * Math.PI) / 180;
@@ -48,7 +48,6 @@ export function addSharedOrganPaths(
   }
 
   if (includeSyntheticBone) {
-    // Fallback spine used only when the 3D atlas is unavailable.
     for (let i = 0; i < 17; i++) {
       const level = 22 + i * 3.7;
       const vy = scaleAnatomyCm(level, patient.heightCm);
@@ -59,7 +58,6 @@ export function addSharedOrganPaths(
       paths.bone += pedicle * 1.15;
     }
 
-    // Fallback rib arcs. These are never composited over the Human Atlas.
     for (let i = 0; i < 12; i++) {
       const ry = scaleAnatomyCm(27 + i * 2.55, patient.heightCm);
       const length = (13.2 - i * 0.42) * patient.morph.torsoWidth;
@@ -82,7 +80,6 @@ export function addSharedOrganPaths(
     }
   }
 
-  // Central airway and mediastinal interfaces.
   paths.air += softCapsule(x, y, 0, scaleAnatomyCm(18, patient.heightCm), 0.05, scaleAnatomyCm(31, patient.heightCm), 0.55, 0.3) * 6.5;
   paths.soft += softEllipse(x, y, -0.4, scaleAnatomyCm(31, patient.heightCm), 3.5 * scale, 7.8 * scale, 0, 0.2) * 1.25;
   paths.soft += softEllipse(x, y, -4.6 * patient.morph.torsoWidth, scaleAnatomyCm(27.5, patient.heightCm), 2.7 * scale, 3.0 * scale, 0.12, 0.2) * 0.9;
