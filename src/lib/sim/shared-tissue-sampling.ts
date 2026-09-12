@@ -15,7 +15,10 @@ export function addSharedTissueLayers(
   const scale = patient.heightCm / 170;
   const rotation = (pose.rotationY * Math.PI) / 180;
   const lateral = projection?.anatomy === "torso-lat" || Math.abs(pose.rotationY) >= 45;
-  const chest = projection?.id === "pa-chest" || projection?.id === "lat-chest";
+  // The renderer historically called this helper without passing Projection.
+  // Inspiration is the defining benchmark state for the PA/lateral chest views,
+  // so retain that as a safe compatibility path until all call sites pass it.
+  const chest = projection?.id === "pa-chest" || projection?.id === "lat-chest" || pose.breath === "inspiration";
 
   // For a true lateral exposure detector X is already the patient's AP axis.
   const xr = lateral ? x : x * Math.cos(rotation) - y * 0.002 * Math.sin(rotation);
