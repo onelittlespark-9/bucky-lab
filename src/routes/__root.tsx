@@ -2,7 +2,6 @@ import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-r
 import { AuthProvider } from "@/lib/auth/provider";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { FeedbackWidget } from "@/components/feedback/FeedbackWidget";
 import appCss from "../styles.css?url";
 
 const APP_NAME = "Bucky Lab";
@@ -41,7 +40,6 @@ export const Route = createRootRoute({
         <AuthProvider>
           <TooltipProvider>
             <Outlet />
-            <FeedbackWidget />
           </TooltipProvider>
         </AuthProvider>
         <Scripts />
