@@ -17,7 +17,7 @@ export function addSharedTissueLayers(
   const lateral = projection?.anatomy === "torso-lat" || Math.abs(pose.rotationY) >= 45;
   // The renderer historically called this helper without passing Projection.
   // Inspiration is the defining benchmark state for the PA/lateral chest views,
-  // so retain that as a safe compatibility path until all call sites pass it.
+  // so retain that as a compatibility path until every call site passes it.
   const chest = projection?.id === "pa-chest" || projection?.id === "lat-chest" || pose.breath === "inspiration";
 
   // For a true lateral exposure detector X is already the patient's AP axis.
@@ -25,9 +25,8 @@ export function addSharedTissueLayers(
 
   if (chest) {
     // Chest radiography needs a relatively thin chest-wall envelope around the
-    // aerated lungs. The previous generic torso model was centred in the upper
-    // abdomen and added several centimetres of soft tissue across the lungs,
-    // making a normal 125 kVp chest appear almost completely opaque.
+    // aerated lungs. The previous generic torso model added several centimetres
+    // of soft tissue through the lung fields, producing a nearly opaque chest.
     const torsoWidth = scaleAnatomyCm(lateral ? 12.0 : 16.0, patient.heightCm);
     const torso = softEllipse(
       xr,
@@ -45,11 +44,24 @@ export function addSharedTissueLayers(
     paths.fat += torso * habitusFat;
     paths.soft += torso * (patient.thickness.chest * (lateral ? 0.070 : 0.052));
 
-    // Pectoral/chest-wall attenuation should be subtle on a PA image and more
-    // evident on a lateral image, never a broad central white mass.
+    // Replace the blanket torso path with aerated lung volume rather than simply
+    // layering "lung" on top of soft tissue. This creates the expected hierarchy
+    // of lucent lungs with denser mediastinum, heart and chest wall.
+    const lungRight = lateral
+      ? softEllipse(xr, y, 0, scaleAnatomyCm(33.0, patient.heightCm), 10.8 * scale, 23.5 * scale, 0, 0.12)
+      : softEllipse(xr, y, -7.2 * scale, scaleAnatomyCm(32.5, patient.heightCm), 10.0 * scale, 24.0 * scale, 0, 0.12);
+    const lungLeft = lateral
+      ? lungRight
+      : softEllipse(xr, y, 7.0 * scale, scaleAnatomyCm(33.0, patient.heightCm), 9.1 * scale, 23.0 * scale, 0, 0.12);
+    const lungMask = Math.max(lungRight, lungLeft);
+    paths.soft *= Math.max(0.16, 1 - lungMask * 0.84);
+    paths.fat *= Math.max(0.35, 1 - lungMask * 0.65);
+
+    // Pectoral/chest-wall attenuation stays subtle on PA and slightly stronger
+    // on lateral images, without obscuring the lungs.
     const pectoralL = softEllipse(xr, y, -5.2 * scale, scaleAnatomyCm(35, patient.heightCm), 5.2 * scale, 7.0 * scale, 0.08, 0.14);
     const pectoralR = softEllipse(xr, y, 5.2 * scale, scaleAnatomyCm(35, patient.heightCm), 5.2 * scale, 7.0 * scale, -0.08, 0.14);
-    paths.soft += Math.max(pectoralL, pectoralR) * (lateral ? 0.70 : 0.38);
+    paths.soft += Math.max(pectoralL, pectoralR) * (lateral ? 0.55 : 0.26);
     return;
   }
 
