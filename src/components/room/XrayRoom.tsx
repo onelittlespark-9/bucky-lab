@@ -1,8 +1,6 @@
 import { ContactShadows } from "@react-three/drei";
 import { useSim } from "@/lib/sim/store";
 import { PatientModel } from "./PatientModel";
-import { InternalAnatomy } from "./InternalAnatomy";
-import { DetailedSkeletalOverlay } from "./DetailedSkeletalOverlay";
 import { PatientRig } from "./PatientRig";
 import { XraySourceVisibility } from "./XraySourceVisibility";
 import { RoomQuickControls } from "./RoomQuickControls";
@@ -31,7 +29,6 @@ function TableAndBucky() {
 }
 
 export function XrayRoom() {
-  const exposing = useSim(s => s.exposing);
   return <>
     <color attach="background" args={["#0a0c0e"]} />
     <hemisphereLight args={["#c8d0d4", "#1a1814", .55]} />
@@ -40,10 +37,6 @@ export function XrayRoom() {
     <TableAndBucky />
     <PatientRig>
       <PatientModel />
-      {exposing && <>
-        <InternalAnatomy />
-        <DetailedSkeletalOverlay />
-      </>}
     </PatientRig>
     <XraySourceVisibility />
     <RoomQuickControls />
