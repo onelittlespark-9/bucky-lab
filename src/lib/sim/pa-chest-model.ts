@@ -7,132 +7,147 @@ const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 const smooth01 = (v: number) => { const t = clamp01(v); return t * t * (3 - 2 * t); };
 
 /**
- * Purpose-built normal PA chest attenuation model.
- * Coordinates are cm on the detector plane, with y measured inferiorly from the
- * vertex convention used by the simulator. The model deliberately avoids the
- * generic torso sampler so chest anatomy is formed in one coordinate system.
+ * Normal PA chest attenuation model.
+ *
+ * Important: lung attenuation replaces thoracic soft tissue rather than being
+ * added on top of it. This is what gives a PA chest its characteristic dark
+ * aerated lungs with a softer mediastinum and subtle overlying ribs.
  */
 export function samplePaChest(x: number, y: number, patient: Patient, pose: SimPose, seed: number): Paths {
   const p = emptyPaths();
   const s = patient.heightCm / 170;
-  const torsoW = 15.8 * patient.morph.torsoWidth * s;
+  const widthScale = patient.morph.torsoWidth;
   const chestDepth = patient.thickness.chest;
-  const centreY = 39.5 * s;
-  const torsoH = 24.8 * s;
+  const insp = pose.breath === "inspiration" ? 1 : 0;
 
-  const body = softEllipse(x, y, 0, centreY, torsoW, torsoH, 0, 0.075);
-  if (body < 0.006) {
-    p.air = 40;
+  // Broad thoracic soft-tissue envelope. Keep this smooth and deliberately
+  // low contrast: a real PA radiograph does not look like a body-outline mask.
+  const body = softEllipse(x, y, 0, 39.0 * s, 16.0 * widthScale * s, 24.0 * s, 0, 0.055);
+  if (body < 0.003) {
+    p.air = 36;
     return p;
   }
 
-  // Thin PA chest wall/background attenuation.
-  const habitusFat = patient.habitus === "hypersthenic" ? 1.25 : patient.habitus === "asthenic" ? 0.45 : 0.78;
-  p.fat = body * habitusFat;
-  p.soft = body * chestDepth * 0.030;
+  const habitus = patient.habitus === "hypersthenic" ? 1.15 : patient.habitus === "asthenic" ? 0.78 : 1.0;
+  p.soft = body * (2.55 * habitus);
+  p.fat = body * (patient.habitus === "hypersthenic" ? 0.72 : patient.habitus === "asthenic" ? 0.30 : 0.46);
 
-  const inspiration = pose.breath === "inspiration" ? 1 : 0;
-  const diaBase = (49.0 - inspiration * 3.0) * s;
-  const rightDia = diaBase - 0.9 * s;
-  const leftDia = diaBase + 0.35 * s;
+  // Diaphragm levels: right slightly higher than left on a normal PA chest.
+  const base = (50.0 - insp * 2.7) * s;
+  const rightDia = base - 0.75 * s;
+  const leftDia = base + 0.45 * s;
 
-  // Lung fields: apices narrow, bases wider, heart notch on the left.
-  const rUpper = softEllipse(x, y, -6.7 * s, 32.8 * s, 8.7 * s, 18.0 * s, -0.02, 0.07);
-  const rLower = softEllipse(x, y, -7.0 * s, 40.2 * s, 9.8 * s, 13.0 * s, 0.01, 0.07);
-  let rightLung = Math.max(rUpper, rLower);
-  const lUpper = softEllipse(x, y, 6.5 * s, 33.0 * s, 8.2 * s, 17.8 * s, 0.02, 0.07);
-  const lLower = softEllipse(x, y, 6.8 * s, 39.8 * s, 8.7 * s, 12.6 * s, -0.01, 0.07);
-  let leftLung = Math.max(lUpper, lLower);
+  // Anatomical lung fields. Two overlapping ellipses per side make the apices
+  // narrow and the lower zones broader without producing obvious geometric edges.
+  let rightLung = Math.max(
+    softEllipse(x, y, -6.7*s, 31.5*s, 7.6*s, 15.8*s, -0.015, 0.055),
+    softEllipse(x, y, -7.0*s, 39.5*s, 9.0*s, 13.0*s, 0.01, 0.055),
+  );
+  let leftLung = Math.max(
+    softEllipse(x, y, 6.4*s, 31.7*s, 7.2*s, 15.5*s, 0.015, 0.055),
+    softEllipse(x, y, 6.8*s, 39.2*s, 8.4*s, 12.7*s, -0.01, 0.055),
+  );
 
-  const rFade = smooth01((rightDia + 1.2 * s - y) / (2.4 * s));
-  const lFade = smooth01((leftDia + 1.2 * s - y) / (2.4 * s));
-  rightLung *= rFade;
-  leftLung *= lFade;
+  // Smooth fade into the hemidiaphragms, avoiding a horizontal cut-off.
+  rightLung *= smooth01((rightDia + 1.7*s - y) / (3.4*s));
+  leftLung *= smooth01((leftDia + 1.7*s - y) / (3.4*s));
 
-  // Cardiomediastinal silhouette, mostly on the patient's left (image right).
-  const heartMain = softEllipse(x, y, 2.8 * s, 42.7 * s, 5.7 * s, 7.3 * s, 0.18, 0.08);
-  const heartInferior = softEllipse(x, y, 2.1 * s, 46.0 * s, 6.3 * s, 4.1 * s, 0.08, 0.08);
-  const heart = Math.max(heartMain, heartInferior);
-  leftLung *= Math.max(0.10, 1 - heart * 0.88);
-  rightLung *= Math.max(0.45, 1 - heart * 0.24);
+  // Cardiac notch and mediastinal overlap. The heart remains mostly on the
+  // patient's left (image right) and should not become a circular blob.
+  const heartUpper = softEllipse(x, y, 2.7*s, 41.3*s, 5.0*s, 7.0*s, 0.12, 0.055);
+  const heartLower = softEllipse(x, y, 3.3*s, 45.0*s, 6.0*s, 5.1*s, 0.10, 0.055);
+  const heart = Math.max(heartUpper, heartLower);
+  leftLung *= Math.max(0.08, 1 - heart * 0.92);
+  rightLung *= Math.max(0.55, 1 - heart * 0.18);
 
-  const mediastinum = softEllipse(x, y, 0.3 * s, 34.0 * s, 2.5 * s, 11.0 * s, 0, 0.09);
-  const upperMediastinum = softEllipse(x, y, 0.1 * s, 27.0 * s, 2.0 * s, 5.7 * s, 0, 0.10);
-  const aorticKnuckle = softEllipse(x, y, 2.1 * s, 30.6 * s, 1.35 * s, 1.7 * s, -0.1, 0.10);
+  const lungMask = Math.max(rightLung, leftLung);
+  // Carve lung from the chest wall; retain a thin anterior/posterior wall.
+  p.soft *= Math.max(0.16, 1 - lungMask * 0.84);
+  p.fat *= Math.max(0.26, 1 - lungMask * 0.70);
+  // Aerated lung has some attenuation, but far less than soft tissue.
+  p.lung += (rightLung + leftLung) * (0.85 + chestDepth * 0.020);
 
-  const lungShape = Math.max(rightLung, leftLung);
-  p.soft *= Math.max(0.12, 1 - lungShape * 0.88);
-  p.fat *= Math.max(0.24, 1 - lungShape * 0.72);
-  p.lung += (rightLung + leftLung) * chestDepth * 0.34;
-  p.soft += heart * 2.25 + mediastinum * 0.78 + upperMediastinum * 0.58 + aorticKnuckle * 0.34;
+  // Cardiomediastinum. Use several overlapping low-amplitude shapes so there is
+  // no single hard-edged white central column.
+  const mediastinum = softEllipse(x, y, 0.35*s, 35.5*s, 2.2*s, 10.4*s, 0, 0.065);
+  const upperMediastinum = softEllipse(x, y, 0.15*s, 28.0*s, 1.75*s, 5.0*s, 0, 0.07);
+  const aorticKnuckle = softEllipse(x, y, 2.15*s, 30.6*s, 1.15*s, 1.35*s, -0.10, 0.08);
+  p.soft += heart * 1.25 + mediastinum * 0.44 + upperMediastinum * 0.30 + aorticKnuckle * 0.20;
 
-  // Trachea and main bronchi remain lucent through the upper mediastinum.
-  p.air += softCapsule(x, y, 0, 20.0 * s, 0, 31.2 * s, 0.48 * s, 0.22) * 5.2;
-  p.air += softCapsule(x, y, 0, 31.0 * s, -2.2 * s, 34.0 * s, 0.34 * s, 0.24) * 2.2;
-  p.air += softCapsule(x, y, 0, 31.0 * s, 2.2 * s, 34.0 * s, 0.34 * s, 0.24) * 2.2;
+  // Tracheal air column and main bronchi.
+  p.air += softCapsule(x, y, 0, 21.0*s, 0, 31.0*s, 0.40*s, 0.28) * 3.8;
+  p.air += softCapsule(x, y, 0, 31.0*s, -2.1*s, 34.1*s, 0.25*s, 0.30) * 1.4;
+  p.air += softCapsule(x, y, 0, 31.0*s, 2.0*s, 34.0*s, 0.25*s, 0.30) * 1.4;
 
-  // Hila and branching pulmonary vessels. These are attenuation paths, not line overlays.
+  // Hila and tapering pulmonary vessels. Keep these deliberately subtle and
+  // numerous enough to read as vascular markings rather than a few drawn lines.
   for (const side of [-1, 1] as const) {
-    const hx = side * 3.2 * s;
-    const hy = (side < 0 ? 35.7 : 34.8) * s;
-    p.soft += softEllipse(x, y, hx, hy, 1.55 * s, 2.0 * s, 0, 0.16) * 0.34;
-    const branches: Array<[number, number, number, number, number, number]> = side < 0 ? [
-      [hx, hy, -6.0*s, 39.0*s, 0.20*s, 0.26],
-      [hx, hy, -8.1*s, 42.0*s, 0.15*s, 0.25],
-      [hx, hy, -9.2*s, 45.0*s, 0.11*s, 0.22],
-      [hx, hy, -5.3*s, 31.0*s, 0.13*s, 0.22],
+    const hx = side * 3.0 * s;
+    const hy = (side < 0 ? 35.7 : 34.9) * s;
+    p.soft += softEllipse(x, y, hx, hy, 1.35*s, 1.75*s, 0, 0.18) * 0.22;
+
+    const targets = side < 0 ? [
+      [-5.2, 31.0, .11], [-6.2, 37.8, .13], [-7.6, 40.5, .10], [-8.8, 43.0, .075], [-9.0, 46.0, .055], [-5.7, 45.5, .065]
     ] : [
-      [hx, hy, 5.6*s, 38.5*s, 0.20*s, 0.26],
-      [hx, hy, 7.3*s, 41.3*s, 0.14*s, 0.25],
-      [hx, hy, 8.2*s, 44.2*s, 0.10*s, 0.22],
-      [hx, hy, 5.0*s, 30.6*s, 0.13*s, 0.22],
+      [5.0, 30.8, .11], [5.8, 37.4, .13], [7.1, 40.0, .10], [8.1, 42.8, .075], [8.2, 45.7, .055], [5.6, 45.2, .065]
     ];
-    for (const [x1,y1,x2,y2,r,soft] of branches) p.soft += softCapsule(x, y, x1, y1, x2, y2, r, 0.30) * soft;
-  }
-
-  // Thoracic vertebral bodies: visible but not a solid central column.
-  for (let i = 0; i < 11; i++) {
-    const vy = (24.5 + i * 2.55) * s;
-    const bodyV = softEllipse(x, y, 0, vy, 0.92 * s, 0.74 * s, 0, 0.16);
-    p.bone += bodyV * 0.72;
-    p.cortical += bodyV * 0.08;
-  }
-
-  // Posterior ribs: smooth inferiorly sloping arcs. The anterior portions are
-  // deliberately lower contrast so the image reads like a PA radiograph.
-  for (let i = 0; i < 10; i++) {
-    const y0 = (27.0 + i * 2.55) * s;
-    const lateralX = (12.6 - i * 0.12) * patient.morph.torsoWidth * s;
-    const drop = (1.0 + i * 0.18) * s;
-    for (const side of [-1, 1] as const) {
-      const x0 = side * 1.5 * s;
-      const x1 = side * 5.8 * s;
-      const x2 = side * lateralX;
-      const x3 = side * (9.8 - i * 0.10) * patient.morph.torsoWidth * s;
-      const seg1 = softCapsule(x, y, x0, y0, x1, y0 + drop * 0.35, 0.16 * s, 0.26);
-      const seg2 = softCapsule(x, y, x1, y0 + drop * 0.35, x2, y0 + drop, 0.15 * s, 0.27);
-      const seg3 = softCapsule(x, y, x2, y0 + drop, x3, y0 + drop * 1.15, 0.12 * s, 0.30);
-      p.bone += (seg1 * 0.50 + seg2 * 0.44 + seg3 * 0.22);
-      p.cortical += (seg1 * 0.05 + seg2 * 0.045 + seg3 * 0.02);
+    for (const [tx, ty, r] of targets) {
+      const vessel = softCapsule(x, y, hx, hy, tx*s, ty*s, r*s, 0.34);
+      p.soft += vessel * 0.12;
     }
   }
 
-  // Clavicles, gently curved and symmetric about the spine.
-  for (const side of [-1, 1] as const) {
-    p.bone += softCapsule(x, y, side * 1.3 * s, 25.8 * s, side * 7.2 * s, 24.6 * s, 0.28 * s, 0.23) * 0.52;
-    p.bone += softCapsule(x, y, side * 7.2 * s, 24.6 * s, side * 11.0 * s, 26.0 * s, 0.24 * s, 0.23) * 0.42;
+  // Thoracic spine: subtle continuous density with faint segmental modulation.
+  const spineStrip = softCapsule(x, y, 0, 24.0*s, 0, 50.0*s, 0.62*s, 0.34);
+  p.bone += spineStrip * 0.11;
+  for (let i = 0; i < 10; i++) {
+    const vy = (25.5 + i * 2.55) * s;
+    const vb = softEllipse(x, y, 0, vy, 0.78*s, 0.58*s, 0, 0.22);
+    p.bone += vb * 0.075;
   }
 
-  // Hemidiaphragms: broad shallow domes with side-specific height.
-  p.soft += softCapsule(x, y, -13.0*s, leftDia+1.3*s, -6.0*s, leftDia-0.2*s, 0.26*s, 0.34) * 0.36;
-  p.soft += softCapsule(x, y, -6.0*s, leftDia-0.2*s, -1.0*s, leftDia-0.8*s, 0.24*s, 0.34) * 0.42;
-  p.soft += softCapsule(x, y, 1.0*s, rightDia-0.9*s, 6.0*s, rightDia-0.2*s, 0.24*s, 0.34) * 0.44;
-  p.soft += softCapsule(x, y, 6.0*s, rightDia-0.2*s, 13.0*s, rightDia+1.1*s, 0.26*s, 0.34) * 0.38;
+  // Posterior ribs. Approximate each rib as a shallow curve using short segments,
+  // but keep attenuation low enough that they remain background anatomy.
+  for (let i = 0; i < 10; i++) {
+    const y0 = (27.0 + i * 2.55) * s;
+    const drop = (0.7 + i * 0.15) * s;
+    const outer = (12.0 - i * 0.10) * widthScale * s;
+    for (const side of [-1, 1] as const) {
+      const pts: Array<[number, number]> = [
+        [side*1.2*s, y0],
+        [side*4.3*s, y0 + drop*0.18],
+        [side*7.7*s, y0 + drop*0.52],
+        [side*outer, y0 + drop],
+      ];
+      for (let j = 0; j < pts.length - 1; j++) {
+        const [x1,y1] = pts[j]!, [x2,y2] = pts[j+1]!;
+        const rib = softCapsule(x, y, x1, y1, x2, y2, 0.115*s, 0.38);
+        p.bone += rib * (j === 0 ? 0.11 : j === 1 ? 0.095 : 0.075);
+      }
+    }
+  }
 
-  // Subtle heterogeneous lung texture only; no broad synthetic blobs.
-  const coarse = (fbm(x * 0.42, y * 0.42, seed + 19) - 0.5) * 0.026;
-  const fine = (fbm(x * 1.35, y * 1.35, seed + 29) - 0.5) * 0.014;
-  p.soft += Math.max(0, p.lung) * Math.max(0, coarse + fine) * 0.10;
+  // Clavicles: slightly more conspicuous than ribs, but still soft-edged.
+  for (const side of [-1, 1] as const) {
+    const c1 = softCapsule(x, y, side*1.2*s, 25.8*s, side*5.5*s, 24.7*s, 0.20*s, 0.34);
+    const c2 = softCapsule(x, y, side*5.5*s, 24.7*s, side*10.2*s, 26.0*s, 0.18*s, 0.34);
+    p.bone += c1 * 0.16 + c2 * 0.12;
+  }
+
+  // Broad shallow hemidiaphragmatic domes. Four short segments per side avoid
+  // the straight-bar appearance seen in previous renders.
+  const addDome = (side: -1|1, centre: number, level: number) => {
+    const xs = [1.0, 4.0, 7.0, 10.0, 13.0].map(v => side * v * s);
+    const ys = [level-0.45*s, level-0.95*s, level-0.70*s, level+0.05*s, level+0.75*s];
+    for (let i=0;i<4;i++) p.soft += softCapsule(x,y,xs[i]!,ys[i]!,xs[i+1]!,ys[i+1]!,0.20*s,0.42)*0.20;
+  };
+  addDome(-1, -6*s, leftDia);
+  addDome(1, 6*s, rightDia);
+
+  // Low-frequency lung texture only. No obvious synthetic speckle or blobs.
+  const coarse = (fbm(x * 0.26, y * 0.26, seed + 19) - 0.5) * 0.020;
+  const fine = (fbm(x * 0.90, y * 0.90, seed + 29) - 0.5) * 0.010;
+  p.soft += Math.max(0, lungMask) * Math.max(0, coarse + fine) * 0.055;
 
   return p;
 }
