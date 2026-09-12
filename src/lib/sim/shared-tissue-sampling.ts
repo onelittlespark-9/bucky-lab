@@ -15,9 +15,6 @@ export function addSharedTissueLayers(
   const scale = patient.heightCm / 170;
   const rotation = (pose.rotationY * Math.PI) / 180;
   const lateral = projection?.anatomy === "torso-lat" || Math.abs(pose.rotationY) >= 45;
-  // The renderer historically called this helper without passing Projection.
-  // Inspiration is the defining benchmark state for the PA/lateral chest views,
-  // so retain that as a compatibility path until every call site passes it.
   const chest = projection?.id === "pa-chest" || projection?.id === "lat-chest" || pose.breath === "inspiration";
 
   // For a true lateral exposure detector X is already the patient's AP axis.
@@ -25,38 +22,35 @@ export function addSharedTissueLayers(
 
   if (chest) {
     // sampleAnatomy() contains an older generic torso model. It is useful for
-    // abdomen/pelvis work, but on chest views it was being combined with this
-    // dedicated thoracic model and effectively double-counting soft tissue,
-    // lungs and abdominal attenuation. Start the chest material path cleanly.
+    // abdomen/pelvis work, but on chest views it double-counts attenuation.
     paths.air = 0;
     paths.lung = 0;
     paths.fat = 0;
     paths.soft = 0;
     paths.gas = 0;
 
+    // Keep the envelope continuous beyond the costophrenic angles. Previously
+    // the model switched abruptly to a large air path at its inferior edge,
+    // which created the obvious horizontal band across the lower chest.
     const torsoWidth = scaleAnatomyCm(lateral ? 12.2 : 16.3, patient.heightCm);
     const torso = softEllipse(
       xr,
       y,
       0,
-      scaleAnatomyCm(38.5, patient.heightCm),
+      scaleAnatomyCm(39.5, patient.heightCm),
       torsoWidth,
-      scaleAnatomyCm(22.8, patient.heightCm),
+      scaleAnatomyCm(25.0, patient.heightCm),
       0,
       0.085,
     );
-    if (torso < 0.012) {
-      paths.air = 42;
-      return;
-    }
+    if (torso < 0.004) return;
 
     const habitusFat = patient.habitus === "hypersthenic" ? 1.45 : patient.habitus === "asthenic" ? 0.45 : 0.82;
     paths.fat = torso * habitusFat;
     paths.soft = torso * (patient.thickness.chest * (lateral ? 0.048 : 0.032));
 
-    // Aerated lungs replace the majority of the thoracic soft-tissue path.
-    // Keep a thin chest-wall component so ribs/soft tissue still sit inside a
-    // believable body envelope rather than floating against detector air.
+    // Aerated lungs replace most of the thoracic soft-tissue path while a thin
+    // chest-wall path remains around them.
     const lungRight = lateral
       ? softEllipse(xr, y, -0.2 * scale, scaleAnatomyCm(34.0, patient.heightCm), 10.4 * scale, 22.7 * scale, 0, 0.10)
       : softEllipse(xr, y, -7.1 * scale, scaleAnatomyCm(34.0, patient.heightCm), 9.8 * scale, 22.8 * scale, -0.02, 0.10);
@@ -67,11 +61,23 @@ export function addSharedTissueLayers(
     paths.soft *= Math.max(0.10, 1 - lungMask * 0.90);
     paths.fat *= Math.max(0.22, 1 - lungMask * 0.78);
 
-    // Subtle pectoral/chest-wall attenuation. A PA chest should not contain a
-    // broad central slab of soft tissue overlying both lungs.
     const pectoralL = softEllipse(xr, y, -5.1 * scale, scaleAnatomyCm(34.5, patient.heightCm), 5.0 * scale, 6.6 * scale, 0.08, 0.13);
     const pectoralR = softEllipse(xr, y, 5.1 * scale, scaleAnatomyCm(34.5, patient.heightCm), 5.0 * scale, 6.6 * scale, -0.08, 0.13);
     paths.soft += Math.max(pectoralL, pectoralR) * (lateral ? 0.42 : 0.18);
+
+    // Add only a low, broad sub-diaphragmatic soft-tissue pedestal rather than
+    // drawing individual abdominal organs into a chest projection.
+    const inferior = softEllipse(
+      xr,
+      y,
+      0,
+      scaleAnatomyCm(55.5, patient.heightCm),
+      scaleAnatomyCm(lateral ? 11.0 : 15.0, patient.heightCm),
+      scaleAnatomyCm(8.5, patient.heightCm),
+      0,
+      0.12,
+    );
+    paths.soft += inferior * 0.45;
     return;
   }
 
