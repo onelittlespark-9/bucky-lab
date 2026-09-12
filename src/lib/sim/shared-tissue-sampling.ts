@@ -24,44 +24,54 @@ export function addSharedTissueLayers(
   const xr = lateral ? x : x * Math.cos(rotation) - y * 0.002 * Math.sin(rotation);
 
   if (chest) {
-    // Chest radiography needs a relatively thin chest-wall envelope around the
-    // aerated lungs. The previous generic torso model added several centimetres
-    // of soft tissue through the lung fields, producing a nearly opaque chest.
-    const torsoWidth = scaleAnatomyCm(lateral ? 12.0 : 16.0, patient.heightCm);
+    // sampleAnatomy() contains an older generic torso model. It is useful for
+    // abdomen/pelvis work, but on chest views it was being combined with this
+    // dedicated thoracic model and effectively double-counting soft tissue,
+    // lungs and abdominal attenuation. Start the chest material path cleanly.
+    paths.air = 0;
+    paths.lung = 0;
+    paths.fat = 0;
+    paths.soft = 0;
+    paths.gas = 0;
+
+    const torsoWidth = scaleAnatomyCm(lateral ? 12.2 : 16.3, patient.heightCm);
     const torso = softEllipse(
       xr,
       y,
       0,
       scaleAnatomyCm(38.5, patient.heightCm),
       torsoWidth,
-      scaleAnatomyCm(22.5, patient.heightCm),
+      scaleAnatomyCm(22.8, patient.heightCm),
       0,
-      0.10,
+      0.085,
     );
-    if (torso < 0.02) return;
+    if (torso < 0.012) {
+      paths.air = 42;
+      return;
+    }
 
-    const habitusFat = patient.habitus === "hypersthenic" ? 1.8 : patient.habitus === "asthenic" ? 0.65 : 1.05;
-    paths.fat += torso * habitusFat;
-    paths.soft += torso * (patient.thickness.chest * (lateral ? 0.070 : 0.052));
+    const habitusFat = patient.habitus === "hypersthenic" ? 1.45 : patient.habitus === "asthenic" ? 0.45 : 0.82;
+    paths.fat = torso * habitusFat;
+    paths.soft = torso * (patient.thickness.chest * (lateral ? 0.048 : 0.032));
 
-    // Replace the blanket torso path with aerated lung volume rather than simply
-    // layering "lung" on top of soft tissue. This creates the expected hierarchy
-    // of lucent lungs with denser mediastinum, heart and chest wall.
+    // Aerated lungs replace the majority of the thoracic soft-tissue path.
+    // Keep a thin chest-wall component so ribs/soft tissue still sit inside a
+    // believable body envelope rather than floating against detector air.
     const lungRight = lateral
-      ? softEllipse(xr, y, 0, scaleAnatomyCm(33.0, patient.heightCm), 10.8 * scale, 23.5 * scale, 0, 0.12)
-      : softEllipse(xr, y, -7.2 * scale, scaleAnatomyCm(32.5, patient.heightCm), 10.0 * scale, 24.0 * scale, 0, 0.12);
+      ? softEllipse(xr, y, -0.2 * scale, scaleAnatomyCm(34.0, patient.heightCm), 10.4 * scale, 22.7 * scale, 0, 0.10)
+      : softEllipse(xr, y, -7.1 * scale, scaleAnatomyCm(34.0, patient.heightCm), 9.8 * scale, 22.8 * scale, -0.02, 0.10);
     const lungLeft = lateral
       ? lungRight
-      : softEllipse(xr, y, 7.0 * scale, scaleAnatomyCm(33.0, patient.heightCm), 9.1 * scale, 23.0 * scale, 0, 0.12);
+      : softEllipse(xr, y, 6.8 * scale, scaleAnatomyCm(34.4, patient.heightCm), 8.9 * scale, 22.0 * scale, 0.02, 0.10);
     const lungMask = Math.max(lungRight, lungLeft);
-    paths.soft *= Math.max(0.16, 1 - lungMask * 0.84);
-    paths.fat *= Math.max(0.35, 1 - lungMask * 0.65);
+    paths.soft *= Math.max(0.10, 1 - lungMask * 0.90);
+    paths.fat *= Math.max(0.22, 1 - lungMask * 0.78);
 
-    // Pectoral/chest-wall attenuation stays subtle on PA and slightly stronger
-    // on lateral images, without obscuring the lungs.
-    const pectoralL = softEllipse(xr, y, -5.2 * scale, scaleAnatomyCm(35, patient.heightCm), 5.2 * scale, 7.0 * scale, 0.08, 0.14);
-    const pectoralR = softEllipse(xr, y, 5.2 * scale, scaleAnatomyCm(35, patient.heightCm), 5.2 * scale, 7.0 * scale, -0.08, 0.14);
-    paths.soft += Math.max(pectoralL, pectoralR) * (lateral ? 0.55 : 0.26);
+    // Subtle pectoral/chest-wall attenuation. A PA chest should not contain a
+    // broad central slab of soft tissue overlying both lungs.
+    const pectoralL = softEllipse(xr, y, -5.1 * scale, scaleAnatomyCm(34.5, patient.heightCm), 5.0 * scale, 6.6 * scale, 0.08, 0.13);
+    const pectoralR = softEllipse(xr, y, 5.1 * scale, scaleAnatomyCm(34.5, patient.heightCm), 5.0 * scale, 6.6 * scale, -0.08, 0.13);
+    paths.soft += Math.max(pectoralL, pectoralR) * (lateral ? 0.42 : 0.18);
     return;
   }
 
