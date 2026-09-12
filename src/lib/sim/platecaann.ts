@@ -1,15 +1,12 @@
 import type { SimState } from "./store";
 
-// Chest collimation is deliberately given a practical tolerance because the
-// simulated light field is an aid to positioning, not a millimetre-perfect
-// boundary detector. Anatomy coverage remains the priority.
 function chestCollimationAcceptable(width: number, height: number, targetW: number, targetH: number) {
   const widthRatio = width / Math.max(1, targetW);
   const heightRatio = height / Math.max(1, targetH);
   return widthRatio >= 0.85 && widthRatio <= 1.35 && heightRatio >= 0.85 && heightRatio <= 1.35;
 }
 
-const decision = (ok: boolean, failText: string, passText = "Acceptable.") => ok ? "pass" : "fail";
+const decision = (ok: boolean, _failText: string, _passText = "Acceptable.") => ok ? "pass" : "fail";
 
 export function assessPlatecaann(args: {
   patientIdentifiersConfirmed?: boolean;
@@ -44,7 +41,7 @@ export function assessPlatecaann(args: {
     { key: "E-contrast", label: "Exposure — contrast", decision: decision(args.exp.contrast, "Contrast is outside the current simulation target."), note: "Assess tissue differentiation and projection-specific anatomical contrast rather than image brightness alone." },
     { key: "E-density", label: "Exposure — density", decision: decision(args.exp.density, "Exposure/density is outside the current simulation target."), note: `Assess exposure adequacy using the simulated EI status${result?.metrics?.eiStatus ? ` (${result.metrics.eiStatus})` : ""}.` },
     { key: "E-sharpness", label: "Exposure — sharpness", decision: decision(args.exp.sharpness, "Reduced sharpness/noise is present; assess whether it compromises the clinical question."), note: "Consider motion and geometric unsharpness, including SID/OID effects where relevant." },
-    { key: "C", label: "Collimation", decision: decision(!collimationError, isChest ? "The chest field is outside the practical tolerance and may exclude required anatomy." : "The simulated field is wider than the target region."), note: isChest ? "For chest, modest over- or under-collimation is tolerated when the apices, costophrenic angles / just below the diaphragm, and lateral soft-tissue borders remain included." : "Use the smallest field that includes all clinically required anatomy." },
+    { key: "C", label: "Collimation", decision: decision(!collimationError, collimationError ? (isChest ? "The chest field is outside the practical tolerance and may exclude required anatomy." : "The simulated field is wider than the target region.") : (isChest ? "For chest, modest over- or under-collimation is tolerated when the apices, costophrenic angles / just below the diaphragm, and lateral soft-tissue borders remain included." : "Use the smallest field that includes all clinically required anatomy.")), note: isChest ? "For chest, modest over- or under-collimation is tolerated when the apices, costophrenic angles / just below the diaphragm, and lateral soft-tissue borders remain included." : "Use the smallest field that includes all clinically required anatomy." },
     { key: "A-artifact", label: "Artefacts", decision: decision(!args.artefactObscuresAnatomy, "An artefact may obscure clinically relevant anatomy."), note: "Check clothing, jewellery, equipment and medical devices before accepting the image." },
     { key: "A-abnormality", label: "Abnormality", decision: decision(args.abnormalityRecognised === undefined || args.abnormalityRecognised, "A reference abnormality has not been recognised."), note: "Review the clinical indication and systematically assess the image for pathology, trauma, devices and unexpected findings." },
     { key: "N-repeat", label: "Need for repeat", decision: decision(!(args.rotation || args.centringError || args.angleError || exposureFail || args.motion || args.artefactObscuresAnatomy), "The image has a defect that may justify another exposure."), note: "Do not repeat merely because the image is imperfect; repeat only when the defect is diagnostically significant." },
