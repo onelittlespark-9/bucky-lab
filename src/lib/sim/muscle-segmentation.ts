@@ -82,10 +82,15 @@ export type MuscleGroup = typeof MUSCLE_GROUPS[number];
 export const ALL_ANATOMY_LAYERS = ["skin", "fat", "muscle", "organs", "skeleton"] as const;
 export type AnatomyLayer = typeof ALL_ANATOMY_LAYERS[number];
 
+// Positioning-room default: the patient is an opaque external body only.
+// Internal anatomy must never appear merely because a scene/component is
+// mounted. Radiographic/internal anatomy is exposed by the post-exposure
+// workflow instead. Keeping these layers off by default also protects against
+// legacy anatomy components that still honour anatomyVisibility.
 export const DEFAULT_ANATOMY_VISIBILITY: Record<AnatomyLayer, boolean> = {
   skin: true,
-  fat: true,
-  muscle: true,
-  organs: true,
-  skeleton: true,
+  fat: false,
+  muscle: false,
+  organs: false,
+  skeleton: false,
 };
