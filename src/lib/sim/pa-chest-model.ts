@@ -22,8 +22,6 @@ export function samplePaChest(x: number, y: number, patient: Patient, pose: SimP
   const depth = patient.thickness.chest;
   const insp = pose.breath === "inspiration" ? 1 : 0;
 
-  // Smooth thoracic envelope with subtle shoulder soft tissue. Keep the chest
-  // wall thin so the lungs remain genuinely radiolucent at chest technique.
   const body = softEllipse(x, y, 0, 39.5*s, 16.3*w*s, 24.6*s, 0, 0.045);
   const shoulderL = gauss(x,y,-13.5*w*s,24.8*s,6.8*s,4.2*s);
   const shoulderR = gauss(x,y,13.5*w*s,24.8*s,6.8*s,4.2*s);
@@ -38,8 +36,6 @@ export function samplePaChest(x: number, y: number, patient: Patient, pose: SimP
   const rightDia = base - 0.85*s;
   const leftDia = base + 0.45*s;
 
-  // Lung masks are deliberately smooth and slightly asymmetric. The lower
-  // zones are broader than the apices, matching a normal erect PA chest.
   let rightLung = Math.max(
     softEllipse(x,y,-6.7*s,31.7*s,7.4*s,15.6*s,-0.02,0.045),
     softEllipse(x,y,-7.1*s,40.0*s,9.3*s,13.5*s,0.01,0.045),
@@ -51,8 +47,6 @@ export function samplePaChest(x: number, y: number, patient: Patient, pose: SimP
   rightLung *= smooth01((rightDia + 1.9*s - y)/(3.6*s));
   leftLung *= smooth01((leftDia + 1.9*s - y)/(3.6*s));
 
-  // Smooth cardiac silhouette. Use overlapping low-frequency fields rather than
-  // a single ellipse so the contour is not circular or diagram-like.
   const lv = gauss(x,y,3.9*s,43.5*s,5.1*s,7.3*s);
   const rv = gauss(x,y,0.6*s,42.4*s,3.5*s,6.2*s);
   const leftAtrium = gauss(x,y,2.2*s,38.8*s,3.6*s,4.2*s);
@@ -65,19 +59,15 @@ export function samplePaChest(x: number, y: number, patient: Patient, pose: SimP
   p.fat *= Math.max(0.24,1-lungMask*0.74);
   p.lung += (rightLung+leftLung) * (0.72 + depth*0.018);
 
-  // Cardiomediastinal attenuation. This is intentionally gentle at high kVp.
   const upperMediastinum = gauss(x,y,0.0,28.8*s,1.8*s,5.4*s);
   const midMediastinum = gauss(x,y,0.25*s,35.0*s,2.15*s,8.7*s);
   const aorticArch = gauss(x,y,2.1*s,30.4*s,1.15*s,1.45*s);
   p.soft += heart*0.90 + upperMediastinum*0.22 + midMediastinum*0.32 + aorticArch*0.14;
 
-  // Trachea and main bronchi remain lucent through the mediastinum.
   p.air += softCapsule(x,y,0,20.8*s,0,30.8*s,0.38*s,0.30)*3.5;
   p.air += softCapsule(x,y,0,30.8*s,-2.1*s,33.8*s,0.23*s,0.32)*1.2;
   p.air += softCapsule(x,y,0,30.8*s,2.0*s,33.8*s,0.23*s,0.32)*1.2;
 
-  // Hila and pulmonary vascular markings. Use several faint tapering branches,
-  // with more basal than apical vessels, to avoid the previous spoke/line look.
   for (const side of [-1,1] as const) {
     const hx = side*3.0*s;
     const hy = (side<0?35.8:35.0)*s;
@@ -90,26 +80,21 @@ export function samplePaChest(x: number, y: number, patient: Patient, pose: SimP
     for (const [tx,ty,r,gain] of targets) p.soft += softCapsule(x,y,hx,hy,tx*s,ty*s,r*s,0.38)*gain;
   }
 
-  // Broad hemidiaphragmatic domes formed as low-frequency attenuation fields,
-  // not bright line segments. Right remains slightly higher than left.
   const rDomeY = rightDia + 0.040*((x-6.2*s)*(x-6.2*s))/s;
   const lDomeY = leftDia + 0.044*((x+5.8*s)*(x+5.8*s))/s;
   const rGate = smooth01((x/s+13.0)/4.0) * (1-smooth01((x/s-0.5)/3.0));
   const lGate = smooth01((x/s-0.5)/3.0) * (1-smooth01((x/s-13.0)/4.0));
-  p.soft += Math.exp(-((y-rDomeY)/(0.75*s))**2)*0.24*rGate;
-  p.soft += Math.exp(-((y-lDomeY)/(0.78*s))**2)*0.22*lGate;
+  const rDomeNorm = (y-rDomeY)/(0.75*s);
+  const lDomeNorm = (y-lDomeY)/(0.78*s);
+  p.soft += Math.exp(-(rDomeNorm ** 2))*0.24*rGate;
+  p.soft += Math.exp(-(lDomeNorm ** 2))*0.22*lGate;
 
-  // Left gastric bubble beneath the diaphragm.
   p.gas += gauss(x,y,5.8*s,(leftDia+3.0*s),3.0*s,1.7*s)*1.8;
 
-  // Gentle parenchymal texture: enough to avoid flat grey lungs without
-  // synthesising obvious blobs or fake reticulation.
   const coarse = (fbm(x*0.22,y*0.22,seed+19)-0.5)*0.016;
   const fine = (fbm(x*0.78,y*0.78,seed+29)-0.5)*0.008;
   p.soft += lungMask * Math.max(0,coarse+fine)*0.045;
 
-  // Bone fields are deliberately zero here; the Human Atlas owns skeletal
-  // geometry for PA chest so the two systems cannot double-render the skeleton.
   p.bone = 0;
   p.cortical = 0;
   return p;
