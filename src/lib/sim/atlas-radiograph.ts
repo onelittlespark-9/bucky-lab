@@ -122,8 +122,8 @@ function renderMeshThickness(scene:THREE.Scene,root:THREE.Group,meshes:THREE.Mes
   return out;
 }
 function regionsForProjection(p:Projection){if(p.id==="pa-chest"||p.id==="lat-chest")return["axial","rib","scapula","clavicle"];return["axial","rib","scapula","clavicle","skull","pelvis","femur","lowerleg","humerus","forearm","hand","foot"];}
-function chestRegionGain(region:string){if(region==="rib")return.42;if(region==="axial")return.26;if(region==="clavicle")return.38;if(region==="scapula")return.10;return.5;}
-function chestThicknessCap(region:string){if(region==="rib")return.95;if(region==="axial")return1.8;if(region==="clavicle")return1.25;if(region==="scapula")return.55;return2.0;}
+function chestRegionGain(region:string){if(region==="rib")return 0.42;if(region==="axial")return 0.26;if(region==="clavicle")return 0.38;if(region==="scapula")return 0.10;return 0.5;}
+function chestThicknessCap(region:string){if(region==="rib")return 0.95;if(region==="axial")return 1.8;if(region==="clavicle")return 1.25;if(region==="scapula")return 0.55;return 2.0;}
 
 export async function atlasBoneOpticalDensity(args:{patient:Patient;projection:Projection;pose:SimPose;tube:TubeState;exposureKvp:number;width:number;height:number;geometry:ProjectionGeometry;}):Promise<Float32Array|null>{
   if(typeof document==="undefined"||typeof window==="undefined")return null;
@@ -150,7 +150,7 @@ export async function atlasBoneOpticalDensity(args:{patient:Patient;projection:P
       const thickness=renderMeshThickness(scene,atlas.root,atlas.meshes,mesh,camera,renderer,renderTarget,frontMaterial,backMaterial,rw,rh),hu=materialHU(region,projection),muTrab=muFromHU(hu.trabecular,exposureKvp),muCort=muFromHU(hu.cortical,exposureKvp),gain=chest?chestRegionGain(region):1,cap=chest?chestThicknessCap(region):12;
       for(let i=0;i<low.length;i++){
         const raw=thickness[i]!;if(raw<=0)continue;
-        const t=Math.min(raw,cap),shellCm=Math.min(t*.22,chest?.14:.22),corticalPath=Math.min(t,shellCm*2),trabPath=Math.max(0,t-corticalPath);
+        const t=Math.min(raw,cap),shellCm=Math.min(t*.22,chest ? .14 : .22),corticalPath=Math.min(t,shellCm*2),trabPath=Math.max(0,t-corticalPath);
         low[i]+=(corticalPath*muCort+trabPath*muTrab)*gain;
       }
     }
