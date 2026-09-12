@@ -1,204 +1,174 @@
 # Bucky Lab
 
-Bucky Lab is a UK-focused diagnostic radiography training simulator for practising the **whole acquisition workflow**: request vetting, patient communication, positioning, collimation, exposure, image critique and clinical decision-making.
+A UK-focused radiographic positioning, exposure and request-vetting simulator for student radiographers.
 
-It is an educational simulator, not a replacement for local departmental protocols, IR(ME)R procedures, supervision or clinical judgement.
+Bucky Lab is designed as a **closed learning and engineering feedback loop**: students use the simulator, report what is unclear or clinically unrealistic, structured context is captured, and that evidence is used to prioritise the next architecture change.
 
-## What the simulator practises
+## Continuous improvement loop
 
-### 1. Department worklist and request vetting
+The app includes an in-app **Feedback** control available throughout the session. Feedback is structured by area (bug, positioning, anatomy, radiograph, workflow, performance, learning or other), rated 1–5, and stored locally in a bounded queue.
 
-Cases are organised through the departmental workflow rather than starting as a generic anatomy library.
+Each submission records only useful simulator context such as screen, mode, projection and request context. Patient identifiers are deliberately removed before storage. Free-text feedback should never contain patient-identifiable information.
 
-- Inpatient
-- Outpatient
-- Emergency Department (ED)
-- Clinical history and requested projections
-- Patient identification and laterality confirmation
-- Patient dialogue and discrepancy handling
-- Requests can require the student to stop and query an inconsistency before exposure
+The intended engineering loop is:
 
-ED cases also consider mobility. Where movement is unsafe or painful, the worklist can surface an appropriate **modified-view learning pathway** rather than forcing a routine position.
-
-### 2. Positioning and acquisition
-
-The room simulator covers general radiography rather than chest imaging alone.
-
-Students practise:
-
-- Patient positioning and rotation
-- Projection selection
-- Area of interest (AOI)
-- Collimation and light-field adjustment
-- Central ray and tube angulation
-- SID / OID relationships
-- Bucky / detector positioning
-- Laterality markers
-- Respiration where relevant
-- kVp and mAs
-- Patient habitus and technique adjustment
-
-Exposure starts from a realistic baseline for the projection and can be adjusted for patient habitus. The student remains responsible for selecting and changing the technique.
-
-### 3. Consequence-based radiographs
-
-The radiograph is intended to be the consequence of the student's acquisition choices, not a pre-rendered answer.
-
-The simulator is being developed around the chain:
-
-**patient + anatomy → positioning → geometry → exposure → attenuation/scatter → detector image**
-
-This includes realistic effects from positioning, rotation, collimation, SID/OID, tube angle and exposure rather than simply changing the appearance of a 3D model.
-
-### 4. Anatomy and patient movement
-
-The patient is treated as a cohesive anatomical rig.
-
-- Skin forms the outer envelope.
-- Fat and muscle remain inside and follow the body.
-- Skeleton remains internally connected to the same patient rig.
-- Ribs follow a natural curved thoracic cage rather than being laid out flat.
-- Clavicles, scapulae, spine, pelvis and limbs remain anatomically connected.
-- Internal anatomy moves with the patient rather than floating independently.
-- Positioning can be changed without exposing internal anatomy during the setup phase.
-- Pathology and devices are intended to remain attached to the relevant anatomy.
-
-The model is validated against neutral, raised-arm, flexed-limb, rotated/oblique and supported positions as the anatomy system develops.
-
-## PLATECAANN image critique
-
-The simulator uses the following assessment structure:
-
-- **P — Patient Identification**
-- **L — Label / marker**
-- **A — Area of Interest**
-- **T — Technique / positioning**
-- **E — Exposure**
-- **C — Collimation**
-- **A — Artefacts**
-- **A — Abnormality**
-- **N — Need for repeat**
-- **N — Need for further views**
-
-A technical imperfection is not automatically a repeat. The key question is whether the image answers the clinical question safely and diagnostically.
-
-Collimation follows the same principle: include all required anatomy with the **smallest practical field**. A small safety margin is acceptable; clipping required anatomy is more serious because it can compromise the examination and cause a repeat.
-
-## ED modified-view learning
-
-Emergency cases can expose the student to alternative positioning when normal movement is inappropriate.
-
-Examples currently supported by the simulation workflow include:
-
-- Seated modified axial shoulder
-- Seated AP shoulder
-- Cross-table hip
-- Cross-table knee
-- Horizontal-beam cervical spine
-- Supported elbow
-- Supported ankle
-- Portable AP chest
-
-These are simulation pathways and should not be interpreted as universal clinical protocols. Local protocols and supervision always take precedence.
-
-## Data and bootstrap integrity
-
-Bucky Lab deliberately keeps database initialisation and schema changes deterministic.
-
-### Database backends
-
-- **Neon/Postgres** is used when `DATABASE_URL` is configured.
-- **PGLite** provides the embedded fallback when `DATABASE_URL` is absent, primarily for development/preview.
-- The application exposes one shared SQL surface through `src/lib/db.ts` so application code does not need to know which backend is active.
-
-### Migration integrity
-
-`migrations/*.sql` is the schema source of truth.
-
-Migrations are tracked in `_migrations` and applied in deterministic filename order. The same migration bookkeeping is shared between the deploy-time migrator and the PGLite bootstrap so preview and production use the same schema contract.
-
-The bootstrap is deliberately defensive:
-
-- concurrent PGLite initialisation is shared rather than creating multiple instances;
-- migration passes are serialised;
-- failed initialisation is not permanently memoised;
-- a failed migration transaction is rolled back rather than recorded as applied;
-- empty/whitespace `DATABASE_URL` is treated as unset;
-- client code cannot initialise the server-only database layer;
-- Better Auth preview persistence uses the same PGLite instance as application data.
-
-Do **not** add ad-hoc table creation to individual server functions. Add schema changes as a numbered SQL migration instead.
-
-### Build and integrity checks
-
-Run the following before treating a change as safe:
-
-```bash
-npm install
-npm run typecheck
-npm test
-npm run check:auth
-npm run build
+```text
+Student action
+    ↓
+Result / friction / error
+    ↓
+In-app feedback + simulator context
+    ↓
+Prioritise repeated failures
+    ↓
+Architecture or clinical-model change
+    ↓
+Typecheck → tests → build → CI
+    ↓
+Verify in the simulator
+    ↓
+Release
+    ↓
+Collect the next cycle of evidence
 ```
 
-`npm run build` also runs the migration step when `DATABASE_URL` is available. Without `DATABASE_URL`, the local/PGLite path remains available for development and preview.
+Feedback is deliberately **evidence-led rather than change-on-request**. A single suggestion can expose a bug, but repeated reports and reproducible simulator behaviour should drive architectural changes. Clinical changes must also be checked against appropriate UK practice before becoming training rules.
 
-The GitHub Actions CI build is the merge gate. A feature is not considered integrated into `main` merely because a local build succeeds: CI must pass, the change must be merged, and the resulting deployment should be checked before calling the feature live.
+The feedback store is currently local-first and dependency-free. This keeps the simulator usable offline and avoids silently sending educational-session data to a third party. A future authenticated export/sync layer can consume the same `FeedbackRecord` shape without changing the student-facing workflow.
 
-## Local development
+## What you practise
+
+### Request vetting
+- Review clinical history and requested projections.
+- Identify laterality, anatomy and clinical mismatches before exposure.
+- Accept appropriate requests or stop and query unsuitable ones.
+
+### Department-aware workflow
+Requests can be separated into:
+- **Inpatient** — ward-based patients and appropriate mobility constraints.
+- **Outpatient** — planned examinations and routine positioning.
+- **Emergency Department** — acute presentations where movement may be painful or unsafe.
+
+ED cases can automatically surface modified-view options. For example, a simulated limited-mobility shoulder case can use a seated modified axial approach rather than forcing an injured patient into a standard position.
+
+These are educational simulation choices, not universal clinical protocols; local departmental protocols and radiographer judgement take precedence in real practice.
+
+### Positioning & technique
+- Multiple projections across thorax, abdomen, pelvis, spine, skull and upper/lower limb.
+- Patient positioning, detector/Bucky positioning, centring, tube angle, SID/OID and collimation.
+- Physical laterality markers and respiration where relevant.
+- Exposure factors with patient-habitus-dependent starting techniques.
+- Projection physics intended to make positioning errors affect the resultant radiograph rather than merely changing a 3D scene.
+
+### Anatomy
+The patient is built as a cohesive anatomical rig rather than independent floating models:
+
+- skin as the outer envelope;
+- subcutaneous tissue and muscle beneath it;
+- connected skeleton;
+- naturally curved and connected ribs;
+- shoulder girdle and limbs attached to the same kinematic system;
+- internal organs positioned inside the body;
+- pathology and devices able to move with the relevant anatomy.
+
+The architecture is validated against multiple positioning states rather than only a neutral standing pose.
+
+### Radiograph and critique
+The intended chain is:
+
+```text
+Patient + pathology
+        ↓
+Positioning / SID / OID / tube angle / collimation
+        ↓
+Tissue attenuation + superimposition + exposure
+        ↓
+Simulated radiograph
+        ↓
+Technical assessment
+        ↓
+PLATECAANN critique
+        ↓
+Improvement / repeat / further view
+```
+
+PLATECAANN covers Patient Identification, Label/Marker, Area of Interest, Technique/Positioning, Exposure, Collimation, Artefacts, Abnormality, Need for Repeat and Need for Further Views.
+
+A technically imperfect image is not automatically a repeat. The key question is whether it answers the clinical question without an avoidable diagnostic limitation.
+
+## Request justification
+Students are presented with realistic imaging requests and must decide whether the request is appropriate before positioning and exposing.
+
+Example: a history of FOOSH on the **right** wrist with a request for the **left** wrist should trigger a stop/query rather than allowing the student to continue blindly.
+
+## Exposure model
+Each projection has a baseline technique representing an average patient. Patient habitus modifies the suggested starting technique:
+
+- slim → baseline or slightly reduced;
+- average → baseline;
+- large → increased;
+- very large → further increased.
+
+Students can override kVp and mAs. Assessment focuses on the resulting diagnostic image as well as the student's technique decisions.
+
+## Collimation / ALARP
+Collimation follows a practical ALARP approach:
+
+- include all required anatomy;
+- use the smallest practical field that reliably achieves this;
+- allow a small practical margin where it reduces the risk of clipping anatomy;
+- avoid unnecessary irradiation and scatter;
+- do not treat mathematically perfect field edges as more important than diagnostic completeness.
+
+The simulator should distinguish between **poor positioning**, which cannot simply be fixed with a huge field, and **insufficient collimation**, which may clip required anatomy.
+
+## Bootstrap and integrity
+The application uses a defensive database bootstrap architecture:
+
+- Neon/Postgres when `DATABASE_URL` is configured;
+- PGLite fallback for local/preview operation;
+- shared initialisation state across development/HMR module instances;
+- serialised PGLite migration passes;
+- migration tracking through `_migrations`;
+- failed initialisation does not permanently poison the memoised promise;
+- database access is server-only;
+- schema is defined through migrations rather than ad-hoc server-function SQL.
+
+The feedback system follows the same integrity principle: bounded local storage, explicit schema, no patient identifiers, and a defined path from observation to tested architecture change.
+
+## Verification gate
+A change is not considered integrated merely because the code has been committed. The normal gate is:
+
+1. typecheck;
+2. automated tests;
+3. production build;
+4. CI passes;
+5. merge to `main`;
+6. deployment completes;
+7. live behaviour is checked where appropriate;
+8. the next feedback cycle begins.
+
+## Stack
+
+React 19, TanStack Start, Three.js (`@react-three/fiber`), Zustand, Tailwind CSS v4, PGLite/Neon database support.
+
+## Run locally
 
 ```bash
 npm install
 npm run dev
 ```
 
-The development server runs on port `8080`.
-
-Useful commands:
+The lab starts on port 8080.
 
 ```bash
 npm run typecheck
 npm test
-npm run check:auth
 npm run build
-npm run preview
 ```
 
-No external database is required for basic local development. Without `DATABASE_URL`, the app uses the PGLite fallback.
-
-## Session workflow
-
-A typical learning session follows:
-
-1. Open the departmental worklist.
-2. Select the patient/request.
-3. Read the history and requested examination.
-4. Identify the patient.
-5. Speak to the patient and establish the presenting problem.
-6. Confirm the area of interest and side.
-7. Assess mobility and select a modified ED view when required.
-8. Position the patient, detector and tube.
-9. Set the AOI and collimate with the light field.
-10. Select/adjust exposure factors for the patient's habitus.
-11. Expose.
-12. Assess the resulting radiograph using PLATECAANN.
-13. Decide whether the image is acceptable, needs repeating, or requires further views.
-14. Compare the student's interpretation with the reference information/PACS workflow.
-
-## Current scope
-
-The simulator contains general-radiography requests spanning the thorax, abdomen, pelvis, spine, skull and upper/lower limbs, with normal cases, common pathology, trauma, devices and postoperative scenarios being expanded progressively.
-
-The system is intentionally being built in layers: **workflow integrity first, then positioning, then projection physics and increasingly realistic image formation**. A feature should not bypass the acquisition workflow simply to make a visual result easier to produce.
-
-## Stack
-
-React 19, TanStack Start, Three.js (`@react-three/fiber`), Zustand, Tailwind CSS v4, PGLite and Postgres/Neon.
-
-## Educational reference
-
-Technique values are informed by established radiographic positioning references and UK practice. Local departmental protocols remain authoritative.
+No external analytics service is required for the feedback loop.
 
 ## Licence
 
-Personal / educational use. Clark's *Positioning in Radiography* is a trademark of its publisher; Bucky Lab is an independent training aid and is not an official product.
+Personal / educational use. Clark's *Positioning in Radiography* is a trademark of its publisher; this project is an independent training aid, not an official product.
