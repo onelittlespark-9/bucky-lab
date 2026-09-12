@@ -1,11 +1,9 @@
-import { ContactShadows, OrbitControls, Html } from "@react-three/drei";
+import { ContactShadows } from "@react-three/drei";
 import { useSim } from "@/lib/sim/store";
 import { PatientModel } from "./PatientModel";
-import { InternalAnatomy } from "./InternalAnatomy";
-import { DetailedSkeletalOverlay } from "./DetailedSkeletalOverlay";
 import { PatientRig } from "./PatientRig";
 import { XraySourceVisibility } from "./XraySourceVisibility";
-import type { AnatomyLayer } from "@/lib/sim/muscle-segmentation";
+import { RoomQuickControls } from "./RoomQuickControls";
 
 function TableAndBucky() {
   const equipment = useSim(s => s.equipment);
@@ -30,13 +28,6 @@ function TableAndBucky() {
   </>;
 }
 
-function AnatomyControls() {
-  const visibility = useSim(s => s.anatomyVisibility);
-  const setLayer = useSim(s => s.setAnatomyLayer);
-  const labels: [AnatomyLayer, string][] = [["skin", "Skin"], ["fat", "Fat"], ["muscle", "Muscle"], ["organs", "Organs"], ["skeleton", "Skeleton"]];
-  return <Html position={[1.25, 1.8, 0]} transform={false} style={{ pointerEvents: "auto" }}><div style={{ background: "rgba(10,14,18,.9)", padding: 12, borderRadius: 10, color: "white", fontFamily: "system-ui", fontSize: 12, width: 150 }}><strong>ANATOMY LAYERS</strong>{labels.map(([id, label]) => <label key={id} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 7, cursor: "pointer" }}><input type="checkbox" checked={visibility[id]} onChange={e => setLayer(id, e.target.checked)} />{label}</label>)}</div></Html>;
-}
-
 export function XrayRoom() {
   return <>
     <color attach="background" args={["#0a0c0e"]} />
@@ -46,12 +37,9 @@ export function XrayRoom() {
     <TableAndBucky />
     <PatientRig>
       <PatientModel />
-      <InternalAnatomy />
-      <DetailedSkeletalOverlay />
     </PatientRig>
-    <AnatomyControls />
     <XraySourceVisibility />
+    <RoomQuickControls />
     <ContactShadows opacity={.35} scale={8} blur={2.2} far={5} />
-    <OrbitControls enablePan minPolarAngle={.2} maxPolarAngle={Math.PI / 2.05} minDistance={1.2} maxDistance={6} target={[0, .9, 0]} />
   </>;
 }

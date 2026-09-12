@@ -79,7 +79,7 @@ function deformSkin(root: THREE.Group, H: number, pose: { shoulderRoll: number; 
 export function HumanAtlasBodyOverlay() {
   const visible = useSim(s => s.anatomyVisibility.skin), patientId = useSim(s => s.patientId), pose = useSim(s => s.pose);
   const [atlas, setAtlas] = useState<THREE.Group | null>(null), [error, setError] = useState<string | null>(null);
-  useEffect(() => { let cancelled = false; loadBodySurface().then(group => { if (cancelled) { group.traverse(o => { if (o instanceof THREE.Mesh) { o.geometry.dispose(); if (Array.isArray(o.material)) o.material.forEach(material => material.dispose()); else material.dispose(); } }); return; } setAtlas(group); }).catch(reason => { if (!cancelled) setError(reason instanceof Error ? reason.message : "Human Atlas body surface could not be loaded."); }); return () => { cancelled = true; }; }, []);
+  useEffect(() => { let cancelled = false; loadBodySurface().then(group => { if (cancelled) { group.traverse(o => { if (o instanceof THREE.Mesh) { o.geometry.dispose(); if (Array.isArray(o.material)) o.material.forEach(m => m.dispose()); else o.material.dispose(); } }); return; } setAtlas(group); }).catch(reason => { if (!cancelled) setError(reason instanceof Error ? reason.message : "Human Atlas body surface could not be loaded."); }); return () => { cancelled = true; }; }, []);
   useEffect(() => { if (!atlas) return; const patient = patientById(patientId); deformSkin(atlas, patient.heightCm / 100, pose); }, [atlas, patientId, pose]);
   useEffect(() => () => { atlas?.traverse(o => { if (o instanceof THREE.Mesh) { o.geometry.dispose(); if (Array.isArray(o.material)) o.material.forEach(m => m.dispose()); else o.material.dispose(); } }); }, [atlas]);
   if (!visible || error || !atlas) return null;
