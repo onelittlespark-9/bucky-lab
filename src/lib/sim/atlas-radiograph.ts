@@ -91,13 +91,20 @@ function articulate(root:THREE.Group,meshes:THREE.Mesh[],pose:SimPose,patient:Pa
   }
 }
 
-function materialHU(region:string,projection:Projection){if(region==="skull")return{trabecular:650,cortical:1250};if(region==="pelvis")return{trabecular:500,cortical:1150};if(region==="rib"||region==="scapula"||region==="clavicle")return{trabecular:450,cortical:1050};if(region==="axial")return{trabecular:projection.id.includes("lumbar")?500:450,cortical:1050};if(region==="femur"||region==="lowerleg")return{trabecular:550,cortical:1250};if(region==="humerus"||region==="forearm")return{trabecular:500,cortical:1150};if(region==="hand"||region==="foot")return{trabecular:450,cortical:1000};return{trabecular:500,cortical:1100};}
+function materialHU(region:string,projection:Projection){
+  const chest=projection.id==="pa-chest"||projection.id==="lat-chest";
+  if(chest){
+    if(region==="rib")return{trabecular:220,cortical:650};
+    if(region==="clavicle")return{trabecular:260,cortical:720};
+    if(region==="scapula")return{trabecular:180,cortical:520};
+    if(region==="axial")return{trabecular:240,cortical:700};
+  }
+  if(region==="skull")return{trabecular:650,cortical:1250};if(region==="pelvis")return{trabecular:500,cortical:1150};if(region==="rib"||region==="scapula"||region==="clavicle")return{trabecular:450,cortical:1050};if(region==="axial")return{trabecular:projection.id.includes("lumbar")?500:450,cortical:1050};if(region==="femur"||region==="lowerleg")return{trabecular:550,cortical:1250};if(region==="humerus"||region==="forearm")return{trabecular:500,cortical:1150};if(region==="hand"||region==="foot")return{trabecular:450,cortical:1000};return{trabecular:500,cortical:1100};
+}
 export function muFromHU(hu:number,kvp:number):number{const e=Math.pow(70/Math.max(45,kvp),.28),a=.0003*e,w=.205*e,b=.72*e;if(hu<=-1000)return a;if(hu<=0)return w+(hu/1000)*(w-a);if(hu<=1000)return w+(hu/1000)*(b-w);return b+Math.min(1000,hu-1000)*.00018*e;}
 
 // RGB packs detector depth at ~24-bit precision while retaining an unsigned-byte
-// render target that works reliably on mobile WebGL. The old single-channel
-// encoding provided only 256 depth levels over a 5 m camera range (~2 cm/step),
-// which destroyed sub-centimetre ribs and produced disconnected oval islands.
+// render target that works reliably on mobile WebGL.
 function unpackDepth24(buf:Uint8Array,j:number):number{return buf[j]!/255+buf[j+1]!/65025+buf[j+2]!/16581375;}
 function renderMeshThickness(scene:THREE.Scene,root:THREE.Group,meshes:THREE.Mesh[],mesh:THREE.Mesh,camera:THREE.OrthographicCamera,renderer:THREE.WebGLRenderer,target:THREE.WebGLRenderTarget,frontMaterial:THREE.ShaderMaterial,backMaterial:THREE.ShaderMaterial,rw:number,rh:number):Float32Array{
   for(const m of meshes)m.visible=m===mesh;
@@ -115,6 +122,8 @@ function renderMeshThickness(scene:THREE.Scene,root:THREE.Group,meshes:THREE.Mes
   return out;
 }
 function regionsForProjection(p:Projection){if(p.id==="pa-chest"||p.id==="lat-chest")return["axial","rib","scapula","clavicle"];return["axial","rib","scapula","clavicle","skull","pelvis","femur","lowerleg","humerus","forearm","hand","foot"];}
+function chestRegionGain(region:string){if(region==="rib")return.42;if(region==="axial")return.26;if(region==="clavicle")return.38;if(region==="scapula")return.10;return.5;}
+function chestThicknessCap(region:string){if(region==="rib")return.95;if(region==="axial")return1.8;if(region==="clavicle")return1.25;if(region==="scapula")return.55;return2.0;}
 
 export async function atlasBoneOpticalDensity(args:{patient:Patient;projection:Projection;pose:SimPose;tube:TubeState;exposureKvp:number;width:number;height:number;geometry:ProjectionGeometry;}):Promise<Float32Array|null>{
   if(typeof document==="undefined"||typeof window==="undefined")return null;
@@ -135,12 +144,20 @@ export async function atlasBoneOpticalDensity(args:{patient:Patient;projection:P
     const depthVertex=`varying float vDepth;void main(){vec4 mv=modelViewMatrix*vec4(position,1.0);gl_Position=projectionMatrix*mv;vDepth=gl_Position.z/gl_Position.w*.5+.5;}`;
     const depthFragment=`varying float vDepth;vec3 packDepth24(float v){v=clamp(v,0.0,0.999999);vec3 enc=fract(v*vec3(1.0,255.0,65025.0));enc-=enc.yzz*vec3(1.0/255.0,1.0/255.0,0.0);return enc;}void main(){gl_FragColor=vec4(packDepth24(vDepth),1.0);}`;
     const frontMaterial=new THREE.ShaderMaterial({vertexShader:depthVertex,fragmentShader:depthFragment,side:THREE.FrontSide,depthTest:true,depthWrite:true}),backMaterial=new THREE.ShaderMaterial({vertexShader:depthVertex,fragmentShader:depthFragment,side:THREE.BackSide,depthTest:true,depthWrite:true});
-    const low=new Float32Array(rw*rh),regions=regionsForProjection(projection);
+    const low=new Float32Array(rw*rh),regions=regionsForProjection(projection),chest=projection.id==="pa-chest"||projection.id==="lat-chest";
     for(const mesh of atlas.meshes){
       const region=mesh.userData.atlasRegion as string;if(!regions.includes(region))continue;
-      const thickness=renderMeshThickness(scene,atlas.root,atlas.meshes,mesh,camera,renderer,renderTarget,frontMaterial,backMaterial,rw,rh),hu=materialHU(region,projection),muTrab=muFromHU(hu.trabecular,exposureKvp),muCort=muFromHU(hu.cortical,exposureKvp);
-      for(let i=0;i<low.length;i++){const t=thickness[i]!;if(t<=0)continue;const shellCm=Math.min(t*.28,.22),corticalPath=Math.min(t,shellCm*2),trabPath=Math.max(0,t-corticalPath);low[i]+=corticalPath*muCort+trabPath*muTrab;}
+      const thickness=renderMeshThickness(scene,atlas.root,atlas.meshes,mesh,camera,renderer,renderTarget,frontMaterial,backMaterial,rw,rh),hu=materialHU(region,projection),muTrab=muFromHU(hu.trabecular,exposureKvp),muCort=muFromHU(hu.cortical,exposureKvp),gain=chest?chestRegionGain(region):1,cap=chest?chestThicknessCap(region):12;
+      for(let i=0;i<low.length;i++){
+        const raw=thickness[i]!;if(raw<=0)continue;
+        const t=Math.min(raw,cap),shellCm=Math.min(t*.22,chest?.14:.22),corticalPath=Math.min(t,shellCm*2),trabPath=Math.max(0,t-corticalPath);
+        low[i]+=(corticalPath*muCort+trabPath*muTrab)*gain;
+      }
     }
+    // Overlapping thin bones should remain separable on a high-kVp chest rather
+    // than accumulating into a solid white column. Keep this cap chest-only so
+    // extremity/pelvis bone contrast is unaffected.
+    if(chest)for(let i=0;i<low.length;i++)low[i]=Math.min(low[i]!,0.62);
     for(const m of atlas.meshes)m.visible=true;scene.overrideMaterial=null;renderer.dispose();renderTarget.dispose();frontMaterial.dispose();backMaterial.dispose();
     const full=new Float32Array(width*height);
     for(let y=0;y<height;y++){const sy=y/Math.max(1,height-1)*(rh-1),y0=Math.floor(sy),y1=Math.min(rh-1,y0+1),fy=sy-y0;for(let x=0;x<width;x++){const sx=x/Math.max(1,width-1)*(rw-1),x0=Math.floor(sx),x1=Math.min(rw-1,x0+1),fx=sx-x0,a=low[y0*rw+x0]!,b=low[y0*rw+x1]!,c=low[y1*rw+x0]!,d=low[y1*rw+x1]!;full[y*width+x]=a*(1-fx)*(1-fy)+b*fx*(1-fy)+c*(1-fx)*fy+d*fx*fy;}}
