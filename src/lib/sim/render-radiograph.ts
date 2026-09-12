@@ -2,6 +2,7 @@ import type { Patient, Projection, SimPose, TubeState, ExposureState, Radiograph
 import { sampleAnatomy, hashPatient, type Paths, type SampleCtx } from "./anatomy";
 import { addSharedOrganPaths } from "./shared-anatomy-sampling";
 import { addSharedTissueLayers } from "./shared-tissue-sampling";
+import { samplePaChest } from "./pa-chest-model";
 import { buildMetrics, fieldScatter, incidentFluence, partThickness } from "./exposure";
 import { clamp, fbm } from "./geometry";
 import { projectionGeometry } from "./projection-physics";
@@ -36,9 +37,6 @@ function localCoords(projection: Projection, patient: Patient, pose: SimPose, px
   const oblique = (pose.oblique * Math.PI) / 180;
   const ry = cmY * Math.cos(oblique) - cmX * Math.sin(oblique) * 0.18 - angleShift;
 
-  // A lateral detector's horizontal axis is the patient's AP dimension. The old
-  // mapping rotated detector X into detector Y, collapsing the chest into a thin
-  // vertical strip and producing the grossly distorted lateral radiograph.
   const lateral = projection.anatomy === "torso-lat" || projection.anatomy === "cspine-lat" || projection.anatomy === "skull-lat";
   if (lateral) return { x: tube.crX + cmX, y: tube.crY + ry };
 
@@ -55,8 +53,8 @@ function ellipse(x: number, y: number, cx: number, cy: number, rx: number, ry: n
 
 function pathologyDelta(pathologyId: PathologyId, x: number, y: number, projection: Projection): number {
   if (projection.anatomy !== "torso-ap" && projection.anatomy !== "torso-lat") return 0;
-  if (pathologyId === "consolidation") return 0.7 * ellipse(x, y, -5.5, 51, 6.5, 7.5);
-  if (pathologyId === "pneumothorax") return -0.75 * ellipse(x, y, -8.5, 19, 6.5, 8.5);
+  if (pathologyId === "consolidation") return 0.7 * ellipse(x, y, -5.5, 43, 5.5, 6.0);
+  if (pathologyId === "pneumothorax") return -0.75 * ellipse(x, y, -8.5, 32, 5.5, 8.0);
   if (pathologyId === "rib-fracture") return 0.22 * ellipse(x, y, 10, 34, 1.2, 1.1);
   return 0;
 }
@@ -122,14 +120,17 @@ export async function renderRadiograph(args: {
     const scatterFrac = fieldScatter(tube.collimationW, tube.collimationH, thickness, grid);
     const seed = hashPatient(patient.id);
     const ctx: SampleCtx = { patient, projection, pose, seed };
+    const isPaChest = projection.id === "pa-chest";
 
     let atlasOD: Float32Array | null = null;
     let atlasError: string | null = null;
-    try {
-      atlasOD = await atlasBoneOpticalDensity({ patient, projection, pose, tube, exposureKvp: kvp, width, height, geometry });
-    } catch (err) {
-      atlasError = err instanceof Error ? err.message : String(err);
-      console.warn("[Bucky Lab] Atlas bone projection failed:", atlasError);
+    if (!isPaChest) {
+      try {
+        atlasOD = await atlasBoneOpticalDensity({ patient, projection, pose, tube, exposureKvp: kvp, width, height, geometry });
+      } catch (err) {
+        atlasError = err instanceof Error ? err.message : String(err);
+        console.warn("[Bucky Lab] Atlas bone projection failed:", atlasError);
+      }
     }
     const hasAtlas = atlasOD !== null;
 
@@ -138,22 +139,23 @@ export async function renderRadiograph(args: {
     for (let py = 0; py < height; py++) {
       for (let px = 0; px < width; px++) {
         const { x, y } = localCoords(projection, patient, pose, px, py, width, height, tube, geometry);
-        const paths = sampleAnatomy(x, y, ctx);
+        const paths = isPaChest ? samplePaChest(x, y, patient, pose, seed) : sampleAnatomy(x, y, ctx);
         if (hasAtlas) { paths.bone = 0; paths.cortical = 0; }
-        if (projection.anatomy === "torso-ap" || projection.anatomy === "torso-lat") {
-          addSharedTissueLayers(paths, x, y, patient, pose);
+        if (!isPaChest && (projection.anatomy === "torso-ap" || projection.anatomy === "torso-lat")) {
+          addSharedTissueLayers(paths, x, y, patient, pose, projection);
           addSharedOrganPaths(paths, x, y, patient, pose);
-          addPacemaker(paths, x, y, projection, simCase?.device === "pacemaker");
         }
+        addPacemaker(paths, x, y, projection, simCase?.device === "pacemaker");
 
-        const softOd = pathsToOD(paths, kvp) * (hasAtlas ? (0.65 + thickness / 45) : (0.55 + thickness / 40));
+        const attenuationScale = isPaChest ? 0.84 : (hasAtlas ? (0.65 + thickness / 45) : (0.55 + thickness / 40));
+        const softOd = pathsToOD(paths, kvp) * attenuationScale;
         const atlasOd = atlasOD?.[py * width + px] ?? 0;
         const od = Math.max(0.01, softOd + atlasOd + pathologyDelta(pathologyId, x, y, projection));
         const T = Math.exp(-od);
-        const boneMask = atlasOd > 0.012 || paths.bone > 0.3 || paths.cortical > 0.15 ? 1 : 0;
-        const trabFine = (fbm(x * 3.2, y * 3.2, seed + 31) - 0.5) * 0.018;
-        const trabCoarse = (fbm(x * 0.9, y * 0.9, seed + 37) - 0.5) * 0.012;
-        const softVar = (fbm(x * 0.45, y * 0.45, seed + 11) - 0.5) * 0.018 * (paths.soft > 1 ? 1 : 0);
+        const boneMask = atlasOd > 0.012 || paths.bone > 0.22 || paths.cortical > 0.08 ? 1 : 0;
+        const trabFine = (fbm(x * 3.2, y * 3.2, seed + 31) - 0.5) * (isPaChest ? 0.010 : 0.018);
+        const trabCoarse = (fbm(x * 0.9, y * 0.9, seed + 37) - 0.5) * (isPaChest ? 0.007 : 0.012);
+        const softVar = (fbm(x * 0.45, y * 0.45, seed + 11) - 0.5) * (isPaChest ? 0.010 : 0.018) * (paths.soft > 1 ? 1 : 0);
         const anatomicalTexture = 1 + boneMask * (trabFine + trabCoarse) + softVar;
         const scat = I0 * scatterFrac * (0.5 + 0.5 * (paths.soft + paths.lung > 0 ? 1 : 0.15));
         let sig = I0 * T * anatomicalTexture + scat;
@@ -180,9 +182,10 @@ export async function renderRadiograph(args: {
     let sat = 0, noiseAcc = 0, contrastAcc = 0, contrastN = 0;
     const logMean = Math.log(mean + 1e-5);
     const contrastScale = clamp((kvp - 45) / 80, 0, 1);
-    const windowW = 1.7 + contrastScale * 2.2;
-    const windowL = logMean + (mean > 100 ? 0.15 : mean < 10 ? -0.25 : 0);
-    const noiseGain = 0.08 + 0.38 / Math.sqrt(Math.max(0.5, mean / 40));
+    const windowW = isPaChest ? 3.25 : 1.7 + contrastScale * 2.2;
+    const windowL = logMean + (isPaChest ? 0.03 : mean > 100 ? 0.15 : mean < 10 ? -0.25 : 0);
+    const baseNoiseGain = 0.08 + 0.38 / Math.sqrt(Math.max(0.5, mean / 40));
+    const noiseGain = isPaChest ? baseNoiseGain * 0.42 : baseNoiseGain;
     const blurRadius = clamp(Math.round(geometry.geometricUnsharpnessMm * 1.25), 0, 3);
     const blurWeight = blurRadius > 0 ? Math.min(0.28, geometry.geometricUnsharpnessMm * 0.11) : 0;
 
@@ -199,13 +202,13 @@ export async function renderRadiograph(args: {
         if (count > 0) sig = sig * (1 - blurWeight) + (neighbour / count) * blurWeight;
       }
       const sigma = noiseGain / Math.sqrt(Math.max(0.5, sig));
-      const nse = (fbm(nx * 0.42, ny * 0.42, seed + 4) - 0.5) * 2 * sigma * 3;
+      const nse = (fbm(nx * 0.42, ny * 0.42, seed + 4) - 0.5) * 2 * sigma * (isPaChest ? 1.25 : 3);
       sig = Math.max(0, sig + nse);
       noiseAcc += Math.abs(nse);
       if (sig > well) { sig = well; sat += 1; }
       const L = Math.log(sig + 1e-5);
       let d = 1 - clamp((L - windowL) / windowW + 0.5, 0, 1);
-      if (kvp >= 100) d = 0.08 + d * 0.84;
+      if (kvp >= 100) d = isPaChest ? 0.055 + d * 0.89 : 0.08 + d * 0.84;
       else if (kvp <= 55) d = clamp(d < 0.5 ? d * 0.9 : 0.5 + (d - 0.5) * 1.1, 0, 1);
       let tone = clamp(d, 0, 1);
       tone = tone * tone * (3 - 2 * tone);
