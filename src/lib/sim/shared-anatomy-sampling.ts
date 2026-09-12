@@ -3,13 +3,6 @@ import type { Paths } from "./anatomy";
 import { fbm, softCapsule, softEllipse } from "./geometry";
 import { SHARED_ORGANS, scaleAnatomyCm } from "./anatomy-structures";
 
-/**
- * Projection-specific attenuation anatomy shared with the 3D patient model.
- * Soft-tissue and organ attenuation is always added here. Synthetic bone is a
- * fallback only: when the Human Atlas projection is available, ribs and spine
- * must come from that single 3D source of truth rather than being painted over
- * it a second time in detector space.
- */
 export function addSharedOrganPaths(
   paths: Paths,
   x: number,
@@ -24,12 +17,9 @@ export function addSharedOrganPaths(
   const chestView = pose.breath === "inspiration";
   const xr = lateral ? x : x * Math.cos(rotation) - y * 0.002 * Math.sin(rotation);
   const seed = patient.id.split("").reduce((h, c) => (Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0), 2166136261);
+  const smooth01 = (v: number) => { const t = Math.max(0, Math.min(1, v)); return t * t * (3 - 2 * t); };
 
   for (const organ of SHARED_ORGANS) {
-    // Chest radiographs must not project the abdomen organ model into the lower
-    // detector. The old loop painted liver, stomach and both kidneys as large
-    // bright ellipses below the diaphragm, which produced the artificial blobs
-    // seen on the benchmark PA chest.
     if (chestView && organ.id !== "lung-right" && organ.id !== "lung-left" && organ.id !== "heart") continue;
 
     const ox = lateral ? 0 : scaleAnatomyCm(organ.xCm, patient.heightCm);
@@ -43,19 +33,18 @@ export function addSharedOrganPaths(
     if (shape < 0.03) continue;
 
     if (organ.density === "lung") {
-      const diaphragm = scaleAnatomyCm(49, patient.heightCm) + (pose.breath === "inspiration" ? -3.0 : 1.0);
-      if (y < diaphragm) {
-        const texture = 0.92 + (fbm(x * 0.7, y * 0.7, seed + 31) - 0.5) * 0.16;
-        paths.lung += shape * patient.thickness.chest * (lateral ? 0.46 : 0.34) * texture;
-        paths.soft *= Math.max(0.20, 1 - shape * 0.50);
+      const base = scaleAnatomyCm(49, patient.heightCm) + (pose.breath === "inspiration" ? -3.0 : 1.0);
+      const diaphragm = lateral ? base : organ.id === "lung-right" ? base - 0.9 * scale : base + 0.35 * scale;
+      const fade = smooth01((diaphragm + 1.4 * scale - y) / (2.8 * scale));
+      if (fade > 0) {
+        const texture = 0.94 + (fbm(x * 0.7, y * 0.7, seed + 31) - 0.5) * 0.10;
+        paths.lung += shape * fade * patient.thickness.chest * (lateral ? 0.44 : 0.32) * texture;
+        paths.soft *= Math.max(0.24, 1 - shape * fade * 0.46);
       }
     } else if (organ.id === "heart") {
-      const heartWeight = lateral ? 2.8 : 2.5;
+      const heartWeight = lateral ? 2.45 : 2.15;
       paths.soft += shape * heartWeight;
-      paths.lung *= Math.max(0.20, 1 - shape * 0.72);
-    } else {
-      paths.soft += shape * (organ.id === "liver" ? 5.5 : 3.4);
-      if (organ.id === "stomach") paths.gas += shape * 2.5;
+      paths.lung *= Math.max(0.24, 1 - shape * 0.66);
     }
   }
 
@@ -69,7 +58,6 @@ export function addSharedOrganPaths(
       const pedicle = softEllipse(x, y, -1.65 * scale, vy + 0.05, scale * 0.28, scale * 0.34, 0, 0.2);
       paths.bone += pedicle * 1.15;
     }
-
     for (let i = 0; i < 12; i++) {
       const ry = scaleAnatomyCm(27 + i * 2.55, patient.heightCm);
       const length = (13.2 - i * 0.42) * patient.morph.torsoWidth;
@@ -93,42 +81,40 @@ export function addSharedOrganPaths(
   }
 
   if (lateral) {
-    paths.air += softCapsule(xr, y, -1.2 * scale, scaleAnatomyCm(18, patient.heightCm), -1.0 * scale, scaleAnatomyCm(31, patient.heightCm), 0.60, 0.3) * 6.5;
-    paths.soft += softEllipse(xr, y, -1.0 * scale, scaleAnatomyCm(33, patient.heightCm), 4.4 * scale, 8.4 * scale, 0, 0.2) * 1.15;
-    paths.soft += softEllipse(xr, y, 1.7 * scale, scaleAnatomyCm(40, patient.heightCm), 5.2 * scale, 7.2 * scale, -0.10, 0.2) * 1.25;
+    paths.air += softCapsule(xr, y, -1.2 * scale, scaleAnatomyCm(18, patient.heightCm), -1.0 * scale, scaleAnatomyCm(31, patient.heightCm), 0.60, 0.3) * 6.2;
+    paths.soft += softEllipse(xr, y, -1.0 * scale, scaleAnatomyCm(33, patient.heightCm), 4.0 * scale, 7.7 * scale, 0, 0.2) * 0.85;
+    paths.soft += softEllipse(xr, y, 1.7 * scale, scaleAnatomyCm(40, patient.heightCm), 4.8 * scale, 6.7 * scale, -0.10, 0.2) * 1.0;
   } else {
-    paths.air += softCapsule(x, y, 0, scaleAnatomyCm(18, patient.heightCm), 0.05, scaleAnatomyCm(31, patient.heightCm), 0.55, 0.3) * 6.5;
-    paths.soft += softEllipse(x, y, -0.4, scaleAnatomyCm(31, patient.heightCm), 3.5 * scale, 7.8 * scale, 0, 0.2) * 1.25;
-    paths.soft += softEllipse(x, y, -4.6 * patient.morph.torsoWidth, scaleAnatomyCm(27.5, patient.heightCm), 2.7 * scale, 3.0 * scale, 0.12, 0.2) * 0.9;
+    paths.air += softCapsule(x, y, 0, scaleAnatomyCm(18, patient.heightCm), 0.05, scaleAnatomyCm(31, patient.heightCm), 0.52, 0.3) * 6.2;
+    paths.soft += softEllipse(x, y, -0.15, scaleAnatomyCm(31.5, patient.heightCm), 2.2 * scale, 7.2 * scale, 0, 0.2) * 0.66;
+    paths.soft += softEllipse(x, y, 3.6 * patient.morph.torsoWidth, scaleAnatomyCm(28.8, patient.heightCm), 1.8 * scale, 2.3 * scale, -0.10, 0.2) * 0.34;
 
     const hilumY = scaleAnatomyCm(35, patient.heightCm);
     for (const side of [-1, 1] as const) {
       const hx = side * 3.5 * patient.morph.torsoWidth;
-      const yOffset = side < 0 ? scale * 0.65 : -scale * 0.35;
-      paths.soft += softEllipse(x, y, hx, hilumY + yOffset, 2.15 * scale, 2.6 * scale, 0, 0.18) * 0.55;
-      paths.soft += softCapsule(x, y, hx, hilumY + yOffset, side * 7.0, scaleAnatomyCm(39.5, patient.heightCm), 0.32, 0.32) * 0.42;
-      paths.soft += softCapsule(x, y, side * 6.2, scaleAnatomyCm(39, patient.heightCm), side * 9.4, scaleAnatomyCm(43.5, patient.heightCm), 0.22, 0.34) * 0.34;
-      paths.soft += softCapsule(x, y, side * 6.5, scaleAnatomyCm(40.5, patient.heightCm), side * 10.4, scaleAnatomyCm(47.5, patient.heightCm), 0.18, 0.36) * 0.25;
-      paths.soft += softCapsule(x, y, side * 6.0, scaleAnatomyCm(41.5, patient.heightCm), side * 9.0, scaleAnatomyCm(52, patient.heightCm), 0.14, 0.38) * 0.18;
+      const yOffset = side < 0 ? scale * 0.55 : -scale * 0.25;
+      paths.soft += softEllipse(x, y, hx, hilumY + yOffset, 1.85 * scale, 2.25 * scale, 0, 0.18) * 0.42;
+      paths.soft += softCapsule(x, y, hx, hilumY + yOffset, side * 6.8, scaleAnatomyCm(39.5, patient.heightCm), 0.27, 0.32) * 0.34;
+      paths.soft += softCapsule(x, y, side * 6.0, scaleAnatomyCm(39, patient.heightCm), side * 9.0, scaleAnatomyCm(43.5, patient.heightCm), 0.18, 0.34) * 0.26;
+      paths.soft += softCapsule(x, y, side * 6.3, scaleAnatomyCm(40.5, patient.heightCm), side * 9.8, scaleAnatomyCm(47.0, patient.heightCm), 0.15, 0.36) * 0.18;
     }
   }
 
   const diaphragmBase = scaleAnatomyCm(49, patient.heightCm) + (pose.breath === "inspiration" ? -3.0 : 1.0);
   if (lateral) {
-    paths.soft += softCapsule(xr, y, -10.0 * scale, diaphragmBase + 0.9, -2.5 * scale, diaphragmBase - 0.3, 0.38, 0.36) * 0.58;
-    paths.soft += softCapsule(xr, y, -2.5 * scale, diaphragmBase - 0.3, 8.5 * scale, diaphragmBase + 0.8, 0.38, 0.36) * 0.58;
+    paths.soft += softCapsule(xr, y, -10.0 * scale, diaphragmBase + 0.9, -2.5 * scale, diaphragmBase - 0.3, 0.32, 0.36) * 0.46;
+    paths.soft += softCapsule(xr, y, -2.5 * scale, diaphragmBase - 0.3, 8.5 * scale, diaphragmBase + 0.8, 0.32, 0.36) * 0.46;
   } else {
     const right = diaphragmBase - scale * 0.9;
     const left = diaphragmBase + scale * 0.3;
-    paths.soft += softCapsule(x, y, -12.5 * patient.morph.torsoWidth, left + 1.1, -8.0 * patient.morph.torsoWidth, left, 0.34, 0.36) * 0.52;
-    paths.soft += softCapsule(x, y, -8.0 * patient.morph.torsoWidth, left, -2.0 * patient.morph.torsoWidth, left - 0.8, 0.32, 0.36) * 0.56;
-    paths.soft += softCapsule(x, y, -2.0 * patient.morph.torsoWidth, left - 0.8, 3.0 * patient.morph.torsoWidth, right - 0.5, 0.30, 0.36) * 0.58;
-    paths.soft += softCapsule(x, y, 3.0 * patient.morph.torsoWidth, right - 0.5, 8.0 * patient.morph.torsoWidth, right, 0.32, 0.36) * 0.58;
-    paths.soft += softCapsule(x, y, 8.0 * patient.morph.torsoWidth, right, 12.5 * patient.morph.torsoWidth, right + 1.2, 0.34, 0.36) * 0.50;
+    paths.soft += softCapsule(x, y, -12.5 * patient.morph.torsoWidth, left + 1.1, -8.0 * patient.morph.torsoWidth, left, 0.28, 0.36) * 0.42;
+    paths.soft += softCapsule(x, y, -8.0 * patient.morph.torsoWidth, left, -2.0 * patient.morph.torsoWidth, left - 0.8, 0.26, 0.36) * 0.46;
+    paths.soft += softCapsule(x, y, 2.0 * patient.morph.torsoWidth, right - 0.8, 8.0 * patient.morph.torsoWidth, right, 0.26, 0.36) * 0.48;
+    paths.soft += softCapsule(x, y, 8.0 * patient.morph.torsoWidth, right, 12.5 * patient.morph.torsoWidth, right + 1.2, 0.28, 0.36) * 0.40;
   }
 
-  const lungTexture = (fbm(x * 1.55, y * 1.55, seed + 47) - 0.5) * 0.06;
-  const fineTexture = (fbm(x * 6.4, y * 6.4, seed + 53) - 0.5) * 0.02;
+  const lungTexture = (fbm(x * 1.55, y * 1.55, seed + 47) - 0.5) * 0.035;
+  const fineTexture = (fbm(x * 6.4, y * 6.4, seed + 53) - 0.5) * 0.012;
   paths.soft += Math.max(0, paths.lung) * Math.max(0, lungTexture);
-  paths.lung += Math.max(0, paths.lung) * Math.max(0, fineTexture) * 0.08;
+  paths.lung += Math.max(0, paths.lung) * Math.max(0, fineTexture) * 0.05;
 }
