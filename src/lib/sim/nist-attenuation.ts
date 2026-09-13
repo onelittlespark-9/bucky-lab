@@ -9,9 +9,10 @@
 // https://physics.nist.gov/PhysRefData/XrayMassCoef/ComTab/adipose.html
 // https://physics.nist.gov/PhysRefData/XrayMassCoef/ComTab/blood.html
 // Reference attenuation curves come from NIST/ICRU data. Effective densities are
-// renderer calibration values: deeply inspired whole-body lung is modelled at
-// 0.210 g/cm3 so an atlas lung path genuinely replaces soft tissue, while
-// cancellous bone is 0.62 g/cm3 to retain cortical/trabecular separation.
+// renderer calibration values: deeply inspired lung is modelled at 0.180 g/cm3
+// so atlas lung volume produces clinically visible radiolucency while preserving
+// soft-tissue and vascular superimposition. Cancellous bone remains 0.62 g/cm3
+// to retain cortical/trabecular separation.
 
 export type RadiographicMaterial =
   | "air"
@@ -39,7 +40,7 @@ const MASS_MU: Record<RadiographicMaterial, Curve> = {
 };
 const DENSITY_G_CM3: Record<RadiographicMaterial, number> = {
   air: 0.001205,
-  inflatedLung: 0.210,
+  inflatedLung: 0.180,
   adipose: 0.95,
   soft: 1.06,
   muscle: 1.05,
