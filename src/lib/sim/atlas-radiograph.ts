@@ -11,7 +11,6 @@ interface AtlasPart { id:string; name:string; system:string; chunk:number; posit
 interface AtlasManifest { version:string; parts:AtlasPart[]; chunks:{url:string;bytes:number}[]; triangles:number; }
 interface AtlasScene { root:THREE.Group; meshes:THREE.Mesh[]; }
 type Side=-1|1;
-
 type ChestRegion = "rib"|"axial"|"clavicle"|"scapula";
 
 function regionFor(name:string):string {
@@ -204,7 +203,10 @@ export async function atlasBoneOpticalDensity(args:{patient:Patient;projection:P
     for(const m of atlas.meshes)m.visible=true;scene.overrideMaterial=null;renderer.dispose();renderTarget.dispose();frontMaterial.dispose();backMaterial.dispose();
     const full=new Float32Array(width*height);
     for(let y=0;y<height;y++){
-      const sy=y/Math.max(1,height-1)*(rh-1),y0=Math.floor(sy),y1=Math.min(rh-1,y0+1),fy=sy-y0;
+      // WebGL readRenderTargetPixels uses a bottom-left origin while the image
+      // renderer and anatomy sampler use top-left image coordinates. Flip Y here
+      // so atlas bones align anatomically with the procedural soft-tissue field.
+      const sy=(1-y/Math.max(1,height-1))*(rh-1),y0=Math.floor(sy),y1=Math.min(rh-1,y0+1),fy=sy-y0;
       for(let x=0;x<width;x++){
         const sx=x/Math.max(1,width-1)*(rw-1),x0=Math.floor(sx),x1=Math.min(rw-1,x0+1),fx=sx-x0,a=low[y0*rw+x0]!,b=low[y0*rw+x1]!,c=low[y1*rw+x0]!,d=low[y1*rw+x1]!;
         full[y*width+x]=a*(1-fx)*(1-fy)+b*fx*(1-fy)+c*(1-fx)*fy+d*fx*fy;
