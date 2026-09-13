@@ -23,9 +23,12 @@ function regionFor(name:string):string {
   if(n.includes("radius")||n.includes("ulna"))return"forearm";
   if(n.includes("hand")||n.includes("metacarp")||n.includes("phalanx")||n.includes("carpal"))return"hand";
   if(n.includes("femur"))return"femur";
-  if(n.includes("tibia")||n.includes("fibula"))return"lowerleg";
+  if(n.includes("patella")||n.includes("tibia")||n.includes("fibula"))return"lowerleg";
   if(n.includes("foot")||n.includes("metatars")||n.includes("talus")||n.includes("calcaneus")||n.includes("tarsal"))return"foot";
-  if(n.includes("pelvis")||n.includes("ilium")||n.includes("ischium")||n.includes("pubis")||n.includes("sacrum"))return"pelvis";
+  if(
+    n.includes("pelvis")||n.includes("ilium")||n.includes("ischium")||n.includes("pubis")||n.includes("sacrum")||
+    n.includes("hip bone")||n.includes("coxal")||n.includes("innominate")||n.includes("acetabul")||n.includes("os cox")
+  )return"pelvis";
   if(n.includes("vertebra")||n.includes("spine")||n.includes("sternum")||n.includes("coccyx"))return"axial";
   if(n.includes("skull")||n.includes("mandible")||n.includes("maxilla")||n.includes("zygomatic")||n.includes("temporal")||n.includes("frontal")||n.includes("parietal"))return"skull";
   return"other";
@@ -77,7 +80,7 @@ function moveGroup(meshes:THREE.Mesh[],target:THREE.Vector3,rotation?:THREE.Quat
 
 function articulate(root:THREE.Group,meshes:THREE.Mesh[],pose:SimPose,patient:Patient,placement:PlacementMode,projectionId:string){
   resetAtlas(root,meshes,patient);
-  if(projectionId==="pa-chest"||projectionId==="lat-chest")return;
+  if(projectionId==="pa-chest"||projectionId==="lat-chest"||projectionId==="ap-full-body")return;
   const H=patient.heightCm/100,scale=H/ATLAS_HEIGHT_M;
   const kin=patientKinematics({H,s:1,shoulder:patient.morph.shoulder,hip:patient.morph.hip,limb:patient.morph.limb,elbowFlex:pose.elbowFlex,hipInternal:pose.hipInternal,armRaise:pose.armRaise,armSide:pose.armSide,armRotation:pose.armRotation,forearmRotation:pose.forearmRotation,shoulderRoll:pose.shoulderRoll,kneeFlex:pose.kneeFlex,projectionId,placement,buckyTilt:0});
   const local=(p:V3)=>new THREE.Vector3(p[0]/scale,p[1]/scale,p[2]/scale),mid=(a:THREE.Vector3,b:THREE.Vector3)=>a.clone().add(b).multiplyScalar(.5),dir=(a:V3,b:V3)=>new THREE.Vector3(b[0]-a[0],b[1]-a[1],b[2]-a[2]).normalize(),y=new THREE.Vector3(0,1,0);
