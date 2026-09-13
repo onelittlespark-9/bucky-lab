@@ -1,4 +1,5 @@
 import type { Patient, Projection, ExposureState, TubeState, ExposureMetrics } from "./types";
+import { linearAttenuation, relativeTubeOutput } from "./nist-attenuation";
 
 export const MU = {
   air: 0.0003,
@@ -14,19 +15,30 @@ export const MU = {
 export type Tissue = keyof typeof MU;
 
 export function muEffective(tissue: Tissue, kvp: number): number {
-  const mu0 = MU[tissue];
-  const ref = 75;
-  const photo = Math.pow(ref / Math.max(40, kvp), 2.6);
-  const compton = Math.pow(ref / Math.max(40, kvp), 0.25);
-  const boneLike = tissue === "bone" || tissue === "cortical" || tissue === "metal" ? 0.72 : 0.35;
-  return mu0 * (boneLike * photo + (1 - boneLike) * compton);
+  switch (tissue) {
+    case "air": return linearAttenuation("air", kvp);
+    case "lung": return linearAttenuation("inflatedLung", kvp);
+    case "fat": return linearAttenuation("adipose", kvp);
+    case "soft": return linearAttenuation("soft", kvp);
+    case "muscle": return linearAttenuation("muscle", kvp);
+    case "bone": return linearAttenuation("trabecularBone", kvp);
+    case "cortical": return linearAttenuation("corticalBone", kvp);
+    case "metal": {
+      // Keep metal phenomenological; the simulator does not yet distinguish
+      // implant alloy composition.
+      const ref = 75;
+      return MU.metal * Math.pow(ref / Math.max(40, kvp), 1.2);
+    }
+  }
 }
 
 export function incidentFluence(kvp: number, mas: number, sidCm: number, grid: boolean): number {
-  const k = Math.pow(kvp / 80, 2.2);
+  const output = relativeTubeOutput(kvp);
   const dist = Math.pow(100 / Math.max(60, sidCm), 2);
-  const gridFactor = grid ? 0.28 : 1;
-  return mas * k * dist * gridFactor * 42;
+  // A grid reduces primary receptor fluence as well as scatter. 0.34 is a
+  // deliberately moderate transmission for a general-purpose focused grid.
+  const gridFactor = grid ? 0.34 : 1;
+  return mas * output * dist * gridFactor * 42;
 }
 
 export function partThickness(patient: Patient, projection: Projection): number {
@@ -88,9 +100,11 @@ export function representativeTransmission(patient: Patient, projection: Project
   const muBone = muEffective("bone", kvp);
   const muLung = muEffective("lung", kvp);
   const isChest = projection.region === "Thorax";
+  // Fractions are effective path fractions, not volume percentages. Lung
+  // replaces soft tissue rather than being added on top of it.
   const effectiveMu = isChest
-    ? muSoft * 0.52 + muLung * 0.32 + muBone * 0.10
-    : muSoft * 0.72 + muBone * 0.20;
+    ? muSoft * 0.34 + muLung * 0.46 + muBone * 0.055
+    : muSoft * 0.76 + muBone * 0.11;
   return Math.exp(-effectiveMu * t);
 }
 
