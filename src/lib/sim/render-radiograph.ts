@@ -71,36 +71,52 @@ function assertFrameQuality(signal: Float32Array, width: number, height: number,
   if (variance / n < minVariance) throw new Error("Render failed — image has almost no anatomical structure.");
 }
 
-function percentile(values: Float32Array, q: number) {
-  const a = Array.from(values).sort((x, y) => x - y);
-  const i = Math.max(0, Math.min(a.length - 1, Math.round((a.length - 1) * q)));
-  return a[i]!;
-}
-function percentileMasked(values: Float32Array, mask: Uint8Array, q: number) {
-  const a: number[] = [];
-  for (let i = 0; i < values.length; i++) if (mask[i]) a.push(values[i]!);
-  if (a.length < 32) return percentile(values, q);
-  a.sort((x, y) => x - y);
-  return a[Math.max(0, Math.min(a.length - 1, Math.round((a.length - 1) * q)))]!;
-}
-function percentilePositive(values: Float32Array, q: number) {
-  const a: number[] = [];
-  for (let i = 0; i < values.length; i++) if (values[i]! > 0) a.push(values[i]!);
-  if (a.length < 32) return 0;
-  a.sort((x, y) => x - y);
-  return a[Math.max(0, Math.min(a.length - 1, Math.round((a.length - 1) * q)))]!;
+function percentile(values: number[], q: number) {
+  if (!values.length) return 0;
+  values.sort((a, b) => a - b);
+  const i = Math.max(0, Math.min(values.length - 1, Math.round((values.length - 1) * q)));
+  return values[i]!;
 }
 
-function reportCanonicalLayers(tissue: Float32Array | null, bone: Float32Array | null, softMask: Uint8Array, projection: Projection) {
-  if (!tissue && !bone) return;
-  const summary = {
-    projection: projection.id,
-    tissue: tissue ? { p10: percentilePositive(tissue, .10), p50: percentilePositive(tissue, .50), p90: percentilePositive(tissue, .90), max: percentilePositive(tissue, .999) } : null,
-    boneDelta: bone ? { p10: percentilePositive(bone, .10), p50: percentilePositive(bone, .50), p90: percentilePositive(bone, .90), max: percentilePositive(bone, .999) } : null,
-    softWindowPixels: softMask.reduce((a, v) => a + (v ? 1 : 0), 0),
-  };
-  console.info("[Bucky Lab] canonical atlas attenuation", summary);
-  if (typeof window !== "undefined") (window as Window & { __BUCKY_LAB_XRAY_DEBUG__?: unknown }).__BUCKY_LAB_XRAY_DEBUG__ = summary;
+function blurScalar(src: Float32Array, w: number, h: number, radius = 2) {
+  const tmp = new Float32Array(src.length), out = new Float32Array(src.length);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let s = 0, n = 0;
+    for (let d = -radius; d <= radius; d++) { const xx = Math.max(0, Math.min(w - 1, x + d)); const wt = radius + 1 - Math.abs(d); s += src[y * w + xx]! * wt; n += wt; }
+    tmp[y * w + x] = s / n;
+  }
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let s = 0, n = 0;
+    for (let d = -radius; d <= radius; d++) { const yy = Math.max(0, Math.min(h - 1, y + d)); const wt = radius + 1 - Math.abs(d); s += tmp[yy * w + x]! * wt; n += wt; }
+    out[y * w + x] = s / n;
+  }
+  return out;
+}
+
+function canonicalTone(
+  od: number,
+  localMean: number,
+  bone: number,
+  bodyWeight: number,
+  anchors: { low: number; mid: number; high: number },
+) {
+  const detail = od - localMean;
+  const lowSpan = Math.max(.06, anchors.mid - anchors.low);
+  const highSpan = Math.max(.08, anchors.high - anchors.mid);
+  let mapped: number;
+  if (od <= anchors.mid) {
+    const t = clamp((od - anchors.low) / lowSpan, 0, 1);
+    mapped = .16 + .45 * Math.pow(t, .78);
+  } else {
+    const t = clamp((od - anchors.mid) / highSpan, 0, 1);
+    mapped = .61 + .31 * Math.pow(t, .72);
+  }
+  const boneDetail = clamp(bone / .12, 0, 1);
+  mapped += detail * (.36 + .24 * boneDetail) + boneDetail * .055;
+  mapped = clamp(mapped, .08, .97);
+  const airTone = .16;
+  const edge = bodyWeight * bodyWeight * (3 - 2 * bodyWeight);
+  return airTone * (1 - edge) + mapped * edge;
 }
 
 export async function renderRadiograph(args: {
@@ -122,8 +138,7 @@ export async function renderRadiograph(args: {
     const width = args.width ?? Math.max(128, Math.round(height * aspect));
     if (width < 64 || height < 64 || width > 2048 || height > 2048) throw new Error(`Render failed — invalid detector size ${width}×${height}.`);
 
-    const kvp = exposure.kvp;
-    const grid = exposure.grid;
+    const kvp = exposure.kvp, grid = exposure.grid;
     const geometry = projectionGeometry(projection, tube, pose, exposure.focalSpot);
     const I0 = incidentFluence(kvp, exposure.mas, tube.sid, grid);
     const thickness = partThickness(patient, projection);
@@ -134,26 +149,19 @@ export async function renderRadiograph(args: {
     const isWholeBody = projection.id === "ap-full-body";
     const canonicalView = usesCanonicalAtlasProjection(projection);
 
-    let atlasOD: Float32Array | null = null;
-    let atlasTissueOD: Float32Array | null = null;
-    let atlasError: string | null = null;
+    let atlasOD: Float32Array | null = null, atlasTissueOD: Float32Array | null = null, atlasError: string | null = null;
     try {
       if (canonicalView) {
         const canonical = await canonicalAtlasProjection({ patient, projection, tube, exposureKvp: kvp, width, height, geometry });
-        atlasOD = canonical.bone;
-        atlasTissueOD = canonical.tissue;
-      } else {
-        atlasOD = await atlasBoneOpticalDensity({ patient, projection, pose, tube, exposureKvp: kvp, width, height, geometry });
-      }
+        atlasOD = canonical.bone; atlasTissueOD = canonical.tissue;
+      } else atlasOD = await atlasBoneOpticalDensity({ patient, projection, pose, tube, exposureKvp: kvp, width, height, geometry });
     } catch (err) {
       atlasError = err instanceof Error ? err.message : String(err);
       console.warn("[Bucky Lab] Atlas projection failed:", atlasError);
     }
 
-    const hasAtlas = atlasOD !== null;
-    const signal = new Float32Array(width * height);
-    const bodyMask = new Uint8Array(width * height);
-    const softWindowMask = new Uint8Array(width * height);
+    const hasAtlas = atlasOD !== null, n = width * height;
+    const signal = new Float32Array(n), bodyMask = new Uint8Array(n), canonicalOD = new Float32Array(n), canonicalBone = new Float32Array(n), bodyWeightMap = new Float32Array(n);
     let sum = 0;
 
     for (let py = 0; py < height; py++) for (let px = 0; px < width; px++) {
@@ -162,113 +170,110 @@ export async function renderRadiograph(args: {
       const paths = isPaChest ? samplePaChest(x, y, patient, pose, seed) : isWholeBody ? sampleFullBody(x, y, patient, seed) : sampleAnatomy(x, y, ctx);
       if (hasAtlas) { paths.bone = 0; paths.cortical = 0; }
       if (!isPaChest && !isWholeBody && (projection.anatomy === "torso-ap" || projection.anatomy === "torso-lat")) {
-        addSharedTissueLayers(paths, x, y, patient, pose, projection);
-        addSharedOrganPaths(paths, x, y, patient, pose);
+        addSharedTissueLayers(paths, x, y, patient, pose, projection); addSharedOrganPaths(paths, x, y, patient, pose);
       }
       addPacemaker(paths, x, y, projection, simCase?.device === "pacemaker");
 
       const attenuationScale = canonicalView ? (hasAtlas ? 1.06 : 1.04) : (hasAtlas ? .65 + thickness / 45 : .55 + thickness / 40);
       const fallbackSoft = pathsToOD(paths, kvp) * attenuationScale;
       const tissueAtlas = atlasTissueOD?.[i] ?? 0;
-      // The atlas boundary contains extremely small tangent paths. Treating those as a full
-      // detector object created the conspicuous white outline around the body. Keep the path
-      // itself, but blend detector response continuously from air into tissue below.
-      const physicalAtlasTissue = canonicalView && tissueAtlas > .0008 ? clamp(tissueAtlas, .0008, 6.5) : 0;
+      const physicalAtlasTissue = canonicalView && tissueAtlas > .00025 ? clamp(tissueAtlas, .00025, 6.5) : 0;
       const softOd = canonicalView ? Math.max(.00005, physicalAtlasTissue > 0 ? physicalAtlasTissue : fallbackSoft) : fallbackSoft;
-      const rawBoneDelta = atlasOD?.[i] ?? 0;
-      // Compress only the strongest cortical peaks while lifting weak skeletal signal. This
-      // preserves ribs/trabeculae without turning long-bone cortices into uniform white tubes.
-      const boneDelta = canonicalView && rawBoneDelta > 0
-        ? Math.min(.20, rawBoneDelta * (1.22 - .32 * clamp(rawBoneDelta / .16, 0, 1)))
-        : rawBoneDelta;
+      const rawBone = atlasOD?.[i] ?? 0;
+      const boneDelta = canonicalView && rawBone > 0 ? Math.min(.19, rawBone * (1.30 - .38 * clamp(rawBone / .15, 0, 1))) : rawBone;
       const od = Math.max(canonicalView ? .00005 : .01, softOd + boneDelta + pathologyDelta(pathologyId, x, y, projection));
       const T = Math.exp(-od);
-      const boneMask = boneDelta > .0045 || paths.bone > .15 || paths.cortical > .05 ? 1 : 0;
-      const trabFine = (fbm(x * 3.2, y * 3.2, seed + 31) - .5) * (canonicalView ? .007 : .018);
-      const trabCoarse = (fbm(x * .9, y * .9, seed + 37) - .5) * (canonicalView ? .004 : .012);
-      const softVar = (fbm(x * .45, y * .45, seed + 11) - .5) * (canonicalView ? .008 : .018) * ((tissueAtlas > .00005 || paths.soft > .08) ? 1 : 0);
+
+      const tissueWeight = canonicalView ? clamp((tissueAtlas - .00015) / .018, 0, 1) : 1;
+      const boneWeight = canonicalView ? clamp(rawBone / .018, 0, 1) * .68 : 0;
+      const bodyWeight = canonicalView ? Math.max(tissueWeight, boneWeight) : 1;
+      bodyWeightMap[i] = bodyWeight;
+      if (bodyWeight > .02) bodyMask[i] = 1;
+      canonicalOD[i] = od;
+      canonicalBone[i] = boneDelta;
+
+      const boneMask = boneDelta > .004 || paths.bone > .15 || paths.cortical > .05 ? 1 : 0;
+      const trabFine = (fbm(x * 3.5, y * 3.5, seed + 31) - .5) * (canonicalView ? .010 : .018);
+      const trabCoarse = (fbm(x * 1.05, y * 1.05, seed + 37) - .5) * (canonicalView ? .006 : .012);
+      const softVar = (fbm(x * .48, y * .48, seed + 11) - .5) * (canonicalView ? .010 : .018) * (tissueAtlas > .00005 || paths.soft > .08 ? 1 : 0);
       const texture = 1 + boneMask * (trabFine + trabCoarse) + softVar;
-      const bodyWeight = canonicalView ? clamp((tissueAtlas - .0008) / .010, 0, 1) : 1;
-      const bodyHere = canonicalView ? bodyWeight > .015 : (tissueAtlas > .0002 || paths.soft + paths.lung > .035 || boneDelta > .005);
-      if (bodyHere) bodyMask[i] = 1;
-      if (canonicalView && bodyWeight > .55 && physicalAtlasTissue > .006 && boneDelta < .018) softWindowMask[i] = 1;
-      // Scatter should veil contrast, not dominate it. The previous canonical scale was strong
-      // enough to wash the lungs and mediastinum into the same grey field.
-      const localScatterScale = canonicalView
-        ? (bodyHere ? .004 + .022 * (1 - Math.exp(-Math.max(0, softOd) * .70)) : .00025)
-        : .5 + .5 * (paths.soft + paths.lung > 0 ? 1 : .15);
+      const localScatterScale = canonicalView ? (bodyWeight > .02 ? .0025 + .012 * (1 - Math.exp(-Math.max(0, softOd) * .65)) : .00012) : .5 + .5 * (paths.soft + paths.lung > 0 ? 1 : .15);
       const scat = I0 * scatterFrac * localScatterScale;
       const bodySignal = I0 * T * texture + scat;
-      const airSignal = I0 * 1.02 + I0 * scatterFrac * .00005;
-      let sig = canonicalView ? airSignal * (1 - bodyWeight) + bodySignal * bodyWeight : bodySignal;
-      if (!bodyHere && !canonicalView) sig = airSignal;
-      signal[i] = sig;
-      sum += sig;
+      const airSignal = I0 * 1.02 + I0 * scatterFrac * .00003;
+      const sig = canonicalView ? airSignal * (1 - bodyWeight) + bodySignal * bodyWeight : (bodyWeight > .02 ? bodySignal : airSignal);
+      signal[i] = sig; sum += sig;
     }
 
-    if (canonicalView) reportCanonicalLayers(atlasTissueOD, atlasOD, softWindowMask, projection);
-    const n = width * height;
-    const mean = sum / n;
-    const well = 280;
+    const mean = sum / n, well = 280;
     let satEstimate = 0;
     for (let i = 0; i < n; i++) if (signal[i]! > well) satEstimate++;
-    assertFrameQuality(signal, width, height, satEstimate / n, mean, canonicalView ? .035 : .8);
+    assertFrameQuality(signal, width, height, satEstimate / n, mean, canonicalView ? .02 : .8);
 
-    const canvas = document.createElement("canvas");
-    canvas.width = width; canvas.height = height;
-    const g = canvas.getContext("2d");
-    if (!g) throw new Error("Render failed — could not obtain 2D canvas context.");
+    const canvas = document.createElement("canvas"); canvas.width = width; canvas.height = height;
+    const g = canvas.getContext("2d"); if (!g) throw new Error("Render failed — could not obtain 2D canvas context.");
     const img = g.createImageData(width, height);
     let sat = 0, noiseAcc = 0, contrastAcc = 0, contrastN = 0;
-    const logMean = Math.log(mean + 1e-5);
-    const contrastScale = clamp((kvp - 45) / 80, 0, 1);
-    const canonicalMaskCount = canonicalView ? softWindowMask.reduce((a, v) => a + (v ? 1 : 0), 0) : 0;
-    const canonicalMask = canonicalMaskCount > 128 ? softWindowMask : bodyMask;
-    const canonicalLow = canonicalView ? Math.log(percentileMasked(signal, canonicalMask, .015) + 1e-5) : 0;
-    const canonicalHigh = canonicalView ? Math.log(percentileMasked(signal, canonicalMask, .985) + 1e-5) : 1;
-    const canonicalSpan = Math.max(.18, canonicalHigh - canonicalLow);
-    // Preserve the physically generated lung/soft-tissue separation instead of flattening it
-    // with an unnecessarily broad canonical window.
-    const windowW = canonicalView ? Math.max(.62, canonicalSpan * 1.10) : 1.7 + contrastScale * 2.2;
-    const windowL = canonicalView ? canonicalLow + canonicalSpan * .50 : logMean + (mean > 100 ? .15 : mean < 10 ? -.25 : 0);
     const baseNoise = .08 + .38 / Math.sqrt(Math.max(.5, mean / 40));
-    const noiseGain = canonicalView ? baseNoise * .28 : baseNoise;
+    const noiseGain = canonicalView ? baseNoise * .24 : baseNoise;
     const blurRadius = clamp(Math.round(geometry.geometricUnsharpnessMm * 1.25), 0, 3);
-    const blurWeight = blurRadius > 0 ? Math.min(.24, geometry.geometricUnsharpnessMm * .09) : 0;
+    const blurWeight = blurRadius > 0 ? Math.min(.20, geometry.geometricUnsharpnessMm * .075) : 0;
+
+    let anchors = { low: .08, mid: .55, high: 1.7 };
+    let localOD = canonicalOD;
+    if (canonicalView) {
+      const tissueValues: number[] = [];
+      for (let i = 0; i < n; i++) if (bodyWeightMap[i]! > .72 && canonicalBone[i]! < .028 && canonicalOD[i]! > .015) tissueValues.push(canonicalOD[i]!);
+      if (tissueValues.length > 128) {
+        anchors = {
+          low: percentile([...tissueValues], .10),
+          mid: percentile([...tissueValues], .56),
+          high: percentile([...tissueValues], .96),
+        };
+        if (anchors.mid - anchors.low < .07) anchors.low = Math.max(.01, anchors.mid - .07);
+        if (anchors.high - anchors.mid < .10) anchors.high = anchors.mid + .10;
+      }
+      localOD = blurScalar(canonicalOD, width, height, isPaChest ? 4 : 2);
+    }
+
+    const logMean = Math.log(mean + 1e-5), contrastScale = clamp((kvp - 45) / 80, 0, 1);
+    const fallbackWindowW = 1.7 + contrastScale * 2.2;
+    const fallbackWindowL = logMean + (mean > 100 ? .15 : mean < 10 ? -.25 : 0);
 
     for (let i = 0; i < n; i++) {
-      let sig = signal[i]!;
       const nx = i % width, ny = i / width | 0;
+      let sig = signal[i]!;
       if (blurRadius > 0 && nx > blurRadius && nx < width - blurRadius - 1 && ny > blurRadius && ny < height - blurRadius - 1) {
         let neighbour = 0, count = 0;
         for (let dy = -blurRadius; dy <= blurRadius; dy++) for (let dx = -blurRadius; dx <= blurRadius; dx++) {
           if (dx === 0 && dy === 0) continue;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist > blurRadius + .25) continue;
-          const falloff = 1 / (1 + dist * dist);
-          neighbour += signal[(ny + dy) * width + nx + dx]! * falloff;
-          count += falloff;
+          const dist = Math.sqrt(dx * dx + dy * dy); if (dist > blurRadius + .25) continue;
+          const falloff = 1 / (1 + dist * dist); neighbour += signal[(ny + dy) * width + nx + dx]! * falloff; count += falloff;
         }
         if (count > 0) sig = sig * (1 - blurWeight) + neighbour / count * blurWeight;
       }
       const sigma = noiseGain / Math.sqrt(Math.max(.5, sig));
       const nse = (fbm(nx * .42, ny * .42, seed + 4) - .5) * 2 * sigma * (canonicalView ? 1 : 3);
-      sig = Math.max(0, sig + nse);
-      noiseAcc += Math.abs(nse);
+      sig = Math.max(0, sig + nse); noiseAcc += Math.abs(nse);
       if (sig > well) { sig = well; sat++; }
-      const L = Math.log(sig + 1e-5);
-      let d = 1 - clamp((L - windowL) / windowW + .5, 0, 1);
-      if (kvp >= 100) d = canonicalView ? clamp((d - .5) * 1.025 + .5, 0, 1) : .08 + d * .84;
-      else if (kvp <= 55) d = clamp(d < .5 ? d * .9 : .5 + (d - .5) * 1.1, 0, 1);
-      let tone = clamp(d, 0, 1);
-      tone = tone * tone * (3 - 2 * tone);
-      if (canonicalView) tone = Math.pow(tone, .995);
+
+      let tone: number;
+      if (canonicalView) {
+        tone = canonicalTone(canonicalOD[i]!, localOD[i]!, canonicalBone[i]!, bodyWeightMap[i]!, anchors);
+        tone = clamp(tone + nse * .0006, 0, 1);
+      } else {
+        const L = Math.log(sig + 1e-5);
+        let d = 1 - clamp((L - fallbackWindowL) / fallbackWindowW + .5, 0, 1);
+        if (kvp >= 100) d = .08 + d * .84;
+        else if (kvp <= 55) d = clamp(d < .5 ? d * .9 : .5 + (d - .5) * 1.1, 0, 1);
+        tone = clamp(d, 0, 1); tone = tone * tone * (3 - 2 * tone);
+      }
       const v = Math.round(tone * 255), o = i * 4;
       img.data[o] = v; img.data[o + 1] = v; img.data[o + 2] = v; img.data[o + 3] = 255;
       if (nx > 0) { contrastAcc += Math.abs(v - img.data[(i - 1) * 4]!); contrastN++; }
     }
 
-    assertFrameQuality(signal, width, height, sat / n, mean, canonicalView ? .035 : .8);
+    assertFrameQuality(signal, width, height, sat / n, mean, canonicalView ? .02 : .8);
     const marker = exposure.marker === "L" || exposure.marker === "R" ? exposure.marker : "R";
     stampMarker(img, width, height, marker, Math.round(width * .08), Math.round(height * .06));
     g.putImageData(img, 0, 0);
@@ -291,8 +296,7 @@ function stampMarker(img: ImageData, w: number, h: number, letter: "L" | "R", x:
   const glyph = letter === "L" ? L_GLYPH : R_GLYPH, scale = 5;
   const put = (px: number, py: number, v: number) => {
     if (px < 0 || py < 0 || px >= w || py >= h) return;
-    const i = (py * w + px) * 4;
-    img.data[i] = v; img.data[i + 1] = v; img.data[i + 2] = v; img.data[i + 3] = 255;
+    const i = (py * w + px) * 4; img.data[i] = v; img.data[i + 1] = v; img.data[i + 2] = v; img.data[i + 3] = 255;
   };
   for (let gy = 0; gy < glyph.length; gy++) for (let gx = 0; gx < glyph[gy]!.length; gx++) if (glyph[gy]![gx]) for (let sy = 0; sy < scale; sy++) for (let sx = 0; sx < scale; sx++) put(x + gx * scale + sx, y + gy * scale + sy, 245);
 }
