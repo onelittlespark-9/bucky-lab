@@ -4,30 +4,281 @@ import { addSharedOrganPaths } from "./shared-anatomy-sampling";
 import { addSharedTissueLayers } from "./shared-tissue-sampling";
 import { samplePaChest } from "./pa-chest-model";
 import { sampleFullBody } from "./full-body-model";
-import { wholeBodyAtlasOpticalDensity } from "./whole-body-atlas";
-import { wholeBodyAtlasTissueOpticalDensity } from "./whole-body-tissue-atlas";
 import { buildMetrics, fieldScatter, incidentFluence, partThickness } from "./exposure";
 import { clamp, fbm } from "./geometry";
 import { projectionGeometry } from "./projection-physics";
 import { atlasBoneOpticalDensity, muFromHU } from "./atlas-radiograph";
+import { canonicalAtlasProjection, usesCanonicalAtlasProjection } from "./canonical-atlas-projection";
 import { scoreExposure } from "./scoring";
 import { caseById } from "./case-bank";
 import type { PathologyId } from "./requests";
-function pathsToOD(p:Paths,kvp:number){return muFromHU(-1000,kvp)*p.air+muFromHU(-700,kvp)*p.lung+muFromHU(-90,kvp)*p.fat+muFromHU(45,kvp)*p.soft*1.05+muFromHU(700,kvp)*p.bone+muFromHU(1200,kvp)*p.cortical+muFromHU(-1000,kvp)*p.gas*40+muFromHU(3000,kvp)*p.metal;}
-export function preloadRadiographAssets(_p:Projection[]){}
-function localCoords(projection:Projection,patient:Patient,pose:SimPose,px:number,py:number,w:number,h:number,tube:TubeState,geometry:ReturnType<typeof projectionGeometry>){const cmX=((px+.5)/w-.5)*tube.collimationW/geometry.magnification,cmY=((py+.5)/h-.5)*tube.collimationH/geometry.magnification,angle=tube.angle*Math.PI/180,ry=cmY*Math.cos(pose.oblique*Math.PI/180)-cmX*Math.sin(pose.oblique*Math.PI/180)*.18-Math.tan(angle)*geometry.oidCm,lateral=projection.anatomy==="torso-lat"||projection.anatomy==="cspine-lat"||projection.anatomy==="skull-lat";if(lateral)return{x:tube.crX+cmX,y:tube.crY+ry};const rx=cmX*Math.cos(pose.rotationY*Math.PI/180);if(projection.anatomy==="torso-ap"||projection.anatomy==="shoulder-ap"||projection.anatomy==="full-body-ap")return{x:tube.crX+rx,y:tube.crY+ry};return{x:rx+tube.crX*.15,y:ry+(tube.crY-projection.cr.y)*.25};}
-function ellipse(x:number,y:number,cx:number,cy:number,rx:number,ry:number){const q=((x-cx)/rx)**2+((y-cy)/ry)**2;return q<1?1-q:0;}
-function pathologyDelta(id:PathologyId,x:number,y:number,p:Projection){if(p.anatomy!=="torso-ap"&&p.anatomy!=="torso-lat")return 0;if(id==="consolidation")return .7*ellipse(x,y,-5.5,43,5.5,6);if(id==="pneumothorax")return-.75*ellipse(x,y,-8.5,32,5.5,8);if(id==="rib-fracture")return .22*ellipse(x,y,10,34,1.2,1.1);return 0;}
-function addPacemaker(p:Paths,x:number,y:number,projection:Projection,on:boolean){if(!on||(projection.anatomy!=="torso-ap"&&projection.anatomy!=="torso-lat"))return;p.metal+=(ellipse(x,y,-8,29,2.7,3.4)+Math.exp(-(((x+3.5)**2)/1.4+((y-35)**2)/34))+Math.exp(-(((x+4.5)**2)/1.2+((y-40)**2)/38)))*14;}
-function assertFrameQuality(signal:Float32Array,width:number,height:number,satFraction:number,mean:number,minVariance=.8){const n=width*height;if(n<100)throw new Error("Render failed — detector matrix is too small.");if(satFraction>.55)throw new Error(`Render failed — image is severely over-exposed (${Math.round(satFraction*100)}% of pixels saturated).`);if(!Number.isFinite(mean)||mean<.05)throw new Error("Render failed — almost no signal reached the detector.");let variance=0;for(let i=0;i<n;i++){const d=signal[i]!-mean;variance+=d*d;}if(variance/n<minVariance)throw new Error("Render failed — image has almost no anatomical structure.");}
-function percentile(values:Float32Array,q:number){const a=Array.from(values).sort((x,y)=>x-y),i=Math.max(0,Math.min(a.length-1,Math.round((a.length-1)*q)));return a[i]!;}
-function percentileMasked(values:Float32Array,mask:Uint8Array,q:number){const a:number[]=[];for(let i=0;i<values.length;i++)if(mask[i])a.push(values[i]!);if(a.length<32)return percentile(values,q);a.sort((x,y)=>x-y);return a[Math.max(0,Math.min(a.length-1,Math.round((a.length-1)*q)))]!;}
-function percentilePositive(values:Float32Array,q:number){const a:number[]=[];for(let i=0;i<values.length;i++)if(values[i]!>0)a.push(values[i]!);if(a.length<32)return 0;a.sort((x,y)=>x-y);return a[Math.max(0,Math.min(a.length-1,Math.round((a.length-1)*q)))]!;}
-function reportWholeBodyLayers(tissue:Float32Array|null,bone:Float32Array|null,softMask:Uint8Array){if(!tissue&&!bone)return;const summary={tissue:tissue?{p10:percentilePositive(tissue,.10),p50:percentilePositive(tissue,.50),p90:percentilePositive(tissue,.90),max:percentilePositive(tissue,.999)}:null,boneDelta:bone?{p10:percentilePositive(bone,.10),p50:percentilePositive(bone,.50),p90:percentilePositive(bone,.90),max:percentilePositive(bone,.999)}:null,softWindowPixels:softMask.reduce((a,v)=>a+(v?1:0),0)};console.info("[Bucky Lab] whole-body accumulated attenuation",summary);if(typeof window!=="undefined")(window as Window&{__BUCKY_LAB_XRAY_DEBUG__?:unknown}).__BUCKY_LAB_XRAY_DEBUG__=summary;}
-export async function renderRadiograph(args:{patient:Patient;projection:Projection;pose:SimPose;tube:TubeState;exposure:ExposureState;pathologyId?:PathologyId;caseId?:string|null;width?:number;height?:number;}):Promise<RadiographResult>{const{patient,projection,pose,tube,exposure,pathologyId="none",caseId}=args;try{const simCase=caseById(caseId),aspect=tube.collimationW/tube.collimationH,height=args.height??768,width=args.width??Math.max(128,Math.round(height*aspect));if(width<64||height<64||width>2048||height>2048)throw new Error(`Render failed — invalid detector size ${width}×${height}.`);const kvp=exposure.kvp,grid=exposure.grid,geometry=projectionGeometry(projection,tube,pose,exposure.focalSpot),I0=incidentFluence(kvp,exposure.mas,tube.sid,grid),thickness=partThickness(patient,projection),scatterFrac=fieldScatter(tube.collimationW,tube.collimationH,thickness,grid),seed=hashPatient(patient.id),ctx:SampleCtx={patient,projection,pose,seed},isPaChest=projection.id==="pa-chest",isWholeBody=projection.id==="ap-full-body";let atlasOD:Float32Array|null=null,atlasTissueOD:Float32Array|null=null,atlasError:string|null=null;try{if(isWholeBody){[atlasOD,atlasTissueOD]=await Promise.all([wholeBodyAtlasOpticalDensity({patient,projection,tube,exposureKvp:kvp,width,height,geometry}),wholeBodyAtlasTissueOpticalDensity({patient,tube,exposureKvp:kvp,width,height,geometry})]);}else atlasOD=await atlasBoneOpticalDensity({patient,projection,pose,tube,exposureKvp:kvp,width,height,geometry});}catch(err){atlasError=err instanceof Error?err.message:String(err);console.warn("[Bucky Lab] Atlas projection failed:",atlasError);}const hasAtlas=atlasOD!==null,signal=new Float32Array(width*height),bodyMask=new Uint8Array(width*height),softWindowMask=new Uint8Array(width*height);let sum=0;for(let py=0;py<height;py++)for(let px=0;px<width;px++){const i=py*width+px,{x,y}=localCoords(projection,patient,pose,px,py,width,height,tube,geometry),paths=isPaChest?samplePaChest(x,y,patient,pose,seed):isWholeBody?sampleFullBody(x,y,patient,seed):sampleAnatomy(x,y,ctx);if(hasAtlas){paths.bone=0;paths.cortical=0;}if(!isPaChest&&!isWholeBody&&(projection.anatomy==="torso-ap"||projection.anatomy==="torso-lat")){addSharedTissueLayers(paths,x,y,patient,pose,projection);addSharedOrganPaths(paths,x,y,patient,pose);}addPacemaker(paths,x,y,projection,simCase?.device==="pacemaker");const attenuationScale=isPaChest?(hasAtlas?.92:1.04):isWholeBody?(hasAtlas?1.06:1.04):(hasAtlas?.65+thickness/45:.55+thickness/40),fallbackSoft=pathsToOD(paths,kvp)*attenuationScale,tissueAtlas=atlasTissueOD?.[i]??0,physicalAtlasTissue=isWholeBody&&tissueAtlas>.00005?clamp(tissueAtlas,.00005,6.5):0,softOd=isWholeBody?Math.max(.00005,physicalAtlasTissue>0?physicalAtlasTissue:fallbackSoft):fallbackSoft,boneDelta=(atlasOD?.[i]??0)*(isPaChest?.64:isWholeBody?1:1),od=Math.max(isWholeBody?.00005:.01,softOd+boneDelta+pathologyDelta(pathologyId,x,y,projection)),T=Math.exp(-od),boneMask=boneDelta>.006||paths.bone>.15||paths.cortical>.05?1:0,trabFine=(fbm(x*3.2,y*3.2,seed+31)-.5)*(isPaChest?.008:isWholeBody?.005:.018),trabCoarse=(fbm(x*.9,y*.9,seed+37)-.5)*(isPaChest?.005:isWholeBody?.003:.012),softVar=(fbm(x*.45,y*.45,seed+11)-.5)*(isPaChest?.034:isWholeBody?.008:.018)*((tissueAtlas>.00005||paths.soft>.08)?1:0),texture=1+boneMask*(trabFine+trabCoarse)+softVar,bodyHere=isWholeBody?physicalAtlasTissue>.00005:(tissueAtlas>.0002||paths.soft+paths.lung>.035||boneDelta>.005);if(bodyHere)bodyMask[i]=1;if(isWholeBody&&physicalAtlasTissue>.006&&boneDelta<.018)softWindowMask[i]=1;const localScatterScale=isWholeBody?(bodyHere?.008+.040*(1-Math.exp(-Math.max(0,softOd)*.70)):.0005):isPaChest?.16:.5+.5*(paths.soft+paths.lung>0?1:.15),scat=I0*scatterFrac*localScatterScale,bodySignal=I0*T*texture+scat,airSignal=I0*1.02+I0*scatterFrac*.00005;let sig=isWholeBody?(bodyHere?bodySignal:airSignal):bodySignal;if(!bodyHere)sig=airSignal;signal[i]=sig;sum+=sig;}
-if(isWholeBody)reportWholeBodyLayers(atlasTissueOD,atlasOD,softWindowMask);const n=width*height,mean=sum/n,well=280;let satEstimate=0;for(let i=0;i<n;i++)if(signal[i]!>well)satEstimate++;assertFrameQuality(signal,width,height,satEstimate/n,mean,isWholeBody?.035:.8);const canvas=document.createElement("canvas");canvas.width=width;canvas.height=height;const g=canvas.getContext("2d");if(!g)throw new Error("Render failed — could not obtain 2D canvas context.");const img=g.createImageData(width,height);let sat=0,noiseAcc=0,contrastAcc=0,contrastN=0;const logMean=Math.log(mean+1e-5),contrastScale=clamp((kvp-45)/80,0,1),wbMaskCount=isWholeBody?softWindowMask.reduce((a,v)=>a+(v?1:0),0):0,wbMask=wbMaskCount>128?softWindowMask:bodyMask,wbLow=isWholeBody?Math.log(percentileMasked(signal,wbMask,.02)+1e-5):0,wbHigh=isWholeBody?Math.log(percentileMasked(signal,wbMask,.98)+1e-5):1,wbSpan=Math.max(.18,wbHigh-wbLow),windowW=isPaChest?1.46:isWholeBody?Math.max(.68,wbSpan*1.25):1.7+contrastScale*2.2,windowL=isWholeBody?wbLow+wbSpan*.52:logMean+(isPaChest?-.13:mean>100?.15:mean<10?-.25:0),baseNoise=.08+.38/Math.sqrt(Math.max(.5,mean/40)),noiseGain=(isPaChest||isWholeBody)?baseNoise*.28:baseNoise,blurRadius=clamp(Math.round(geometry.geometricUnsharpnessMm*1.25),0,3),blurWeight=blurRadius>0?Math.min(.24,geometry.geometricUnsharpnessMm*.09):0;
-for(let i=0;i<n;i++){let sig=signal[i]!;const nx=i%width,ny=i/width|0;if(blurRadius>0&&nx>blurRadius&&nx<width-blurRadius-1&&ny>blurRadius&&ny<height-blurRadius-1){let neighbour=0,count=0;for(let dy=-blurRadius;dy<=blurRadius;dy++)for(let dx=-blurRadius;dx<=blurRadius;dx++){if(dx===0&&dy===0)continue;const dist=Math.sqrt(dx*dx+dy*dy);if(dist>blurRadius+.25)continue;const falloff=1/(1+dist*dist);neighbour+=signal[(ny+dy)*width+nx+dx]!*falloff;count+=falloff;}if(count>0)sig=sig*(1-blurWeight)+neighbour/count*blurWeight;}const sigma=noiseGain/Math.sqrt(Math.max(.5,sig)),nse=(fbm(nx*.42,ny*.42,seed+4)-.5)*2*sigma*((isPaChest||isWholeBody)?1:3);sig=Math.max(0,sig+nse);noiseAcc+=Math.abs(nse);if(sig>well){sig=well;sat++;}const L=Math.log(sig+1e-5);let d=1-clamp((L-windowL)/windowW+.5,0,1);if(kvp>=100)d=isPaChest?clamp((d-.035)*1.10+.035,0,1):isWholeBody?clamp((d-.5)*1.015+.5,0,1):.08+d*.84;else if(kvp<=55)d=clamp(d<.5?d*.9:.5+(d-.5)*1.1,0,1);let tone=clamp(d,0,1);tone=tone*tone*(3-2*tone);if(isPaChest){tone=clamp((tone-.5)*1.18+.5,0,1);tone=Math.pow(tone,.94);}else if(isWholeBody){tone=Math.pow(tone,.995);}const v=Math.round(tone*255),o=i*4;img.data[o]=v;img.data[o+1]=v;img.data[o+2]=v;img.data[o+3]=255;if(nx>0){contrastAcc+=Math.abs(v-img.data[(i-1)*4]!);contrastN++;}}
-assertFrameQuality(signal,width,height,sat/n,mean,isWholeBody?.035:.8);const marker=exposure.marker==="L"||exposure.marker==="R"?exposure.marker:"R";stampMarker(img,width,height,marker,Math.round(width*.08),Math.round(height*.06));g.putImageData(img,0,0);const dataUrl=canvas.toDataURL("image/png"),metrics=buildMetrics(mean,noiseAcc/n,contrastN?contrastAcc/contrastN/255:0,sat/n,patient,projection,exposure,tube),scores=scoreExposure({patient,projection,pose,tube,exposure,metrics}),overall=scores.reduce((a,c)=>a+c.weight*gradeNum(c.grade),0)/scores.reduce((a,c)=>a+c.weight,0),overallGrade=overall>=.85?"excellent":overall>=.62?"acceptable":"repeat";if(atlasError&&!hasAtlas)console.warn("[Bucky Lab] procedural fallback:",atlasError);return{metrics,scores,overall,overallGrade,width,height,dataUrl};}catch(err){const message=err instanceof Error?err.message:String(err);if(message.startsWith("Render failed"))throw err;throw new Error(`Render failed — ${message}`);}}
-function gradeNum(g:"excellent"|"acceptable"|"repeat"){return g==="excellent"?1:g==="acceptable"?.7:.25;}
-function stampMarker(img:ImageData,w:number,h:number,letter:"L"|"R",x:number,y:number){const glyph=letter==="L"?L_GLYPH:R_GLYPH,scale=5,put=(px:number,py:number,v:number)=>{if(px<0||py<0||px>=w||py>=h)return;const i=(py*w+px)*4;img.data[i]=v;img.data[i+1]=v;img.data[i+2]=v;img.data[i+3]=255;};for(let gy=0;gy<glyph.length;gy++)for(let gx=0;gx<glyph[gy]!.length;gx++)if(glyph[gy]![gx])for(let sy=0;sy<scale;sy++)for(let sx=0;sx<scale;sx++)put(x+gx*scale+sx,y+gy*scale+sy,245);}
-const L_GLYPH=[[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,1,1,1,1]],R_GLYPH=[[1,1,1,1,0],[1,0,0,0,1],[1,1,1,1,0],[1,0,1,0,0],[1,0,0,1,0]];
+
+function pathsToOD(p: Paths, kvp: number) {
+  return muFromHU(-1000, kvp) * p.air + muFromHU(-700, kvp) * p.lung + muFromHU(-90, kvp) * p.fat +
+    muFromHU(45, kvp) * p.soft * 1.05 + muFromHU(700, kvp) * p.bone + muFromHU(1200, kvp) * p.cortical +
+    muFromHU(-1000, kvp) * p.gas * 40 + muFromHU(3000, kvp) * p.metal;
+}
+
+export function preloadRadiographAssets(_p: Projection[]) {}
+
+function localCoords(
+  projection: Projection,
+  patient: Patient,
+  pose: SimPose,
+  px: number,
+  py: number,
+  w: number,
+  h: number,
+  tube: TubeState,
+  geometry: ReturnType<typeof projectionGeometry>,
+) {
+  const cmX = ((px + .5) / w - .5) * tube.collimationW / geometry.magnification;
+  const cmY = ((py + .5) / h - .5) * tube.collimationH / geometry.magnification;
+  const angle = tube.angle * Math.PI / 180;
+  const ry = cmY * Math.cos(pose.oblique * Math.PI / 180) - cmX * Math.sin(pose.oblique * Math.PI / 180) * .18 - Math.tan(angle) * geometry.oidCm;
+  const lateral = projection.anatomy === "torso-lat" || projection.anatomy === "cspine-lat" || projection.anatomy === "skull-lat";
+  if (lateral) return { x: tube.crX + cmX, y: tube.crY + ry };
+  const rx = cmX * Math.cos(pose.rotationY * Math.PI / 180);
+  if (projection.anatomy === "torso-ap" || projection.anatomy === "shoulder-ap" || projection.anatomy === "full-body-ap") return { x: tube.crX + rx, y: tube.crY + ry };
+  return { x: rx + tube.crX * .15, y: ry + (tube.crY - projection.cr.y) * .25 };
+}
+
+function ellipse(x: number, y: number, cx: number, cy: number, rx: number, ry: number) {
+  const q = ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2;
+  return q < 1 ? 1 - q : 0;
+}
+
+function pathologyDelta(id: PathologyId, x: number, y: number, p: Projection) {
+  if (p.anatomy !== "torso-ap" && p.anatomy !== "torso-lat") return 0;
+  if (id === "consolidation") return .7 * ellipse(x, y, -5.5, 43, 5.5, 6);
+  if (id === "pneumothorax") return -.75 * ellipse(x, y, -8.5, 32, 5.5, 8);
+  if (id === "rib-fracture") return .22 * ellipse(x, y, 10, 34, 1.2, 1.1);
+  return 0;
+}
+
+function addPacemaker(p: Paths, x: number, y: number, projection: Projection, on: boolean) {
+  if (!on || (projection.anatomy !== "torso-ap" && projection.anatomy !== "torso-lat")) return;
+  p.metal += (ellipse(x, y, -8, 29, 2.7, 3.4) + Math.exp(-(((x + 3.5) ** 2) / 1.4 + ((y - 35) ** 2) / 34)) + Math.exp(-(((x + 4.5) ** 2) / 1.2 + ((y - 40) ** 2) / 38))) * 14;
+}
+
+function assertFrameQuality(signal: Float32Array, width: number, height: number, satFraction: number, mean: number, minVariance = .8) {
+  const n = width * height;
+  if (n < 100) throw new Error("Render failed — detector matrix is too small.");
+  if (satFraction > .55) throw new Error(`Render failed — image is severely over-exposed (${Math.round(satFraction * 100)}% of pixels saturated).`);
+  if (!Number.isFinite(mean) || mean < .05) throw new Error("Render failed — almost no signal reached the detector.");
+  let variance = 0;
+  for (let i = 0; i < n; i++) { const d = signal[i]! - mean; variance += d * d; }
+  if (variance / n < minVariance) throw new Error("Render failed — image has almost no anatomical structure.");
+}
+
+function percentile(values: Float32Array, q: number) {
+  const a = Array.from(values).sort((x, y) => x - y);
+  const i = Math.max(0, Math.min(a.length - 1, Math.round((a.length - 1) * q)));
+  return a[i]!;
+}
+function percentileMasked(values: Float32Array, mask: Uint8Array, q: number) {
+  const a: number[] = [];
+  for (let i = 0; i < values.length; i++) if (mask[i]) a.push(values[i]!);
+  if (a.length < 32) return percentile(values, q);
+  a.sort((x, y) => x - y);
+  return a[Math.max(0, Math.min(a.length - 1, Math.round((a.length - 1) * q)))]!;
+}
+function percentilePositive(values: Float32Array, q: number) {
+  const a: number[] = [];
+  for (let i = 0; i < values.length; i++) if (values[i]! > 0) a.push(values[i]!);
+  if (a.length < 32) return 0;
+  a.sort((x, y) => x - y);
+  return a[Math.max(0, Math.min(a.length - 1, Math.round((a.length - 1) * q)))]!;
+}
+
+function reportCanonicalLayers(tissue: Float32Array | null, bone: Float32Array | null, softMask: Uint8Array, projection: Projection) {
+  if (!tissue && !bone) return;
+  const summary = {
+    projection: projection.id,
+    tissue: tissue ? { p10: percentilePositive(tissue, .10), p50: percentilePositive(tissue, .50), p90: percentilePositive(tissue, .90), max: percentilePositive(tissue, .999) } : null,
+    boneDelta: bone ? { p10: percentilePositive(bone, .10), p50: percentilePositive(bone, .50), p90: percentilePositive(bone, .90), max: percentilePositive(bone, .999) } : null,
+    softWindowPixels: softMask.reduce((a, v) => a + (v ? 1 : 0), 0),
+  };
+  console.info("[Bucky Lab] canonical atlas attenuation", summary);
+  if (typeof window !== "undefined") (window as Window & { __BUCKY_LAB_XRAY_DEBUG__?: unknown }).__BUCKY_LAB_XRAY_DEBUG__ = summary;
+}
+
+export async function renderRadiograph(args: {
+  patient: Patient;
+  projection: Projection;
+  pose: SimPose;
+  tube: TubeState;
+  exposure: ExposureState;
+  pathologyId?: PathologyId;
+  caseId?: string | null;
+  width?: number;
+  height?: number;
+}): Promise<RadiographResult> {
+  const { patient, projection, pose, tube, exposure, pathologyId = "none", caseId } = args;
+  try {
+    const simCase = caseById(caseId);
+    const aspect = tube.collimationW / tube.collimationH;
+    const height = args.height ?? 768;
+    const width = args.width ?? Math.max(128, Math.round(height * aspect));
+    if (width < 64 || height < 64 || width > 2048 || height > 2048) throw new Error(`Render failed — invalid detector size ${width}×${height}.`);
+
+    const kvp = exposure.kvp;
+    const grid = exposure.grid;
+    const geometry = projectionGeometry(projection, tube, pose, exposure.focalSpot);
+    const I0 = incidentFluence(kvp, exposure.mas, tube.sid, grid);
+    const thickness = partThickness(patient, projection);
+    const scatterFrac = fieldScatter(tube.collimationW, tube.collimationH, thickness, grid);
+    const seed = hashPatient(patient.id);
+    const ctx: SampleCtx = { patient, projection, pose, seed };
+    const isPaChest = projection.id === "pa-chest";
+    const isWholeBody = projection.id === "ap-full-body";
+    const canonicalView = usesCanonicalAtlasProjection(projection);
+
+    let atlasOD: Float32Array | null = null;
+    let atlasTissueOD: Float32Array | null = null;
+    let atlasError: string | null = null;
+    try {
+      if (canonicalView) {
+        const canonical = await canonicalAtlasProjection({ patient, projection, tube, exposureKvp: kvp, width, height, geometry });
+        atlasOD = canonical.bone;
+        atlasTissueOD = canonical.tissue;
+      } else {
+        atlasOD = await atlasBoneOpticalDensity({ patient, projection, pose, tube, exposureKvp: kvp, width, height, geometry });
+      }
+    } catch (err) {
+      atlasError = err instanceof Error ? err.message : String(err);
+      console.warn("[Bucky Lab] Atlas projection failed:", atlasError);
+    }
+
+    const hasAtlas = atlasOD !== null;
+    const signal = new Float32Array(width * height);
+    const bodyMask = new Uint8Array(width * height);
+    const softWindowMask = new Uint8Array(width * height);
+    let sum = 0;
+
+    for (let py = 0; py < height; py++) for (let px = 0; px < width; px++) {
+      const i = py * width + px;
+      const { x, y } = localCoords(projection, patient, pose, px, py, width, height, tube, geometry);
+      const paths = isPaChest ? samplePaChest(x, y, patient, pose, seed) : isWholeBody ? sampleFullBody(x, y, patient, seed) : sampleAnatomy(x, y, ctx);
+      if (hasAtlas) { paths.bone = 0; paths.cortical = 0; }
+      if (!isPaChest && !isWholeBody && (projection.anatomy === "torso-ap" || projection.anatomy === "torso-lat")) {
+        addSharedTissueLayers(paths, x, y, patient, pose, projection);
+        addSharedOrganPaths(paths, x, y, patient, pose);
+      }
+      addPacemaker(paths, x, y, projection, simCase?.device === "pacemaker");
+
+      const attenuationScale = canonicalView ? (hasAtlas ? 1.06 : 1.04) : (hasAtlas ? .65 + thickness / 45 : .55 + thickness / 40);
+      const fallbackSoft = pathsToOD(paths, kvp) * attenuationScale;
+      const tissueAtlas = atlasTissueOD?.[i] ?? 0;
+      const physicalAtlasTissue = canonicalView && tissueAtlas > .00005 ? clamp(tissueAtlas, .00005, 6.5) : 0;
+      const softOd = canonicalView ? Math.max(.00005, physicalAtlasTissue > 0 ? physicalAtlasTissue : fallbackSoft) : fallbackSoft;
+      const boneDelta = atlasOD?.[i] ?? 0;
+      const od = Math.max(canonicalView ? .00005 : .01, softOd + boneDelta + pathologyDelta(pathologyId, x, y, projection));
+      const T = Math.exp(-od);
+      const boneMask = boneDelta > .006 || paths.bone > .15 || paths.cortical > .05 ? 1 : 0;
+      const trabFine = (fbm(x * 3.2, y * 3.2, seed + 31) - .5) * (canonicalView ? .005 : .018);
+      const trabCoarse = (fbm(x * .9, y * .9, seed + 37) - .5) * (canonicalView ? .003 : .012);
+      const softVar = (fbm(x * .45, y * .45, seed + 11) - .5) * (canonicalView ? .008 : .018) * ((tissueAtlas > .00005 || paths.soft > .08) ? 1 : 0);
+      const texture = 1 + boneMask * (trabFine + trabCoarse) + softVar;
+      const bodyHere = canonicalView ? physicalAtlasTissue > .00005 : (tissueAtlas > .0002 || paths.soft + paths.lung > .035 || boneDelta > .005);
+      if (bodyHere) bodyMask[i] = 1;
+      if (canonicalView && physicalAtlasTissue > .006 && boneDelta < .018) softWindowMask[i] = 1;
+      const localScatterScale = canonicalView ? (bodyHere ? .008 + .040 * (1 - Math.exp(-Math.max(0, softOd) * .70)) : .0005) : .5 + .5 * (paths.soft + paths.lung > 0 ? 1 : .15);
+      const scat = I0 * scatterFrac * localScatterScale;
+      const bodySignal = I0 * T * texture + scat;
+      const airSignal = I0 * 1.02 + I0 * scatterFrac * .00005;
+      let sig = canonicalView ? (bodyHere ? bodySignal : airSignal) : bodySignal;
+      if (!bodyHere) sig = airSignal;
+      signal[i] = sig;
+      sum += sig;
+    }
+
+    if (canonicalView) reportCanonicalLayers(atlasTissueOD, atlasOD, softWindowMask, projection);
+    const n = width * height;
+    const mean = sum / n;
+    const well = 280;
+    let satEstimate = 0;
+    for (let i = 0; i < n; i++) if (signal[i]! > well) satEstimate++;
+    assertFrameQuality(signal, width, height, satEstimate / n, mean, canonicalView ? .035 : .8);
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width; canvas.height = height;
+    const g = canvas.getContext("2d");
+    if (!g) throw new Error("Render failed — could not obtain 2D canvas context.");
+    const img = g.createImageData(width, height);
+    let sat = 0, noiseAcc = 0, contrastAcc = 0, contrastN = 0;
+    const logMean = Math.log(mean + 1e-5);
+    const contrastScale = clamp((kvp - 45) / 80, 0, 1);
+    const canonicalMaskCount = canonicalView ? softWindowMask.reduce((a, v) => a + (v ? 1 : 0), 0) : 0;
+    const canonicalMask = canonicalMaskCount > 128 ? softWindowMask : bodyMask;
+    const canonicalLow = canonicalView ? Math.log(percentileMasked(signal, canonicalMask, .02) + 1e-5) : 0;
+    const canonicalHigh = canonicalView ? Math.log(percentileMasked(signal, canonicalMask, .98) + 1e-5) : 1;
+    const canonicalSpan = Math.max(.18, canonicalHigh - canonicalLow);
+    const windowW = canonicalView ? Math.max(.68, canonicalSpan * 1.25) : 1.7 + contrastScale * 2.2;
+    const windowL = canonicalView ? canonicalLow + canonicalSpan * .52 : logMean + (mean > 100 ? .15 : mean < 10 ? -.25 : 0);
+    const baseNoise = .08 + .38 / Math.sqrt(Math.max(.5, mean / 40));
+    const noiseGain = canonicalView ? baseNoise * .28 : baseNoise;
+    const blurRadius = clamp(Math.round(geometry.geometricUnsharpnessMm * 1.25), 0, 3);
+    const blurWeight = blurRadius > 0 ? Math.min(.24, geometry.geometricUnsharpnessMm * .09) : 0;
+
+    for (let i = 0; i < n; i++) {
+      let sig = signal[i]!;
+      const nx = i % width, ny = i / width | 0;
+      if (blurRadius > 0 && nx > blurRadius && nx < width - blurRadius - 1 && ny > blurRadius && ny < height - blurRadius - 1) {
+        let neighbour = 0, count = 0;
+        for (let dy = -blurRadius; dy <= blurRadius; dy++) for (let dx = -blurRadius; dx <= blurRadius; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist > blurRadius + .25) continue;
+          const falloff = 1 / (1 + dist * dist);
+          neighbour += signal[(ny + dy) * width + nx + dx]! * falloff;
+          count += falloff;
+        }
+        if (count > 0) sig = sig * (1 - blurWeight) + neighbour / count * blurWeight;
+      }
+      const sigma = noiseGain / Math.sqrt(Math.max(.5, sig));
+      const nse = (fbm(nx * .42, ny * .42, seed + 4) - .5) * 2 * sigma * (canonicalView ? 1 : 3);
+      sig = Math.max(0, sig + nse);
+      noiseAcc += Math.abs(nse);
+      if (sig > well) { sig = well; sat++; }
+      const L = Math.log(sig + 1e-5);
+      let d = 1 - clamp((L - windowL) / windowW + .5, 0, 1);
+      if (kvp >= 100) d = canonicalView ? clamp((d - .5) * 1.015 + .5, 0, 1) : .08 + d * .84;
+      else if (kvp <= 55) d = clamp(d < .5 ? d * .9 : .5 + (d - .5) * 1.1, 0, 1);
+      let tone = clamp(d, 0, 1);
+      tone = tone * tone * (3 - 2 * tone);
+      if (canonicalView) tone = Math.pow(tone, .995);
+      const v = Math.round(tone * 255), o = i * 4;
+      img.data[o] = v; img.data[o + 1] = v; img.data[o + 2] = v; img.data[o + 3] = 255;
+      if (nx > 0) { contrastAcc += Math.abs(v - img.data[(i - 1) * 4]!); contrastN++; }
+    }
+
+    assertFrameQuality(signal, width, height, sat / n, mean, canonicalView ? .035 : .8);
+    const marker = exposure.marker === "L" || exposure.marker === "R" ? exposure.marker : "R";
+    stampMarker(img, width, height, marker, Math.round(width * .08), Math.round(height * .06));
+    g.putImageData(img, 0, 0);
+    const dataUrl = canvas.toDataURL("image/png");
+    const metrics = buildMetrics(mean, noiseAcc / n, contrastN ? contrastAcc / contrastN / 255 : 0, sat / n, patient, projection, exposure, tube);
+    const scores = scoreExposure({ patient, projection, pose, tube, exposure, metrics });
+    const overall = scores.reduce((a, c) => a + c.weight * gradeNum(c.grade), 0) / scores.reduce((a, c) => a + c.weight, 0);
+    const overallGrade = overall >= .85 ? "excellent" : overall >= .62 ? "acceptable" : "repeat";
+    if (atlasError && !hasAtlas) console.warn("[Bucky Lab] procedural fallback:", atlasError);
+    return { metrics, scores, overall, overallGrade, width, height, dataUrl };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.startsWith("Render failed")) throw err;
+    throw new Error(`Render failed — ${message}`);
+  }
+}
+
+function gradeNum(g: "excellent" | "acceptable" | "repeat") { return g === "excellent" ? 1 : g === "acceptable" ? .7 : .25; }
+function stampMarker(img: ImageData, w: number, h: number, letter: "L" | "R", x: number, y: number) {
+  const glyph = letter === "L" ? L_GLYPH : R_GLYPH, scale = 5;
+  const put = (px: number, py: number, v: number) => {
+    if (px < 0 || py < 0 || px >= w || py >= h) return;
+    const i = (py * w + px) * 4;
+    img.data[i] = v; img.data[i + 1] = v; img.data[i + 2] = v; img.data[i + 3] = 255;
+  };
+  for (let gy = 0; gy < glyph.length; gy++) for (let gx = 0; gx < glyph[gy]!.length; gx++) if (glyph[gy]![gx]) for (let sy = 0; sy < scale; sy++) for (let sx = 0; sx < scale; sx++) put(x + gx * scale + sx, y + gy * scale + sy, 245);
+}
+const L_GLYPH = [[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,1,1,1,1]], R_GLYPH = [[1,1,1,1,0],[1,0,0,0,1],[1,1,1,1,0],[1,0,1,0,0],[1,0,0,1,0]];
