@@ -116,9 +116,9 @@ function projectThickness(scene:THREE.Scene,atlas:LoadedAtlas,part:LoadedPart,ca
 function blur(src:Float32Array,w:number,h:number){const out=new Float32Array(src.length);for(let y=0;y<h;y++)for(let x=0;x<w;x++){let s=0,n=0;for(let yy=Math.max(0,y-1);yy<=Math.min(h-1,y+1);yy++)for(let xx=Math.max(0,x-1);xx<=Math.min(w-1,x+1);xx++){const wt=xx===x&&yy===y?8:xx===x||yy===y?1:.35;s+=src[yy*w+xx]!*wt;n+=wt;}out[y*w+x]=s/n;}return out;}
 function distanceToBoundary(src:Float32Array,w:number,h:number){const inf=1e6,d=new Float32Array(src.length);for(let i=0;i<d.length;i++)d[i]=src[i]>.001?inf:0;for(let y=0;y<h;y++)for(let x=0;x<w;x++){const i=y*w+x;if(!d[i])continue;let v=d[i]!;if(x)v=Math.min(v,d[i-1]!+1);if(y)v=Math.min(v,d[i-w]!+1);if(x&&y)v=Math.min(v,d[i-w-1]!+1.414);if(x<w-1&&y)v=Math.min(v,d[i-w+1]!+1.414);d[i]=v;}for(let y=h-1;y>=0;y--)for(let x=w-1;x>=0;x--){const i=y*w+x;if(!d[i])continue;let v=d[i]!;if(x<w-1)v=Math.min(v,d[i+1]!+1);if(y<h-1)v=Math.min(v,d[i+w]!+1);if(x<w-1&&y<h-1)v=Math.min(v,d[i+w+1]!+1.414);if(x&&y<h-1)v=Math.min(v,d[i+w-1]!+1.414);d[i]=v;}return d;}
 
-interface BoneProfile { gain:number; cap:number; shellPx:number; marrow:number; texture:number; overlap:number; }
-function profile(region:BoneRegion):BoneProfile{switch(region){case"skull":return{gain:.145,cap:.72,shellPx:1.45,marrow:.68,texture:.74,overlap:.30};case"pelvis":return{gain:.165,cap:.62,shellPx:1.55,marrow:.72,texture:.62,overlap:.34};case"axial":return{gain:.090,cap:.34,shellPx:1.05,marrow:.80,texture:.92,overlap:.46};case"rib":return{gain:.080,cap:.18,shellPx:.74,marrow:.80,texture:.98,overlap:.48};case"clavicle":return{gain:.155,cap:.38,shellPx:1.12,marrow:.58,texture:.52,overlap:.32};case"scapula":return{gain:.120,cap:.31,shellPx:1.02,marrow:.72,texture:.66,overlap:.34};case"femur":return{gain:.205,cap:.76,shellPx:1.55,marrow:.92,texture:.36,overlap:.32};case"lowerleg":return{gain:.182,cap:.64,shellPx:1.42,marrow:.92,texture:.40,overlap:.32};case"humerus":return{gain:.190,cap:.66,shellPx:1.48,marrow:.91,texture:.38,overlap:.32};case"forearm":return{gain:.170,cap:.55,shellPx:1.30,marrow:.91,texture:.42,overlap:.30};case"patella":return{gain:.155,cap:.36,shellPx:.96,marrow:.72,texture:.62,overlap:.28};case"hand":case"foot":return{gain:.168,cap:.35,shellPx:.58,marrow:.76,texture:.68,overlap:.24};default:return{gain:.160,cap:.42,shellPx:1.15,marrow:.66,texture:.56,overlap:.34};}}
-function bulkDensity(region:BoneRegion,name:string){const n=name.toLowerCase();if(region==="skull")return n.includes("mandible")?1.60:1.50;if(region==="rib")return 1.30;if(region==="humerus")return 1.40;if(region==="femur")return 1.33;if(region==="pelvis")return n.includes("sacrum")?1.25:1.20;if(region==="axial")return 1.24;if(region==="forearm"||region==="lowerleg")return 1.34;if(region==="hand"||region==="foot")return 1.22;if(region==="scapula"||region==="clavicle")return 1.28;return 1.20;}
+interface BoneProfile { gain:number; cap:number; shellPx:number; marrow:number; texture:number; overlap:number; heterogeneity:number; }
+function profile(region:BoneRegion):BoneProfile{switch(region){case"skull":return{gain:.136,cap:.60,shellPx:1.34,marrow:.72,texture:.86,overlap:.18,heterogeneity:.18};case"pelvis":return{gain:.154,cap:.56,shellPx:1.46,marrow:.76,texture:.72,overlap:.30,heterogeneity:.16};case"axial":return{gain:.078,cap:.28,shellPx:.96,marrow:.85,texture:1.08,overlap:.54,heterogeneity:.34};case"rib":return{gain:.068,cap:.15,shellPx:.68,marrow:.85,texture:1.12,overlap:.60,heterogeneity:.42};case"clavicle":return{gain:.150,cap:.36,shellPx:1.05,marrow:.62,texture:.60,overlap:.30,heterogeneity:.12};case"scapula":return{gain:.112,cap:.29,shellPx:.96,marrow:.76,texture:.76,overlap:.34,heterogeneity:.18};case"femur":return{gain:.195,cap:.70,shellPx:1.48,marrow:.95,texture:.44,overlap:.30,heterogeneity:.10};case"lowerleg":return{gain:.178,cap:.60,shellPx:1.34,marrow:.95,texture:.48,overlap:.30,heterogeneity:.10};case"humerus":return{gain:.184,cap:.62,shellPx:1.40,marrow:.94,texture:.46,overlap:.30,heterogeneity:.10};case"forearm":return{gain:.168,cap:.52,shellPx:1.22,marrow:.94,texture:.50,overlap:.28,heterogeneity:.12};case"patella":return{gain:.150,cap:.34,shellPx:.88,marrow:.74,texture:.72,overlap:.26,heterogeneity:.18};case"hand":case"foot":return{gain:.185,cap:.36,shellPx:.50,marrow:.72,texture:.82,overlap:.18,heterogeneity:.22};default:return{gain:.155,cap:.40,shellPx:1.08,marrow:.70,texture:.64,overlap:.32,heterogeneity:.14};}}
+function bulkDensity(region:BoneRegion,name:string){const n=name.toLowerCase();if(region==="skull")return n.includes("mandible")?1.60:n.includes("temporal")?1.58:1.47;if(region==="rib")return 1.27;if(region==="humerus")return 1.40;if(region==="femur")return 1.33;if(region==="pelvis")return n.includes("sacrum")?1.25:1.20;if(region==="axial")return 1.21;if(region==="forearm"||region==="lowerleg")return 1.34;if(region==="hand"||region==="foot")return 1.25;if(region==="scapula"||region==="clavicle")return 1.28;return 1.20;}
 function isLong(region:BoneRegion){return region==="femur"||region==="lowerleg"||region==="humerus"||region==="forearm";}
 function isFlat(region:BoneRegion){return region==="skull"||region==="pelvis"||region==="axial"||region==="scapula"||region==="rib";}
 
@@ -141,16 +141,49 @@ export async function projectAtlasSkeletalOD(args:{patient:Patient;projection:Pr
     const vs=`varying float vDepth;void main(){vec4 mv=modelViewMatrix*vec4(position,1.0);gl_Position=projectionMatrix*mv;vDepth=gl_Position.z/gl_Position.w*.5+.5;}`,fs=`varying float vDepth;vec3 packDepth24(float v){v=clamp(v,0.0,0.999999);vec3 enc=fract(v*vec3(1.0,255.0,65025.0));enc-=enc.yzz*vec3(1.0/255.0,1.0/255.0,0.0);return enc;}void main(){gl_FragColor=vec4(packDepth24(vDepth),1.0);}`;
     const fm=new THREE.ShaderMaterial({vertexShader:vs,fragmentShader:fs,side:THREE.FrontSide,depthTest:true,depthWrite:true}),bm=new THREE.ShaderMaterial({vertexShader:vs,fragmentShader:fs,side:THREE.BackSide,depthTest:true,depthWrite:true});
     const optical=new Float32Array(rw*rh),overlap=new Float32Array(rw*rh),muCort=linearAttenuation("corticalBone",exposureKvp),muTrab=linearAttenuation("trabecularBone",exposureKvp),muMarrow=linearAttenuation("adipose",exposureKvp),muSoft=linearAttenuation("soft",exposureKvp);
-    for(const part of atlas.parts){if(part.region==="other")continue;const raw=projectThickness(scene,atlas,part,camera,renderer,targetRT,fm,bm,rw,rh),smooth=blur(raw,rw,rh),distance=distanceToBoundary(raw,rw,rh),p=profile(part.region),long=isLong(part.region),flat=isFlat(part.region),small=part.region==="hand"||part.region==="foot"||part.region==="patella",densityScale=Math.max(.78,Math.min(1.32,bulkDensity(part.region,part.sourceName)/1.18)),seed=seedFor(part.sourceName);
-      for(let i=0;i<optical.length;i++){const r=raw[i]!;if(r<=0)continue;const projected=Math.min(p.cap,r*.94+smooth[i]!*.06),x=i%rw,y=(i/rw)|0,dist=distance[i]!,interior=clamp01((dist-p.shellPx*.25)/Math.max(.9,p.shellPx*3.0)),rim=1-interior,fine=noise(x,y,seed,small?2.4:3.8)-.5,mid=noise(x,y,seed^0x85ebca6b,small?5.4:8.2)-.5,coarse=noise(x,y,seed^0x9e3779b9,small?11:19)-.5,structure=clamp01(.5+fine*.50+mid*.34+coarse*.16),ripple=1+(structure-.5)*p.texture,regionalTrab=muMarrow+(muTrab-muMarrow)*densityScale;
-        let corticalFraction=flat?.055+.34*rim:.12+.46*rim;if(part.region==="skull")corticalFraction=.050+.30*rim;if(part.region==="axial"||part.region==="rib")corticalFraction=.036+.28*rim;if(long)corticalFraction=.115+.52*rim;if(small)corticalFraction=.085+.40*rim;
-        const corticalPath=Math.min(projected*.62,projected*corticalFraction),inner=Math.max(0,projected-corticalPath);let marrowFraction=flat?p.marrow*(.82+.30*interior):p.marrow*(.58+.42*interior);if(long)marrowFraction=p.marrow*(.10+.90*interior);if(small)marrowFraction=p.marrow*(.48+.50*interior);marrowFraction=clamp01(marrowFraction+(.5-structure)*(part.region==="axial"||part.region==="rib"?.34:flat?.24:small?.16:.10));
-        const marrowPath=inner*marrowFraction,trabPath=inner-marrowPath;const central=part.region==="skull"?1-.56*interior*(.44+.56*structure):part.region==="axial"||part.region==="rib"?1-.64*interior*(.40+.60*structure):flat?1-.50*interior*(.48+.52*structure):long?1-.62*interior*(.70+.30*structure):small?1-.28*interior*(.64+.36*structure):1;
-        const corticalDelta=Math.max(0,muCort-muSoft),trabDelta=Math.max(0,regionalTrab*ripple*central-muSoft),marrowDelta=muMarrow-muSoft,base=Math.max(0,(corticalPath*corticalDelta+trabPath*trabDelta+marrowPath*marrowDelta)*p.gain),scale=1/(1+overlap[i]!*p.overlap);optical[i]+=base*scale;overlap[i]+=Math.min(1,base/.022);
+    for(const part of atlas.parts){
+      if(part.region==="other")continue;
+      const raw=projectThickness(scene,atlas,part,camera,renderer,targetRT,fm,bm,rw,rh),smooth=blur(raw,rw,rh),distance=distanceToBoundary(raw,rw,rh),p=profile(part.region),long=isLong(part.region),flat=isFlat(part.region),small=part.region==="hand"||part.region==="foot"||part.region==="patella",densityScale=Math.max(.76,Math.min(1.34,bulkDensity(part.region,part.sourceName)/1.18)),seed=seedFor(part.sourceName);
+      for(let i=0;i<optical.length;i++){
+        const r=raw[i]!;if(r<=0)continue;
+        const projected=Math.min(p.cap,r*.94+smooth[i]!*.06),x=i%rw,y=(i/rw)|0,dist=distance[i]!;
+        const interior=clamp01((dist-p.shellPx*.20)/Math.max(.75,p.shellPx*3.15)),rim=1-interior;
+        const fine=noise(x,y,seed,small?2.0:3.5)-.5,mid=noise(x,y,seed^0x85ebca6b,small?4.8:7.6)-.5,coarse=noise(x,y,seed^0x9e3779b9,small?9:17)-.5,macro=noise(x,y,seed^0x27d4eb2d,small?15:29)-.5;
+        const structure=clamp01(.5+fine*.46+mid*.34+coarse*.20),ripple=1+(structure-.5)*p.texture+macro*p.heterogeneity,regionalTrab=muMarrow+(muTrab-muMarrow)*densityScale;
+
+        let corticalFraction=flat?.050+.32*Math.pow(rim,.82):.11+.47*Math.pow(rim,.76);
+        if(part.region==="skull")corticalFraction=.045+.29*Math.pow(rim,.76);
+        if(part.region==="axial"||part.region==="rib")corticalFraction=.030+.25*Math.pow(rim,.82);
+        if(long)corticalFraction=.095+.56*Math.pow(rim,.70);
+        if(small)corticalFraction=.075+.46*Math.pow(rim,.72);
+
+        const corticalPath=Math.min(projected*.66,projected*corticalFraction),inner=Math.max(0,projected-corticalPath),canal=long?Math.pow(interior,1.55):0;
+        let marrowFraction=flat?p.marrow*(.78+.24*interior):p.marrow*(.52+.46*interior);
+        if(long)marrowFraction=p.marrow*(.06+.94*Math.pow(interior,1.30));
+        if(small)marrowFraction=p.marrow*(.34+.54*interior);
+        marrowFraction=clamp01(marrowFraction+(.5-structure)*(part.region==="axial"||part.region==="rib"?.38:flat?.25:small?.15:.09));
+        const marrowPath=inner*marrowFraction,trabPath=inner-marrowPath;
+
+        let central=1;
+        if(part.region==="skull")central=1-.50*interior*(.34+.66*structure);
+        else if(part.region==="axial"||part.region==="rib")central=1-.73*interior*(.42+.58*structure);
+        else if(flat)central=1-.52*interior*(.44+.56*structure);
+        else if(long)central=1-.78*canal*(.70+.30*structure);
+        else if(small)central=1-.24*interior*(.58+.42*structure);
+
+        const corticalDelta=Math.max(0,muCort-muSoft),trabDelta=Math.max(0,regionalTrab*Math.max(.48,ripple)*Math.max(.12,central)-muSoft),marrowDelta=muMarrow-muSoft;
+        let regionalVariation=1;
+        if(part.region==="rib"||part.region==="axial")regionalVariation=.70+.58*structure+.12*coarse;
+        else if(part.region==="skull")regionalVariation=.84+.30*structure+.10*macro;
+        else if(small)regionalVariation=.90+.22*structure;
+        const materialOD=(corticalPath*corticalDelta+trabPath*trabDelta+marrowPath*marrowDelta)*p.gain*regionalVariation;
+        const base=Math.max(0,materialOD),scale=1/(1+overlap[i]!*p.overlap);
+        optical[i]+=base*scale;
+        overlap[i]+=Math.min(1,base/.020);
       }
     }
     for(const p of atlas.parts)p.mesh.visible=true;scene.overrideMaterial=null;renderer.dispose();targetRT.dispose();fm.dispose();bm.dispose();
-    const full=new Float32Array(width*height);for(let y=0;y<height;y++){const sy=(1-y/Math.max(1,height-1))*(rh-1),y0=Math.floor(sy),y1=Math.min(rh-1,y0+1),fy=sy-y0;for(let x=0;x<width;x++){const sx=x/Math.max(1,width-1)*(rw-1),x0=Math.floor(sx),x1=Math.min(rw-1,x0+1),fx=sx-x0,a=optical[y0*rw+x0]!,b=optical[y0*rw+x1]!,c=optical[y1*rw+x0]!,d=optical[y1*rw+x1]!;full[y*width+x]=Math.min(.24,a*(1-fx)*(1-fy)+b*fx*(1-fy)+c*(1-fx)*fy+d*fx*fy);}}
+    const full=new Float32Array(width*height);for(let y=0;y<height;y++){const sy=(1-y/Math.max(1,height-1))*(rh-1),y0=Math.floor(sy),y1=Math.min(rh-1,y0+1),fy=sy-y0;for(let x=0;x<width;x++){const sx=x/Math.max(1,width-1)*(rw-1),x0=Math.floor(sx),x1=Math.min(rw-1,x0+1),fx=sx-x0,a=optical[y0*rw+x0]!,b=optical[y0*rw+x1]!,c=optical[y1*rw+x0]!,d=optical[y1*rw+x1]!;full[y*width+x]=Math.min(.235,a*(1-fx)*(1-fy)+b*fx*(1-fy)+c*(1-fx)*fy+d*fx*fy);}}
     return full;
   }catch(err){console.warn("[Bucky Lab] Unified skeletal atlas projection failed",err);return null;}
 }
