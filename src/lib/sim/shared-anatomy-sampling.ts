@@ -45,6 +45,26 @@ export function addSharedOrganPaths(
       const heartWeight = lateral ? 2.45 : 2.15;
       paths.soft += shape * heartWeight;
       paths.lung *= Math.max(0.24, 1 - shape * 0.66);
+    } else if (organ.id === "liver") {
+      // Focused abdomen/lumbar/pelvis views now inherit the same broad organ
+      // superimposition principle as the whole-body renderer instead of a
+      // homogeneous abdominal soft-tissue block.
+      paths.soft += shape * organ.depthCm * scale * (lateral ? 0.105 : 0.082);
+    } else if (organ.id === "stomach") {
+      paths.soft += shape * organ.depthCm * scale * (lateral ? 0.050 : 0.038);
+      const gas = softEllipse(
+        xr,
+        y,
+        ox + (lateral ? -0.35 : -0.55) * scale,
+        oy - 0.35 * scale,
+        Math.max(0.45, ow * 0.40),
+        Math.max(0.35, oh * 0.27),
+        0.08,
+        0.20,
+      );
+      paths.gas += gas * (lateral ? 1.10 : 0.82);
+    } else if (organ.id === "kidney-right" || organ.id === "kidney-left") {
+      paths.soft += shape * organ.depthCm * scale * (lateral ? 0.070 : 0.055);
     }
   }
 
