@@ -43,7 +43,22 @@ export function fbm(x: number, y: number, seed = 1): number {
   return s;
 }
 
-/** 1 inside, 0 outside, soft rim. */
+/**
+ * Approximate the relative ray path through an ellipsoidal structure.
+ *
+ * The old anatomy primitives returned a broad flat value of 1 across most of
+ * every structure. That was convenient for masks, but produced the segmented
+ * / CG appearance seen when an individual test area was compared with the
+ * atlas whole-body radiograph. A radiograph records integrated path length:
+ * rays through the centre of a rounded structure travel farther than tangential
+ * rays. The chord term below preserves the existing footprint and peak value
+ * while introducing that physically useful depth gradient.
+ */
+function chordProfile(q: number): number {
+  return 0.58 + 0.42 * Math.sqrt(Math.max(0, 1 - q));
+}
+
+/** 1 at the deepest centre, 0 outside, with a depth-dependent soft rim. */
 export function softEllipse(
   x: number,
   y: number,
@@ -60,11 +75,13 @@ export function softEllipse(
   const s = Math.sin(rot);
   const dx = (c * dx0 + s * dy0) / Math.max(0.01, rx);
   const dy = (-s * dx0 + c * dy0) / Math.max(0.01, ry);
-  const d = dx * dx + dy * dy;
-  if (d >= 1) return 0;
+  const q = dx * dx + dy * dy;
+  if (q >= 1) return 0;
+
   const inner = (1 - edge) * (1 - edge);
-  if (d <= inner) return 1;
-  return 1 - smoothstep(inner, 1, d);
+  const depth = chordProfile(q);
+  if (q <= inner) return depth;
+  return depth * (1 - smoothstep(inner, 1, q));
 }
 
 export function softCapsule(
@@ -85,9 +102,16 @@ export function softCapsule(
   const py = y1 + vy * t;
   const d = Math.hypot(x - px, y - py);
   if (d >= r) return 0;
-  const inner = r * (1 - edge);
-  if (d <= inner) return 1;
-  return 1 - smoothstep(inner, r, d);
+
+  const q = (d / Math.max(0.01, r)) ** 2;
+  const inner = (1 - edge) * (1 - edge);
+  const radialDepth = chordProfile(q);
+  // A small longitudinal depth change prevents long bones and vessels from
+  // becoming perfectly uniform translucent columns without changing geometry.
+  const axialDepth = l2 < 1e-8 ? 1 : 0.94 + 0.06 * (1 - Math.abs(t * 2 - 1));
+  const depth = radialDepth * axialDepth;
+  if (q <= inner) return depth;
+  return depth * (1 - smoothstep(inner, 1, q));
 }
 
 export function rimEllipse(
@@ -100,7 +124,11 @@ export function rimEllipse(
   thickness: number,
   rot = 0,
 ): number {
-  const outer = softEllipse(x, y, cx, cy, rx, ry, rot, 0.2);
-  const inner = softEllipse(x, y, cx, cy, rx - thickness, ry - thickness, rot, 0.25);
-  return Math.max(0, outer - inner * 0.92);
+  const outer = softEllipse(x, y, cx, cy, rx, ry, rot, 0.16);
+  const innerRx = Math.max(0.02, rx - thickness);
+  const innerRy = Math.max(0.02, ry - thickness);
+  const inner = softEllipse(x, y, cx, cy, innerRx, innerRy, rot, 0.20);
+  // Retain a little central shell contribution to mimic superimposed cortices,
+  // but keep the strongest response at tangential cortical margins.
+  return Math.max(0, outer - inner * 0.86);
 }
