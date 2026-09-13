@@ -3,49 +3,194 @@ import type { Patient, Projection, TubeState } from "./types";
 import type { ProjectionGeometry } from "./projection-physics";
 import { linearAttenuation } from "./nist-attenuation";
 
-const MODEL_ROOT="/models/human-atlas/";
-const ATLAS_HEIGHT_M=1.7;
-const SYSTEMS=new Set(["integumentary","muscular","respiratory","cardiac","digestive","urinary","arterial","venous","lymphatic","nervous"]);
+const MODEL_ROOT = "/models/human-atlas/";
+const ATLAS_HEIGHT_M = 1.7;
+const SYSTEMS = new Set(["integumentary","muscular","respiratory","cardiac","digestive","urinary","arterial","venous","lymphatic","nervous"]);
 
-interface AtlasPart{name:string;system:string;chunk:number;positions:number;normals:number;indices:number;vertexCount:number;indexCount:number;bounds:[number[],number[]];}
-interface AtlasManifest{parts:AtlasPart[];chunks:{url:string;bytes:number}[];}
-interface LoadedPart{mesh:THREE.Mesh;system:string;name:string;}
-interface TissueAtlas{root:THREE.Group;parts:LoadedPart[];}
-let cache:Promise<TissueAtlas>|null=null;
+interface AtlasPart { name:string; system:string; chunk:number; positions:number; normals:number; indices:number; vertexCount:number; indexCount:number; bounds:[number[],number[]]; }
+interface AtlasManifest { parts:AtlasPart[]; chunks:{url:string;bytes:number}[]; }
+interface LoadedPart { mesh:THREE.Mesh; system:string; name:string; }
+interface TissueAtlas { root:THREE.Group; parts:LoadedPart[]; }
+let cache: Promise<TissueAtlas> | null = null;
 
-async function loadAtlas():Promise<TissueAtlas>{
-  if(cache)return cache;
-  cache=(async()=>{
-    const response=await fetch(`${MODEL_ROOT}atlas.json`,{cache:"force-cache"});if(!response.ok)throw new Error(`Tissue atlas manifest failed (${response.status}).`);
-    const manifest=await response.json() as AtlasManifest,selected=manifest.parts.filter(p=>SYSTEMS.has(p.system)),chunks=new Map<number,ArrayBuffer>();
-    await Promise.all([...new Set(selected.map(p=>p.chunk))].map(async i=>{const c=manifest.chunks[i];if(!c)throw new Error(`Atlas chunk ${i} missing.`);const r=await fetch(c.url,{cache:"force-cache"});if(!r.ok)throw new Error(`Atlas chunk ${i} failed.`);const b=await r.arrayBuffer();if(b.byteLength!==c.bytes)throw new Error(`Atlas chunk ${i} incomplete.`);chunks.set(i,b);}));
-    const root=new THREE.Group(),parts:LoadedPart[]=[];
-    for(const part of selected){const buffer=chunks.get(part.chunk);if(!buffer)continue;const g=new THREE.BufferGeometry();g.setAttribute("position",new THREE.BufferAttribute(new Float32Array(buffer,part.positions,part.vertexCount*3),3));g.setAttribute("normal",new THREE.BufferAttribute(new Int16Array(buffer,part.normals,part.vertexCount*3),3,true));g.setIndex(new THREE.BufferAttribute(new Uint32Array(buffer,part.indices,part.indexCount),1));const c=new THREE.Vector3((part.bounds[0][0]+part.bounds[1][0])*.5,(part.bounds[0][1]+part.bounds[1][1])*.5,(part.bounds[0][2]+part.bounds[1][2])*.5);g.translate(-c.x,-c.y,-c.z);const mesh=new THREE.Mesh(g);mesh.position.copy(c);mesh.name=part.name;root.add(mesh);parts.push({mesh,system:part.system,name:part.name});}
-    return{root,parts};
-  })();return cache;
+async function loadAtlas(): Promise<TissueAtlas> {
+  if (cache) return cache;
+  cache = (async () => {
+    const response = await fetch(`${MODEL_ROOT}atlas.json`, { cache: "force-cache" });
+    if (!response.ok) throw new Error(`Tissue atlas manifest failed (${response.status}).`);
+    const manifest = await response.json() as AtlasManifest;
+    const selected = manifest.parts.filter(p => SYSTEMS.has(p.system));
+    const chunks = new Map<number, ArrayBuffer>();
+    await Promise.all([...new Set(selected.map(p => p.chunk))].map(async i => {
+      const c = manifest.chunks[i]; if (!c) throw new Error(`Atlas chunk ${i} missing.`);
+      const r = await fetch(c.url, { cache: "force-cache" }); if (!r.ok) throw new Error(`Atlas chunk ${i} failed.`);
+      const b = await r.arrayBuffer(); if (b.byteLength !== c.bytes) throw new Error(`Atlas chunk ${i} incomplete.`);
+      chunks.set(i, b);
+    }));
+    const root = new THREE.Group(), parts: LoadedPart[] = [];
+    for (const part of selected) {
+      const buffer = chunks.get(part.chunk); if (!buffer) continue;
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(buffer, part.positions, part.vertexCount * 3), 3));
+      g.setAttribute("normal", new THREE.BufferAttribute(new Int16Array(buffer, part.normals, part.vertexCount * 3), 3, true));
+      g.setIndex(new THREE.BufferAttribute(new Uint32Array(buffer, part.indices, part.indexCount), 1));
+      const c = new THREE.Vector3((part.bounds[0][0] + part.bounds[1][0]) * .5, (part.bounds[0][1] + part.bounds[1][1]) * .5, (part.bounds[0][2] + part.bounds[1][2]) * .5);
+      g.translate(-c.x, -c.y, -c.z);
+      const mesh = new THREE.Mesh(g); mesh.position.copy(c); mesh.name = part.name; root.add(mesh);
+      parts.push({ mesh, system: part.system, name: part.name });
+    }
+    return { root, parts };
+  })();
+  return cache;
 }
-function clamp01(v:number){return Math.max(0,Math.min(1,v));}
-function smoothstep(a:number,b:number,v:number){const t=clamp01((v-a)/Math.max(1e-6,b-a));return t*t*(3-2*t);}
-function unpackDepth(buf:Uint8Array,j:number){return buf[j]!/255+buf[j+1]!/65025+buf[j+2]!/16581375;}
 
-function projectVisible(scene:THREE.Scene,atlas:TissueAtlas,test:(p:LoadedPart)=>boolean,camera:THREE.OrthographicCamera,renderer:THREE.WebGLRenderer,target:THREE.WebGLRenderTarget,fm:THREE.ShaderMaterial,bm:THREE.ShaderMaterial,w:number,h:number){for(const p of atlas.parts)p.mesh.visible=test(p);atlas.root.updateMatrixWorld(true);const f=new Uint8Array(w*h*4),b=new Uint8Array(w*h*4);scene.overrideMaterial=fm;renderer.setRenderTarget(target);renderer.clear(true,true,true);renderer.render(scene,camera);renderer.readRenderTargetPixels(target,0,0,w,h,f);scene.overrideMaterial=bm;renderer.clear(true,true,true);renderer.render(scene,camera);renderer.readRenderTargetPixels(target,0,0,w,h,b);const out=new Float32Array(w*h),range=camera.far-camera.near;for(let i=0;i<out.length;i++){const j=i*4,a=unpackDepth(f,j),z=unpackDepth(b,j);if(a>=.9999||z>=.9999)continue;const cm=Math.abs(z-a)*range*100;if(cm>.001&&cm<60)out[i]=cm;}return out;}
-function projectParts(scene:THREE.Scene,atlas:TissueAtlas,test:(p:LoadedPart)=>boolean,camera:THREE.OrthographicCamera,renderer:THREE.WebGLRenderer,target:THREE.WebGLRenderTarget,fm:THREE.ShaderMaterial,bm:THREE.ShaderMaterial,w:number,h:number,partCap:number,totalCap:number){const selected=atlas.parts.filter(test),sum=new Float32Array(w*h);for(const part of selected){const t=projectVisible(scene,atlas,p=>p===part,camera,renderer,target,fm,bm,w,h);for(let i=0;i<sum.length;i++)sum[i]=Math.min(totalCap,sum[i]!+Math.min(partCap,t[i]!));}return sum;}
-function blur(src:Float32Array,w:number,h:number,passes=1){let cur=src;for(let p=0;p<passes;p++){const tmp=new Float32Array(src.length),out=new Float32Array(src.length);for(let y=0;y<h;y++)for(let x=0;x<w;x++){let s=0,n=0;for(let d=-1;d<=1;d++){const xx=Math.max(0,Math.min(w-1,x+d)),wt=d===0?2:1;s+=cur[y*w+xx]!*wt;n+=wt;}tmp[y*w+x]=s/n;}for(let y=0;y<h;y++)for(let x=0;x<w;x++){let s=0,n=0;for(let d=-1;d<=1;d++){const yy=Math.max(0,Math.min(h-1,y+d)),wt=d===0?2:1;s+=tmp[yy*w+x]!*wt;n+=wt;}out[y*w+x]=s/n;}cur=out;}return cur;}
-function sample(src:Float32Array,sw:number,sh:number,x:number,y:number){x=Math.max(0,Math.min(sw-1,x));y=Math.max(0,Math.min(sh-1,y));const x0=Math.floor(x),x1=Math.min(sw-1,x0+1),y0=Math.floor(y),y1=Math.min(sh-1,y0+1),fx=x-x0,fy=y-y0,a=src[y0*sw+x0]!,b=src[y0*sw+x1]!,c=src[y1*sw+x0]!,d=src[y1*sw+x1]!;return a*(1-fx)*(1-fy)+b*fx*(1-fy)+c*(1-fx)*fy+d*fx*fy;}
+function clamp01(v:number) { return Math.max(0, Math.min(1, v)); }
+function unpackDepth(buf:Uint8Array,j:number) { return buf[j]! / 255 + buf[j + 1]! / 65025 + buf[j + 2]! / 16581375; }
 
-export async function projectAtlasTissueOD(args:{patient:Patient;projection:Projection;tube:TubeState;exposureKvp:number;width:number;height:number;geometry:ProjectionGeometry;wholeBody?:boolean;}):Promise<Float32Array|null>{
-  if(typeof document==="undefined"||typeof window==="undefined")return null;
-  const{patient,projection,tube,exposureKvp,width,height,geometry,wholeBody=false}=args;
-  try{
-    const atlas=await loadAtlas();atlas.root.position.set(0,0,0);atlas.root.rotation.set(0,0,0);atlas.root.quaternion.identity();atlas.root.scale.setScalar(patient.heightCm/100/ATLAS_HEIGHT_M);for(const p of atlas.parts){p.mesh.visible=true;p.mesh.quaternion.identity();}
-    atlas.root.updateMatrixWorld(true);const bounds=new THREE.Box3().setFromObject(atlas.root),centre=bounds.getCenter(new THREE.Vector3());centre.x=0;
-    const rw=Math.min(448,Math.max(192,width)),rh=Math.min(896,Math.max(320,height));let target=centre.clone();if(!wholeBody){const targetYcm=projection.cr.y*patient.heightCm/170;target=new THREE.Vector3(projection.cr.x/100,patient.heightCm/100-targetYcm/100,0);}
-    const lateral=projection.anatomy==="torso-lat"||projection.anatomy==="cspine-lat"||projection.anatomy==="skull-lat";
-    const camera=new THREE.OrthographicCamera(0,1,1,0,.01,5),halfW=tube.collimationW/geometry.magnification/200,halfH=tube.collimationH/geometry.magnification/200;camera.left=-halfW;camera.right=halfW;camera.top=halfH;camera.bottom=-halfH;camera.position.copy(lateral?new THREE.Vector3(target.x+2.5,target.y,target.z):new THREE.Vector3(target.x,target.y,target.z+2.5));camera.lookAt(target);camera.updateProjectionMatrix();
-    const renderer=new THREE.WebGLRenderer({antialias:false,alpha:false,preserveDrawingBuffer:false});renderer.setSize(rw,rh,false);renderer.setPixelRatio(1);renderer.outputColorSpace=THREE.LinearSRGBColorSpace;renderer.setClearColor(0xffffff,1);const scene=new THREE.Scene();scene.background=new THREE.Color(0xffffff);scene.add(atlas.root);const rt=new THREE.WebGLRenderTarget(rw,rh,{format:THREE.RGBAFormat,type:THREE.UnsignedByteType,depthBuffer:true,stencilBuffer:false});const vs=`varying float vDepth;void main(){vec4 mv=modelViewMatrix*vec4(position,1.0);gl_Position=projectionMatrix*mv;vDepth=gl_Position.z/gl_Position.w*.5+.5;}`,fs=`varying float vDepth;vec3 packDepth24(float v){v=clamp(v,0.0,0.999999);vec3 enc=fract(v*vec3(1.0,255.0,65025.0));enc-=enc.yzz*vec3(1.0/255.0,1.0/255.0,0.0);return enc;}void main(){gl_FragColor=vec4(packDepth24(vDepth),1.0);}`,fm=new THREE.ShaderMaterial({vertexShader:vs,fragmentShader:fs,side:THREE.FrontSide,depthTest:true,depthWrite:true}),bm=new THREE.ShaderMaterial({vertexShader:vs,fragmentShader:fs,side:THREE.BackSide,depthTest:true,depthWrite:true});
-    const skin=blur(projectVisible(scene,atlas,p=>p.system==="integumentary",camera,renderer,rt,fm,bm,rw,rh),rw,rh,3),muscle=blur(projectVisible(scene,atlas,p=>p.system==="muscular",camera,renderer,rt,fm,bm,rw,rh),rw,rh,2),lung=blur(projectParts(scene,atlas,p=>p.system==="respiratory"&&/lung/i.test(p.name),camera,renderer,rt,fm,bm,rw,rh,32,40),rw,rh,1),heart=blur(projectParts(scene,atlas,p=>p.system==="cardiac",camera,renderer,rt,fm,bm,rw,rh,11,15),rw,rh,2),vessels=blur(projectParts(scene,atlas,p=>p.system==="arterial"||p.system==="venous",camera,renderer,rt,fm,bm,rw,rh,.7,3.2),rw,rh,3),digestive=blur(projectParts(scene,atlas,p=>p.system==="digestive",camera,renderer,rt,fm,bm,rw,rh,9,24),rw,rh,2),urinary=blur(projectParts(scene,atlas,p=>p.system==="urinary",camera,renderer,rt,fm,bm,rw,rh,8,14),rw,rh,2),brain=blur(projectParts(scene,atlas,p=>p.system==="nervous"&&/brain|cerebr|encephal/i.test(p.name),camera,renderer,rt,fm,bm,rw,rh,15,19),rw,rh,2),diaphragm=blur(projectParts(scene,atlas,p=>p.system==="muscular"&&/diaphragm/i.test(p.name),camera,renderer,rt,fm,bm,rw,rh,3,5),rw,rh,2);
-    const muSoft=linearAttenuation("soft",exposureKvp),muFat=linearAttenuation("adipose",exposureKvp),muLung=linearAttenuation("inflatedLung",exposureKvp),muMuscle=linearAttenuation("muscle",exposureKvp),muBlood=linearAttenuation("blood",exposureKvp),muBrain=linearAttenuation("brain",exposureKvp),out=new Float32Array(rw*rh);
-    for(let i=0;i<out.length;i++){const body=skin[i]!;if(body<=.003)continue;const musclePath=Math.min(body*.64,muscle[i]!*0.45),fatPath=Math.min(body*.22,Math.max(body*.05,(body-musclePath)*.22)),internal=Math.max(0,body-musclePath-fatPath),lungPath=Math.min(internal*.97,lung[i]!*0.98),afterLung=Math.max(0,internal-lungPath),brainPath=Math.min(afterLung,brain[i]!*0.90),heartPath=Math.min(Math.max(0,afterLung-brainPath),heart[i]!*0.90),vesselPath=Math.min(Math.max(0,afterLung-brainPath-heartPath),vessels[i]!*0.18),organCapacity=Math.max(0,afterLung-brainPath-heartPath-vesselPath),digestivePath=Math.min(organCapacity*.70,digestive[i]!*0.38),urinaryPath=Math.min(Math.max(0,organCapacity-digestivePath)*.55,urinary[i]!*0.48),generalSoft=Math.max(0,organCapacity-digestivePath-urinaryPath),lungInterstitial=lungPath*.025,aerated=Math.max(0,lungPath-lungInterstitial),diaphragmPath=Math.min(internal*.24,diaphragm[i]!*0.70);out[i]=Math.max(0,(fatPath*muFat+musclePath*muMuscle+generalSoft*muSoft+aerated*muLung+lungInterstitial*muSoft+brainPath*muBrain+heartPath*muBlood+vesselPath*muBlood+digestivePath*muSoft*1.035+urinaryPath*muSoft*1.07+diaphragmPath*Math.max(0,muMuscle-muLung)*.52)*.72);}
-    for(const p of atlas.parts)p.mesh.visible=true;scene.overrideMaterial=null;renderer.dispose();rt.dispose();fm.dispose();bm.dispose();const full=new Float32Array(width*height);for(let y=0;y<height;y++){const sy=(1-y/Math.max(1,height-1))*(rh-1);for(let x=0;x<width;x++){const sx=x/Math.max(1,width-1)*(rw-1);full[y*width+x]=sample(out,rw,rh,sx,sy);}}return full;
-  }catch(err){console.warn("[Bucky Lab] Unified tissue atlas projection failed",err);return null;}
+function projectVisible(scene:THREE.Scene, atlas:TissueAtlas, test:(p:LoadedPart)=>boolean, camera:THREE.OrthographicCamera, renderer:THREE.WebGLRenderer, target:THREE.WebGLRenderTarget, fm:THREE.ShaderMaterial, bm:THREE.ShaderMaterial, w:number, h:number) {
+  for (const p of atlas.parts) p.mesh.visible = test(p);
+  atlas.root.updateMatrixWorld(true);
+  const f = new Uint8Array(w * h * 4), b = new Uint8Array(w * h * 4);
+  scene.overrideMaterial = fm; renderer.setRenderTarget(target); renderer.clear(true,true,true); renderer.render(scene,camera); renderer.readRenderTargetPixels(target,0,0,w,h,f);
+  scene.overrideMaterial = bm; renderer.clear(true,true,true); renderer.render(scene,camera); renderer.readRenderTargetPixels(target,0,0,w,h,b);
+  const out = new Float32Array(w * h), range = camera.far - camera.near;
+  for (let i = 0; i < out.length; i++) {
+    const j = i * 4, a = unpackDepth(f,j), z = unpackDepth(b,j);
+    if (a >= .9999 || z >= .9999) continue;
+    const cm = Math.abs(z - a) * range * 100;
+    if (cm > .001 && cm < 60) out[i] = cm;
+  }
+  return out;
+}
+
+function projectParts(scene:THREE.Scene, atlas:TissueAtlas, test:(p:LoadedPart)=>boolean, camera:THREE.OrthographicCamera, renderer:THREE.WebGLRenderer, target:THREE.WebGLRenderTarget, fm:THREE.ShaderMaterial, bm:THREE.ShaderMaterial, w:number, h:number, partCap:number, totalCap:number) {
+  const selected = atlas.parts.filter(test), sum = new Float32Array(w * h);
+  for (const part of selected) {
+    const t = projectVisible(scene, atlas, p => p === part, camera, renderer, target, fm, bm, w, h);
+    for (let i = 0; i < sum.length; i++) sum[i] = Math.min(totalCap, sum[i]! + Math.min(partCap, t[i]!));
+  }
+  return sum;
+}
+
+function blur(src:Float32Array,w:number,h:number,passes=1) {
+  let cur = src;
+  for (let p = 0; p < passes; p++) {
+    const tmp = new Float32Array(src.length), out = new Float32Array(src.length);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      let s = 0, n = 0;
+      for (let d = -1; d <= 1; d++) { const xx = Math.max(0, Math.min(w - 1, x + d)), wt = d === 0 ? 2 : 1; s += cur[y * w + xx]! * wt; n += wt; }
+      tmp[y * w + x] = s / n;
+    }
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      let s = 0, n = 0;
+      for (let d = -1; d <= 1; d++) { const yy = Math.max(0, Math.min(h - 1, y + d)), wt = d === 0 ? 2 : 1; s += tmp[yy * w + x]! * wt; n += wt; }
+      out[y * w + x] = s / n;
+    }
+    cur = out;
+  }
+  return cur;
+}
+function sample(src:Float32Array,sw:number,sh:number,x:number,y:number) {
+  x = Math.max(0, Math.min(sw - 1, x)); y = Math.max(0, Math.min(sh - 1, y));
+  const x0 = Math.floor(x), x1 = Math.min(sw - 1, x0 + 1), y0 = Math.floor(y), y1 = Math.min(sh - 1, y0 + 1), fx = x - x0, fy = y - y0;
+  const a = src[y0 * sw + x0]!, b = src[y0 * sw + x1]!, c = src[y1 * sw + x0]!, d = src[y1 * sw + x1]!;
+  return a * (1 - fx) * (1 - fy) + b * fx * (1 - fy) + c * (1 - fx) * fy + d * fx * fy;
+}
+
+export async function projectAtlasTissueOD(args:{patient:Patient;projection:Projection;tube:TubeState;exposureKvp:number;width:number;height:number;geometry:ProjectionGeometry;wholeBody?:boolean;}):Promise<Float32Array|null> {
+  if (typeof document === "undefined" || typeof window === "undefined") return null;
+  const { patient, projection, tube, exposureKvp, width, height, geometry, wholeBody = false } = args;
+  try {
+    const atlas = await loadAtlas();
+    atlas.root.position.set(0,0,0); atlas.root.rotation.set(0,0,0); atlas.root.quaternion.identity(); atlas.root.scale.setScalar(patient.heightCm / 100 / ATLAS_HEIGHT_M);
+    for (const p of atlas.parts) { p.mesh.visible = true; p.mesh.quaternion.identity(); }
+    atlas.root.updateMatrixWorld(true);
+    const bounds = new THREE.Box3().setFromObject(atlas.root), centre = bounds.getCenter(new THREE.Vector3()); centre.x = 0;
+    const rw = Math.min(512, Math.max(224, width)), rh = Math.min(1024, Math.max(384, height));
+    let target = centre.clone();
+    if (!wholeBody) { const targetYcm = projection.cr.y * patient.heightCm / 170; target = new THREE.Vector3(projection.cr.x / 100, patient.heightCm / 100 - targetYcm / 100, 0); }
+    const lateral = projection.anatomy === "torso-lat" || projection.anatomy === "cspine-lat" || projection.anatomy === "skull-lat";
+    const camera = new THREE.OrthographicCamera(0,1,1,0,.01,5), halfW = tube.collimationW / geometry.magnification / 200, halfH = tube.collimationH / geometry.magnification / 200;
+    camera.left = -halfW; camera.right = halfW; camera.top = halfH; camera.bottom = -halfH;
+    camera.position.copy(lateral ? new THREE.Vector3(target.x + 2.5, target.y, target.z) : new THREE.Vector3(target.x, target.y, target.z + 2.5));
+    camera.lookAt(target); camera.updateProjectionMatrix();
+
+    const renderer = new THREE.WebGLRenderer({ antialias:false, alpha:false, preserveDrawingBuffer:false }); renderer.setSize(rw,rh,false); renderer.setPixelRatio(1); renderer.outputColorSpace = THREE.LinearSRGBColorSpace; renderer.setClearColor(0xffffff,1);
+    const scene = new THREE.Scene(); scene.background = new THREE.Color(0xffffff); scene.add(atlas.root);
+    const rt = new THREE.WebGLRenderTarget(rw,rh,{format:THREE.RGBAFormat,type:THREE.UnsignedByteType,depthBuffer:true,stencilBuffer:false});
+    const vs = `varying float vDepth;void main(){vec4 mv=modelViewMatrix*vec4(position,1.0);gl_Position=projectionMatrix*mv;vDepth=gl_Position.z/gl_Position.w*.5+.5;}`;
+    const fs = `varying float vDepth;vec3 packDepth24(float v){v=clamp(v,0.0,0.999999);vec3 enc=fract(v*vec3(1.0,255.0,65025.0));enc-=enc.yzz*vec3(1.0/255.0,1.0/255.0,0.0);return enc;}void main(){gl_FragColor=vec4(packDepth24(vDepth),1.0);}`;
+    const fm = new THREE.ShaderMaterial({vertexShader:vs,fragmentShader:fs,side:THREE.FrontSide,depthTest:true,depthWrite:true}), bm = new THREE.ShaderMaterial({vertexShader:vs,fragmentShader:fs,side:THREE.BackSide,depthTest:true,depthWrite:true});
+
+    const skin = blur(projectVisible(scene,atlas,p => p.system === "integumentary",camera,renderer,rt,fm,bm,rw,rh),rw,rh,2);
+    const muscle = blur(projectVisible(scene,atlas,p => p.system === "muscular" && !/diaphragm/i.test(p.name),camera,renderer,rt,fm,bm,rw,rh),rw,rh,2);
+    const lung = blur(projectParts(scene,atlas,p => p.system === "respiratory" && /lung/i.test(p.name),camera,renderer,rt,fm,bm,rw,rh,32,42),rw,rh,1);
+    const heart = blur(projectParts(scene,atlas,p => p.system === "cardiac",camera,renderer,rt,fm,bm,rw,rh,12,18),rw,rh,1);
+    const vessels = blur(projectParts(scene,atlas,p => p.system === "arterial" || p.system === "venous",camera,renderer,rt,fm,bm,rw,rh,.8,3.8),rw,rh,2);
+    const digestive = blur(projectParts(scene,atlas,p => p.system === "digestive",camera,renderer,rt,fm,bm,rw,rh,10,26),rw,rh,1);
+    const urinary = blur(projectParts(scene,atlas,p => p.system === "urinary",camera,renderer,rt,fm,bm,rw,rh,9,16),rw,rh,1);
+    const brain = blur(projectParts(scene,atlas,p => p.system === "nervous" && /brain|cerebr|encephal/i.test(p.name),camera,renderer,rt,fm,bm,rw,rh,16,20),rw,rh,1);
+    const diaphragm = blur(projectParts(scene,atlas,p => p.system === "muscular" && /diaphragm/i.test(p.name),camera,renderer,rt,fm,bm,rw,rh,4,6),rw,rh,1);
+
+    const muSoft = linearAttenuation("soft",exposureKvp), muFat = linearAttenuation("adipose",exposureKvp), muLung = linearAttenuation("inflatedLung",exposureKvp), muMuscle = linearAttenuation("muscle",exposureKvp), muBlood = linearAttenuation("blood",exposureKvp), muBrain = linearAttenuation("brain",exposureKvp);
+    const out = new Float32Array(rw * rh);
+    for (let i = 0; i < out.length; i++) {
+      const body = skin[i]!; if (body <= .003) continue;
+      // The integumentary shell defines the total ray path. All internal materials replace portions
+      // of that path; no organ is allowed to add thickness outside the body envelope.
+      const musclePath = Math.min(body * .50, muscle[i]! * .36);
+      const fatPath = Math.min(body * .19, Math.max(body * .045, (body - musclePath) * .16));
+      const internal = Math.max(0, body - musclePath - fatPath);
+
+      const desiredLung = Math.min(internal * .94, lung[i]! * .96);
+      const desiredBrain = Math.min(internal, brain[i]! * .92);
+      const desiredHeart = Math.min(internal, heart[i]! * .94);
+      const desiredVessels = Math.min(internal * .24, vessels[i]! * .24);
+      const desiredDigestive = Math.min(internal * .82, digestive[i]! * .42);
+      const desiredUrinary = Math.min(internal * .38, urinary[i]! * .52);
+      const desiredDiaphragm = Math.min(internal * .18, diaphragm[i]! * .62);
+
+      // These are actual projected structures. Preserve simultaneous lung/heart/vessel and
+      // abdominal superimposition, then scale only if their combined chord exceeds the body ray.
+      const requested = desiredLung + desiredBrain + desiredHeart + desiredVessels + desiredDigestive + desiredUrinary + desiredDiaphragm;
+      const scale = requested > internal && requested > 0 ? internal / requested : 1;
+      const lungPath = desiredLung * scale, brainPath = desiredBrain * scale, heartPath = desiredHeart * scale, vesselPath = desiredVessels * scale;
+      const digestivePath = desiredDigestive * scale, urinaryPath = desiredUrinary * scale, diaphragmPath = desiredDiaphragm * scale;
+      const occupied = lungPath + brainPath + heartPath + vesselPath + digestivePath + urinaryPath + diaphragmPath;
+      const generalSoft = Math.max(0, internal - occupied);
+      const interstitial = lungPath * .035, aerated = Math.max(0, lungPath - interstitial);
+
+      out[i] = Math.max(0,
+        fatPath * muFat +
+        musclePath * muMuscle +
+        generalSoft * muSoft +
+        aerated * muLung +
+        interstitial * muSoft +
+        brainPath * muBrain +
+        heartPath * muBlood +
+        vesselPath * muBlood +
+        digestivePath * muSoft * 1.025 +
+        urinaryPath * muSoft * 1.055 +
+        diaphragmPath * muMuscle
+      ) * .78;
+    }
+
+    // A single mild smoothing pass represents finite detector MTF and removes mesh tessellation
+    // without erasing organ interfaces or peripheral soft-tissue boundaries.
+    const physical = blur(out, rw, rh, 1);
+    for (const p of atlas.parts) p.mesh.visible = true;
+    scene.overrideMaterial = null; renderer.dispose(); rt.dispose(); fm.dispose(); bm.dispose();
+    const full = new Float32Array(width * height);
+    for (let y = 0; y < height; y++) {
+      const sy = (1 - y / Math.max(1,height - 1)) * (rh - 1);
+      for (let x = 0; x < width; x++) {
+        const sx = x / Math.max(1,width - 1) * (rw - 1);
+        full[y * width + x] = sample(physical,rw,rh,sx,sy);
+      }
+    }
+    return full;
+  } catch (err) {
+    console.warn("[Bucky Lab] Unified tissue atlas projection failed", err);
+    return null;
+  }
 }
