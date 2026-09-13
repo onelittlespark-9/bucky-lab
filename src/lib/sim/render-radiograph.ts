@@ -76,26 +76,25 @@ function blurScalar(src: Float32Array, w: number, h: number, radius: number) {
 }
 function smooth01(v: number) { const t = clamp(v, 0, 1); return t * t * (3 - 2 * t); }
 
-function clinicalTone(od: number, softOD: number, localOD: number, boneOD: number, bodyWeight: number, anchors: { low: number; mid: number; high: number }) {
-  if (bodyWeight <= .001 && od < .001) return .055;
-  const span = Math.max(.09, anchors.high - anchors.low);
-  const lowSpan = Math.max(.035, anchors.mid - anchors.low);
-  const highSpan = Math.max(.045, anchors.high - anchors.mid);
+function detectorTone(detectorOD: number, localOD: number, boneOD: number, bodyWeight: number, anchors: { low: number; mid: number; high: number }, chest: boolean) {
+  if (bodyWeight <= .002 && detectorOD < .004) return .035;
+  const lowSpan = Math.max(.030, anchors.mid - anchors.low);
+  const highSpan = Math.max(.055, anchors.high - anchors.mid);
   let base: number;
-  if (softOD <= anchors.mid) {
-    const t = clamp((softOD - anchors.low) / lowSpan, 0, 1);
-    base = .13 + .40 * Math.pow(t, .82);
+  if (detectorOD <= anchors.mid) {
+    const t = clamp((detectorOD - anchors.low) / lowSpan, 0, 1);
+    base = (chest ? .105 : .095) + (chest ? .39 : .42) * Math.pow(t, chest ? .88 : .82);
   } else {
-    const t = clamp((softOD - anchors.mid) / highSpan, 0, 1);
-    base = .53 + .24 * Math.pow(t, .78);
+    const t = clamp((detectorOD - anchors.mid) / highSpan, 0, 1);
+    base = (chest ? .495 : .515) + (chest ? .37 : .35) * Math.pow(t, .72);
   }
-  const boneStrength = 1 - Math.exp(-Math.max(0, boneOD) / .075);
-  const localDetail = clamp((od - localOD) / span, -.55, .55);
-  let tone = base + boneStrength * .19 + localDetail * (.055 + .065 * boneStrength);
-  tone = clamp(tone, .075, .965);
-  // Blend tangential rays from air according to actual attenuating path, not an atlas mask.
-  const pathWeight = smooth01(clamp(Math.max(softOD / .030, boneOD / .018, bodyWeight * .72), 0, 1));
-  return .055 * (1 - pathWeight) + tone * pathWeight;
+  const span = Math.max(.10, anchors.high - anchors.low);
+  const detail = clamp((detectorOD - localOD) / span, -.32, .32);
+  const boneStrength = 1 - Math.exp(-Math.max(0, boneOD) / .10);
+  let tone = base + detail * (chest ? .035 : .028) + boneStrength * (chest ? .035 : .045);
+  tone = clamp(tone, .050, .955);
+  const pathWeight = smooth01(clamp(bodyWeight * 1.12, 0, 1));
+  return .035 * (1 - pathWeight) + tone * pathWeight;
 }
 
 export async function renderRadiograph(args: { patient: Patient; projection: Projection; pose: SimPose; tube: TubeState; exposure: ExposureState; pathologyId?: PathologyId; caseId?: string | null; width?: number; height?: number; }): Promise<RadiographResult> {
@@ -146,7 +145,6 @@ export async function renderRadiograph(args: { patient: Patient; projection: Pro
       const atlasSoft = useTissueAtlas ? (atlasTissue?.[i] ?? 0) : 0;
       const softOD = atlasSoft > .00025 ? atlasSoft : fallback;
       const rawBone = useBoneAtlas ? (atlasBone?.[i] ?? 0) : 0;
-      // Preserve the projector's regional material response. Only gently compress extreme overlap.
       const bone = rawBone > 0 ? (rawBone <= .28 ? rawBone : .28 + (rawBone - .28) * .28) : 0;
       const metalOD = paths.metal > 0 ? muFromHU(3000, kvp) * paths.metal : 0;
       const pathOD = pathologyDelta(pathologyId, x, y, projection);
@@ -159,7 +157,7 @@ export async function renderRadiograph(args: { patient: Patient; projection: Pro
       const bodyWeight = Math.max(tissueWeight, boneWeight, useTissueAtlas ? 0 : proceduralWeight);
       bodyWeightMap[i] = bodyWeight;
 
-      const scatterScale = bodyWeight > .02 ? .0025 + .015 * (1 - Math.exp(-Math.max(0, softOD) * .55)) : .00005;
+      const scatterScale = bodyWeight > .02 ? .002 + .011 * (1 - Math.exp(-Math.max(0, softOD) * .55)) : .00004;
       const scat = I0 * scatterFrac * scatterScale;
       const bodySignal = I0 * Math.exp(-od) + scat;
       const airSignal = I0 * 1.02 + I0 * scatterFrac * .00002;
@@ -171,41 +169,44 @@ export async function renderRadiograph(args: { patient: Patient; projection: Pro
     let satEstimate = 0; for (let i = 0; i < n; i++) if (signal[i]! > well) satEstimate++;
     assertFrameQuality(signal, width, height, satEstimate / n, mean, .018);
 
-    const softSamples: number[] = [];
-    for (let i = 0; i < n; i++) if (bodyWeightMap[i] > .55 && softODMap[i] > .001 && boneOD[i] < .055) softSamples.push(softODMap[i]!);
+    const airReference = Math.max(1e-6, I0 * 1.02 + I0 * scatterFrac * .00002);
+    const detectorOD = new Float32Array(n), detectorSamples: number[] = [];
+    for (let i = 0; i < n; i++) {
+      detectorOD[i] = Math.max(0, -Math.log(clamp(signal[i]! / airReference, 1e-6, 1.02)));
+      if (bodyWeightMap[i] > .50 && detectorOD[i]! > .002 && boneOD[i] < .16) detectorSamples.push(detectorOD[i]!);
+    }
     const anchors = {
-      low: percentile([...softSamples], .035),
-      mid: percentile([...softSamples], .52),
-      high: percentile([...softSamples], .985),
+      low: percentile([...detectorSamples], isPaChest ? .025 : .035),
+      mid: percentile([...detectorSamples], isPaChest ? .46 : .52),
+      high: percentile([...detectorSamples], isPaChest ? .995 : .990),
     };
-    if (anchors.mid <= anchors.low + .035) anchors.mid = anchors.low + .035;
-    if (anchors.high <= anchors.mid + .050) anchors.high = anchors.mid + .050;
-    const localOD = blurScalar(totalOD, width, height, Math.max(3, Math.min(9, Math.round(Math.min(width, height) / 145))));
+    if (anchors.mid <= anchors.low + .030) anchors.mid = anchors.low + .030;
+    if (anchors.high <= anchors.mid + .055) anchors.high = anchors.mid + .055;
+    const localDetectorOD = blurScalar(detectorOD, width, height, isPaChest ? 3 : Math.max(2, Math.min(5, Math.round(Math.min(width, height) / 220))));
 
     const canvas = document.createElement("canvas"); canvas.width = width; canvas.height = height;
     const g = canvas.getContext("2d"); if (!g) throw new Error("Render failed — could not obtain 2D canvas context.");
     const img = g.createImageData(width, height);
     let sat = 0, noiseAcc = 0, contrastAcc = 0, contrastN = 0;
-    const quantumNoise = .0018 + .0065 / Math.sqrt(Math.max(.6, exposure.mas));
-    const blurRadius = clamp(Math.round(geometry.geometricUnsharpnessMm * 1.05), 0, 2);
-    const blurWeight = blurRadius > 0 ? Math.min(.16, geometry.geometricUnsharpnessMm * .07) : 0;
+    const quantumNoise = .0014 + .0050 / Math.sqrt(Math.max(.6, exposure.mas));
+    const blurRadius = geometry.geometricUnsharpnessMm > .16 ? 1 : 0;
+    const blurWeight = blurRadius ? Math.min(.10, geometry.geometricUnsharpnessMm * .05) : 0;
 
     for (let i = 0; i < n; i++) {
       const nx = i % width, ny = i / width | 0;
-      let tone = clinicalTone(totalOD[i]!, softODMap[i]!, localOD[i]!, boneOD[i]!, bodyWeightMap[i]!, anchors);
-      if (blurRadius > 0 && nx > blurRadius && nx < width - blurRadius - 1 && ny > blurRadius && ny < height - blurRadius - 1) {
+      let tone = detectorTone(detectorOD[i]!, localDetectorOD[i]!, boneOD[i]!, bodyWeightMap[i]!, anchors, isPaChest);
+      if (blurRadius > 0 && nx > 1 && nx < width - 2 && ny > 1 && ny < height - 2) {
         let neighbour = 0, count = 0;
-        for (let dy = -blurRadius; dy <= blurRadius; dy++) for (let dx = -blurRadius; dx <= blurRadius; dx++) {
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
           if (!dx && !dy) continue;
-          const dist = Math.sqrt(dx * dx + dy * dy); if (dist > blurRadius + .25) continue;
-          const j = (ny + dy) * width + nx + dx, wt = 1 / (1 + dist * dist);
-          neighbour += clinicalTone(totalOD[j]!, softODMap[j]!, localOD[j]!, boneOD[j]!, bodyWeightMap[j]!, anchors) * wt; count += wt;
+          const j = (ny + dy) * width + nx + dx, wt = (dx === 0 || dy === 0) ? 1 : .7;
+          neighbour += detectorTone(detectorOD[j]!, localDetectorOD[j]!, boneOD[j]!, bodyWeightMap[j]!, anchors, isPaChest) * wt; count += wt;
         }
         if (count > 0) tone = tone * (1 - blurWeight) + neighbour / count * blurWeight;
       }
-      const bodyNoise = quantumNoise * (.25 + .75 * bodyWeightMap[i]!);
+      const bodyNoise = quantumNoise * (.20 + .80 * bodyWeightMap[i]!);
       const fine = (fbm(nx * .61, ny * .61, seed + 4) - .5) * 2 * bodyNoise;
-      const detector = (fbm(nx * .13, ny * .13, seed + 17) - .5) * .0022;
+      const detector = (fbm(nx * .13, ny * .13, seed + 17) - .5) * .0016;
       const nse = fine + detector;
       tone = clamp(tone + nse, 0, 1); noiseAcc += Math.abs(nse);
       if (signal[i]! > well) sat++;
