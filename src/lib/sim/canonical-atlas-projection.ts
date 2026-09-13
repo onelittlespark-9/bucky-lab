@@ -8,8 +8,8 @@ const CANONICAL_W_CM=60;
 const CANONICAL_H_CM=180;
 const CANONICAL_CR_Y_CM=85;
 const REFERENCE_KVP=80;
-const BASE_WIDTH=512;
-const BASE_HEIGHT=1536;
+const BASE_WIDTH=640;
+const BASE_HEIGHT=1920;
 const MAX_CACHE_ENTRIES=3;
 const MAX_VIEW_CACHE_ENTRIES=8;
 type CanonicalMaps={bone:Float32Array|null;tissue:Float32Array|null;width:number;height:number};
@@ -30,8 +30,6 @@ async function canonicalMaps(args:{patient:Patient;projection:Projection;tube:Tu
   const{patient,projection,tube,geometry}=args,key=cacheKey(patient);
   const existing=CACHE.get(key);if(existing){touchCache(key,existing);return existing;}
   const canonicalTube:TubeState={...tube,crX:0,crY:CANONICAL_CR_Y_CM,collimationW:CANONICAL_W_CM,collimationH:CANONICAL_H_CM};
-  // The canonical atlas is an object-space map. Projection magnification is applied only when it is cropped to a detector view.
-  // This avoids rebuilding the expensive 3-D anatomy for every SID/OID or examination type.
   const objectGeometry:ProjectionGeometry={...geometry,magnification:1,effectiveObjectScale:1};
   const pending=Promise.all([
     projectAtlasSkeletalOD({patient,projection,tube:canonicalTube,exposureKvp:REFERENCE_KVP,width:BASE_WIDTH,height:BASE_HEIGHT,geometry:objectGeometry,wholeBody:true}),
@@ -46,7 +44,6 @@ export async function canonicalAtlasProjection(args:{patient:Patient;projection:
   const{patient,projection,tube,exposureKvp,width,height,geometry}=args,patientKey=cacheKey(patient),viewKey=[patientKey,projection.id,exposureKvp,width,height,tube.crX.toFixed(3),tube.crY.toFixed(3),tube.collimationW.toFixed(3),tube.collimationH.toFixed(3),geometry.magnification.toFixed(5)].join("|");
   const cached=VIEW_CACHE.get(viewKey);if(cached){touchView(viewKey,cached);return cached;}
   const maps=await canonicalMaps({patient,projection,tube,geometry});
-  // Geometry is cached at a reference spectrum; cheap material rescaling preserves the expected kVp response without re-projecting every mesh.
   const tissueScale=linearAttenuation("soft",exposureKvp)/linearAttenuation("soft",REFERENCE_KVP),boneNow=.68*linearAttenuation("corticalBone",exposureKvp)+.32*linearAttenuation("trabecularBone",exposureKvp),boneRef=.68*linearAttenuation("corticalBone",REFERENCE_KVP)+.32*linearAttenuation("trabecularBone",REFERENCE_KVP),boneScale=boneNow/boneRef;
   const result={bone:cropCanonical(maps.bone,maps.width,maps.height,tube,geometry,width,height,boneScale),tissue:cropCanonical(maps.tissue,maps.width,maps.height,tube,geometry,width,height,tissueScale)};touchView(viewKey,result);return result;
 }
