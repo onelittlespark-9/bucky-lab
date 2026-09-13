@@ -165,7 +165,7 @@ function projectCoverage(
   scene.overrideMaterial = mat;
   renderer.setRenderTarget(target);
   renderer.setClearColor(0xffffff, 1);
-  renderer.clear(true, true, true);
+  renderer.clear(true, true,true);
   renderer.render(scene, camera);
   renderer.readRenderTargetPixels(target, 0, 0, w, h, px);
   const out = new Float32Array(w * h);
@@ -383,16 +383,16 @@ export async function wholeBodyAtlasTissueOpticalDensity(args: {
     const kidneysRaw = projectParts(scene, atlas.root, atlas.parts, (p) => p.system === "urinary" && /kidney|renal/i.test(p.name), camera, renderer, target, fm, bm, rw, rh, 7, 12);
     const brainRaw = projectParts(scene, atlas.root, atlas.parts, (p) => p.system === "nervous" && /brain|cerebr|encephal/i.test(p.name), camera, renderer, target, fm, bm, rw, rh, 14, 18);
 
-    const heart = blurMap(heartRaw, rw, rh, 9);
-    const heartCoverage = blurMap(heartCoverageRaw, rw, rh, 7);
-    const centralVessels = blurMap(centralVesselsRaw, rw, rh, 11);
-    const allVessels = blurMap(allVesselsRaw, rw, rh, 13);
-    const diaphragm = blurMap(diaphragmRaw, rw, rh, 7);
-    const digestive = blurMap(digestiveRaw, rw, rh, 9);
-    const urinary = blurMap(urinaryRaw, rw, rh, 8);
-    const liver = blurMap(liverRaw, rw, rh, 10);
-    const spleen = blurMap(spleenRaw, rw, rh, 8);
-    const kidneys = blurMap(kidneysRaw, rw, rh, 8);
+    const heart = blurMap(heartRaw, rw, rh, 7);
+    const heartCoverage = blurMap(heartCoverageRaw, rw, rh, 5);
+    const centralVessels = blurMap(centralVesselsRaw, rw, rh, 9);
+    const allVessels = blurMap(allVesselsRaw, rw, rh, 12);
+    const diaphragm = blurMap(diaphragmRaw, rw, rh, 6);
+    const digestive = blurMap(digestiveRaw, rw, rh, 8);
+    const urinary = blurMap(urinaryRaw, rw, rh, 7);
+    const liver = blurMap(liverRaw, rw, rh, 8);
+    const spleen = blurMap(spleenRaw, rw, rh, 7);
+    const kidneys = blurMap(kidneysRaw, rw, rh, 7);
     const brain = blurMap(brainRaw, rw, rh, 4);
 
     const muSoft = linearAttenuation("soft", exposureKvp);
@@ -405,63 +405,69 @@ export async function wholeBodyAtlasTissueOpticalDensity(args: {
     const low = new Float32Array(rw * rh);
     const lungPixels = respiratoryMaskRaw.reduce((sum, value) => sum + (value > 0 ? 1 : 0), 0);
     const lungCoverageFraction = lungPixels / Math.max(1, rw * rh);
-    const useEnvelopeFallback = lungCoverageFraction < 0.035;
+    const useEnvelopeFallback = lungCoverageFraction < 0.045;
 
     for (let i = 0; i < low.length; i++) {
       const x = i % rw;
       const y = Math.floor(i / rw);
       const xNorm = ((x + 0.5) / rw) * 2 - 1;
       const yNorm = ((y + 0.5) / rh) * 2 - 1;
-      const boundaryTaper = Math.pow(smoothstep(0.055, 0.88, skinCoverage[i]!), 1.18);
-      const mixedDepth = skin[i]! * 0.24 + skinSoft[i]! * 0.76;
-      const tangentLimited = Math.min(mixedDepth, skinSoft[i]! * 1.10 + 0.035);
+      const boundaryTaper = Math.pow(smoothstep(0.045, 0.90, skinCoverage[i]!), 1.13);
+      const mixedDepth = skin[i]! * 0.22 + skinSoft[i]! * 0.78;
+      const tangentLimited = Math.min(mixedDepth, skinSoft[i]! * 1.08 + 0.028);
       const bodyDepth = Math.max(0, tangentLimited * boundaryTaper);
       const muscleDepth = Math.min(bodyDepth, muscleRaw[i]! * boundaryTaper);
       if (bodyDepth <= 0.002) continue;
 
       const inferredFat = Math.max(0, bodyDepth - muscleDepth);
-      const fatPath = Math.min(bodyDepth * 0.21, Math.max(bodyDepth * 0.055, inferredFat * 0.36));
-      const musclePath = Math.min(Math.max(0, bodyDepth - fatPath), Math.max(bodyDepth * 0.055, muscleDepth * 0.23));
+      const fatPath = Math.min(bodyDepth * 0.20, Math.max(bodyDepth * 0.05, inferredFat * 0.34));
+      const musclePath = Math.min(Math.max(0, bodyDepth - fatPath), Math.max(bodyDepth * 0.05, muscleDepth * 0.21));
       const internalCapacity = Math.max(0, bodyDepth - fatPath - musclePath);
 
-      const atlasThoraxMask = clamp01((respiratoryMask[i]! - 0.02) / 0.68);
-      const leftEnvelope = Math.exp(-Math.pow((xNorm + 0.135) / 0.115, 2) - Math.pow((yNorm - 0.36) / 0.25, 2));
-      const rightEnvelope = Math.exp(-Math.pow((xNorm - 0.135) / 0.115, 2) - Math.pow((yNorm - 0.36) / 0.25, 2));
-      const bodySupportedEnvelope = Math.max(leftEnvelope, rightEnvelope) * smoothstep(0.18, 0.78, skinCoverage[i]!);
-      const envelopeAssist = useEnvelopeFallback ? bodySupportedEnvelope * 0.96 : bodySupportedEnvelope * 0.42;
+      const atlasThoraxMask = clamp01((respiratoryMask[i]! - 0.015) / 0.60);
+      const leftEnvelope = Math.exp(-Math.pow((xNorm + 0.17) / 0.155, 2) - Math.pow((yNorm - 0.34) / 0.285, 2));
+      const rightEnvelope = Math.exp(-Math.pow((xNorm - 0.17) / 0.155, 2) - Math.pow((yNorm - 0.34) / 0.285, 2));
+      const apicalTaper = smoothstep(0.04, 0.34, yNorm + 0.02);
+      const basalTaper = 1 - smoothstep(0.58, 0.76, yNorm);
+      const bodySupportedEnvelope = Math.max(leftEnvelope, rightEnvelope) * apicalTaper * basalTaper * smoothstep(0.12, 0.72, skinCoverage[i]!);
+      const envelopeAssist = bodySupportedEnvelope * (useEnvelopeFallback ? 1.0 : 0.82);
       const thoraxMask = clamp01(Math.max(atlasThoraxMask, envelopeAssist));
-      const bilateralGap = smoothstep(0.030, 0.125, Math.abs(xNorm));
-      const lungSilhouette = thoraxMask * (0.08 + 0.92 * bilateralGap);
-      const lungCore = Math.pow(clamp01(lungSilhouette), 0.68);
-      const lungCandidate = Math.min(internalCapacity * 0.96, internalCapacity * 0.94 * lungCore);
+      const bilateralGap = smoothstep(0.045, 0.145, Math.abs(xNorm));
+      const lungSilhouette = thoraxMask * (0.035 + 0.965 * bilateralGap);
+      const lungCore = Math.pow(clamp01(lungSilhouette), 0.58);
+      const lungCandidate = Math.min(internalCapacity * 0.985, internalCapacity * 0.975 * lungCore);
 
-      const heartShape = clamp01((heartCoverage[i]! - 0.018) / 0.62);
-      const mediastinalCore = Math.exp(-Math.pow((xNorm + 0.01) / 0.13, 2)) * thoraxMask;
-      const heartPath = Math.min(internalCapacity * 0.82, Math.max(heart[i]! * 1.38, internalCapacity * 0.62 * heartShape));
-      const centralSoftPath = internalCapacity * 0.30 * mediastinalCore;
-      const centralVesselPath = Math.min(internalCapacity * 0.028, centralVessels[i]! * 0.10);
-      const peripheralVesselPath = Math.min(internalCapacity * 0.0008, allVessels[i]! * 0.00055 * lungCore);
-      const diaphragmPath = Math.min(internalCapacity * 0.31, diaphragm[i]! * 1.28);
+      const heartShape = clamp01((heartCoverage[i]! - 0.03) / 0.66);
+      const mediastinalCore = Math.exp(-Math.pow((xNorm + 0.012) / 0.115, 2)) * thoraxMask;
+      const heartPath = Math.min(internalCapacity * 0.70, Math.max(heart[i]! * 1.18, internalCapacity * 0.50 * heartShape));
+      const centralSoftPath = internalCapacity * 0.24 * mediastinalCore;
+      const centralVesselPath = Math.min(internalCapacity * 0.032, centralVessels[i]! * 0.105);
+      const peripheralVesselPath = Math.min(internalCapacity * 0.006, allVessels[i]! * 0.0042 * lungCore);
+      const diaphragmPath = Math.min(internalCapacity * 0.25, diaphragm[i]! * 1.05);
       const mediastinalDisplacement = Math.min(
         lungCandidate,
-        heartPath * 0.98 + centralSoftPath + centralVesselPath * 0.12 + diaphragmPath * 0.82,
+        heartPath * 0.68 + centralSoftPath * 0.82 + centralVesselPath * 0.35 + diaphragmPath * 0.48,
       );
       const lungPath = Math.max(0, lungCandidate - mediastinalDisplacement);
 
       const brainPath = Math.min(Math.max(0, internalCapacity - lungPath), brain[i]! * 0.86);
       const afterBrain = Math.max(0, internalCapacity - lungPath - brainPath);
-      const bloodPath = Math.min(afterBrain, heartPath * 0.94 + centralVesselPath * 0.34 + peripheralVesselPath * 0.04);
+      const bloodPath = Math.min(afterBrain, heartPath * 0.82 + centralVesselPath * 0.42 + peripheralVesselPath * 0.20);
       const afterBlood = Math.max(0, afterBrain - bloodPath);
-      const liverPath = Math.min(afterBlood * 0.91, liver[i]! * 0.82);
-      const afterLiver = Math.max(0, afterBlood - liverPath);
-      const spleenPath = Math.min(afterLiver * 0.56, spleen[i]! * 0.42);
-      const afterSpleen = Math.max(0, afterLiver - spleenPath);
-      const kidneyPath = Math.min(afterSpleen * 0.60, kidneys[i]! * 0.46);
-      const afterKidney = Math.max(0, afterSpleen - kidneyPath);
-      const digestivePath = Math.min(afterKidney * 0.70, digestive[i]! * 0.32 + urinary[i]! * 0.13);
-      const generalSoftPath = Math.max(0, afterKidney - digestivePath);
 
-      const lungInterstitial = lungPath * 0.018;
+      const liverDemand = Math.min(afterBlood * 0.78, liver[i]! * 0.74);
+      const spleenDemand = Math.min(afterBlood * 0.34, spleen[i]! * 0.38);
+      const kidneyDemand = Math.min(afterBlood * 0.38, kidneys[i]! * 0.42);
+      const digestiveDemand = Math.min(afterBlood * 0.48, digestive[i]! * 0.28 + urinary[i]! * 0.11);
+      const organDemand = liverDemand + spleenDemand + kidneyDemand + digestiveDemand;
+      const organScale = organDemand > 0 ? Math.min(1, afterBlood * 0.82 / organDemand) : 0;
+      const liverPath = liverDemand * organScale;
+      const spleenPath = spleenDemand * organScale;
+      const kidneyPath = kidneyDemand * organScale;
+      const digestivePath = digestiveDemand * organScale;
+      const generalSoftPath = Math.max(0, afterBlood - liverPath - spleenPath - kidneyPath - digestivePath);
+
+      const lungInterstitial = lungPath * 0.032;
       const aeratedLungPath = Math.max(0, lungPath - lungInterstitial);
       const od =
         fatPath * muFat +
@@ -471,12 +477,12 @@ export async function wholeBodyAtlasTissueOpticalDensity(args: {
         lungInterstitial * muSoft +
         bloodPath * muBlood +
         brainPath * muBrain +
-        liverPath * muSoft * 1.09 +
-        spleenPath * muSoft * 1.065 +
-        kidneyPath * muSoft * 1.07 +
-        digestivePath * muSoft * 1.015 +
-        diaphragmPath * Math.max(0, muMuscle - muLung) * 0.52 +
-        Math.min(lungPath, centralVesselPath * 0.05 + peripheralVesselPath * 0.01) * Math.max(0, muBlood - muLung) * 0.025;
+        liverPath * muSoft * 1.085 +
+        spleenPath * muSoft * 1.055 +
+        kidneyPath * muSoft * 1.06 +
+        digestivePath * muSoft * 1.01 +
+        diaphragmPath * Math.max(0, muMuscle - muLung) * 0.42 +
+        Math.min(lungPath, centralVesselPath * 0.20 + peripheralVesselPath * 0.18) * Math.max(0, muBlood - muLung) * 0.12;
 
       low[i] = Math.max(0, od * spectrumScale);
     }
