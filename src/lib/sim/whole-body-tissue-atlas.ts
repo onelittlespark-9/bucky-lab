@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { Patient, TubeState } from "./types";
 import type { ProjectionGeometry } from "./projection-physics";
+import { linearAttenuation } from "./nist-attenuation";
 
 const MODEL_ROOT = "/models/human-atlas/";
 const ATLAS_HEIGHT_M = 1.7;
@@ -40,7 +41,6 @@ async function loadAtlas():Promise<TissueAtlas>{
 }
 
 function unpack(b:Uint8Array,j:number){return b[j]!/255+b[j+1]!/65025+b[j+2]!/16581375;}
-function mu(hu:number,kvp:number){const e=Math.pow(70/Math.max(45,kvp),.28),a=.0003*e,w=.205*e,b=.72*e;if(hu<=-1000)return a;if(hu<=0)return w+(hu/1000)*(w-a);if(hu<=1000)return w+(hu/1000)*(b-w);return b;}
 function projectVisible(scene:THREE.Scene,root:THREE.Group,parts:LoadedPart[],visible:(p:LoadedPart)=>boolean,camera:THREE.OrthographicCamera,renderer:THREE.WebGLRenderer,target:THREE.WebGLRenderTarget,fm:THREE.ShaderMaterial,bm:THREE.ShaderMaterial,w:number,h:number){for(const p of parts)p.mesh.visible=visible(p);root.updateMatrixWorld(true);const front=new Uint8Array(w*h*4),back=new Uint8Array(w*h*4);scene.overrideMaterial=fm;renderer.setRenderTarget(target);renderer.clear(true,true,true);renderer.render(scene,camera);renderer.readRenderTargetPixels(target,0,0,w,h,front);scene.overrideMaterial=bm;renderer.clear(true,true,true);renderer.render(scene,camera);renderer.readRenderTargetPixels(target,0,0,w,h,back);const out=new Float32Array(w*h),range=camera.far-camera.near;for(let i=0;i<out.length;i++){const j=i*4,a=unpack(front,j),z=unpack(back,j);if(a>=.9999||z>=.9999)continue;const cm=Math.abs(z-a)*range*100;if(cm>0&&cm<55)out[i]=cm;}return out;}
 function projectCoverage(scene:THREE.Scene,root:THREE.Group,parts:LoadedPart[],visible:(p:LoadedPart)=>boolean,camera:THREE.OrthographicCamera,renderer:THREE.WebGLRenderer,target:THREE.WebGLRenderTarget,maskMaterial:THREE.MeshBasicMaterial,w:number,h:number){for(const p of parts)p.mesh.visible=visible(p);root.updateMatrixWorld(true);const pixels=new Uint8Array(w*h*4);scene.overrideMaterial=maskMaterial;renderer.setRenderTarget(target);renderer.setClearColor(0xffffff,1);renderer.clear(true,true,true);renderer.render(scene,camera);renderer.readRenderTargetPixels(target,0,0,w,h,pixels);const out=new Float32Array(w*h);for(let i=0;i<out.length;i++)out[i]=pixels[i*4]!<245?1:0;return out;}
 function projectParts(scene:THREE.Scene,root:THREE.Group,parts:LoadedPart[],test:(p:LoadedPart)=>boolean,camera:THREE.OrthographicCamera,renderer:THREE.WebGLRenderer,target:THREE.WebGLRenderTarget,fm:THREE.ShaderMaterial,bm:THREE.ShaderMaterial,w:number,h:number,perPartCap:number,totalCap:number){const selected=parts.filter(test),sum=new Float32Array(w*h);for(const part of selected){const t=projectVisible(scene,root,parts,p=>p===part,camera,renderer,target,fm,bm,w,h);for(let i=0;i<sum.length;i++)sum[i]=Math.min(totalCap,sum[i]!+Math.min(perPartCap,t[i]!));}return sum;}
@@ -59,14 +59,35 @@ export async function wholeBodyAtlasTissueOpticalDensity(args:{patient:Patient;t
     const skin=projectVisible(scene,atlas.root,atlas.parts,p=>p.system==="integumentary",camera,renderer,target,fm,bm,rw,rh),skinSoft=blurMap(blurMap(skin,rw,rh),rw,rh),muscleRaw=projectVisible(scene,atlas.root,atlas.parts,p=>p.system==="muscular",camera,renderer,target,fm,bm,rw,rh),respiratoryUnion=projectVisible(scene,atlas.root,atlas.parts,p=>p.system==="respiratory",camera,renderer,target,fm,bm,rw,rh),respiratoryParts=projectParts(scene,atlas.root,atlas.parts,p=>p.system==="respiratory",camera,renderer,target,fm,bm,rw,rh,15,31),respiratoryMaskRaw=projectCoverage(scene,atlas.root,atlas.parts,p=>p.system==="respiratory",camera,renderer,target,maskMaterial,rw,rh),respiratoryMask=blurMap(blurMap(respiratoryMaskRaw,rw,rh),rw,rh),lung=new Float32Array(rw*rh);for(let i=0;i<lung.length;i++)lung[i]=Math.max(respiratoryUnion[i]!,respiratoryParts[i]!);
     const heart=projectParts(scene,atlas.root,atlas.parts,p=>p.system==="cardiac",camera,renderer,target,fm,bm,rw,rh,10,12),digestive=projectParts(scene,atlas.root,atlas.parts,p=>p.system==="digestive",camera,renderer,target,fm,bm,rw,rh,9,22),urinary=projectParts(scene,atlas.root,atlas.parts,p=>p.system==="urinary",camera,renderer,target,fm,bm,rw,rh,7,12),centralVessels=projectParts(scene,atlas.root,atlas.parts,p=>(p.system==="arterial"||p.system==="venous")&&/(pulmonary|aorta|aortic|vena cava|caval|brachiocephalic|subclavian)/i.test(p.name),camera,renderer,target,fm,bm,rw,rh,2.8,7.5),diaphragmRaw=projectParts(scene,atlas.root,atlas.parts,p=>p.system==="muscular"&&/diaphragm/i.test(p.name),camera,renderer,target,fm,bm,rw,rh,2.5,4),diaphragm=blurMap(diaphragmRaw,rw,rh),liver=projectParts(scene,atlas.root,atlas.parts,p=>/liver|hepatic/i.test(p.name),camera,renderer,target,fm,bm,rw,rh,12,14),spleen=projectParts(scene,atlas.root,atlas.parts,p=>/spleen|splenic/i.test(p.name),camera,renderer,target,fm,bm,rw,rh,7,8),kidneys=projectParts(scene,atlas.root,atlas.parts,p=>p.system==="urinary"&&/kidney|renal/i.test(p.name),camera,renderer,target,fm,bm,rw,rh,7,12),brain=projectParts(scene,atlas.root,atlas.parts,p=>p.system==="nervous"&&/brain|cerebr|encephal/i.test(p.name),camera,renderer,target,fm,bm,rw,rh,14,18);
 
-    const low=new Float32Array(rw*rh),muSoft=mu(30,exposureKvp),muLung=mu(-900,exposureKvp),muOrgan=mu(58,exposureKvp),muMuscle=mu(48,exposureKvp),muBlood=mu(65,exposureKvp),muBrain=mu(38,exposureKvp),scale=.054;
+    const low=new Float32Array(rw*rh);
+    const muSoft=linearAttenuation("soft",exposureKvp),muLung=linearAttenuation("inflatedLung",exposureKvp),muMuscle=linearAttenuation("muscle",exposureKvp),muBlood=linearAttenuation("blood",exposureKvp),muBrain=linearAttenuation("brain",exposureKvp);
+    // A modest spectrum calibration keeps the mono-energetic effective-energy
+    // approximation aligned with the polychromatic detector model without
+    // flattening kVp-dependent contrast.
+    const spectrumScale=.62;
     for(let i=0;i<low.length;i++){
-      const skinDepth=skin[i]!,bodyDepth=skinDepth*.82+skinSoft[i]!*.18,muscle=Math.min(bodyDepth>0?bodyDepth*.78:18,muscleRaw[i]!),body=bodyDepth>0?bodyDepth:Math.min(32,muscle*1.15);if(body<=0)continue;
-      const baseline=Math.min(42,body)*muSoft*scale,atlasLungDepth=Math.min(body*.94,lung[i]!*1.42),silhouetteLungDepth=Math.min(body*.90,body*.82*respiratoryMask[i]!),lungReplace=Math.max(atlasLungDepth,silhouetteLungDepth),aeration=lungReplace*(muLung-muSoft)*scale*1.08,muscleMod=Math.min(body,muscle)*Math.max(0,muMuscle-muSoft)*.010,heartDepth=Math.min(body*.62,heart[i]!),vesselDepth=Math.min(body*.24,centralVessels[i]!),diaphragmDepth=Math.min(body*.18,diaphragm[i]!),heartOverlap=Math.min(lungReplace,heartDepth),vesselOverlap=Math.min(Math.max(0,lungReplace-heartOverlap),vesselDepth*.90),diaphragmOverlap=Math.min(Math.max(0,lungReplace-heartOverlap-vesselOverlap),diaphragmDepth*.86),heartRestore=heartOverlap*(muSoft-muLung)*scale*1.08,vesselRestore=vesselOverlap*(muSoft-muLung)*scale*1.03,diaphragmRestore=diaphragmOverlap*(muSoft-muLung)*scale*1.00,heartDensity=heartDepth*Math.max(0,muOrgan-muSoft)*.068,vesselDensity=vesselDepth*Math.max(0,muBlood-muSoft)*.078,diaphragmDensity=diaphragmDepth*Math.max(0,muMuscle-muSoft)*.046,digestAdd=Math.min(body,digestive[i]!)*Math.max(0,muOrgan-muSoft)*.014,urinaryAdd=Math.min(body,urinary[i]!)*Math.max(0,muOrgan-muSoft)*.013,liverAdd=Math.min(body*.68,liver[i]!)*Math.max(0,muOrgan-muSoft)*.043,spleenAdd=Math.min(body*.38,spleen[i]!)*Math.max(0,muOrgan-muSoft)*.034,kidneyAdd=Math.min(body*.32,kidneys[i]!)*Math.max(0,muOrgan-muSoft)*.030,brainAdd=Math.min(body*.7,brain[i]!)*Math.max(0,muBrain-muSoft)*.030;
-      low[i]=Math.max(.0015,baseline+aeration+muscleMod+heartRestore+vesselRestore+diaphragmRestore+heartDensity+vesselDensity+diaphragmDensity+digestAdd+urinaryAdd+liverAdd+spleenAdd+kidneyAdd+brainAdd);
+      const skinDepth=skin[i]!,bodyDepth=skinDepth*.82+skinSoft[i]!*.18,muscleDepth=Math.min(bodyDepth>0?bodyDepth*.82:18,muscleRaw[i]!),body=bodyDepth>0?bodyDepth:Math.min(32,muscleDepth*1.15);if(body<=0)continue;
+      const atlasLungDepth=Math.min(body*.94,lung[i]!*1.24),silhouetteLungDepth=Math.min(body*.88,body*.78*respiratoryMask[i]!),lungDepth=Math.max(atlasLungDepth,silhouetteLungDepth);
+      const heartDepth=Math.min(body*.60,heart[i]!),vesselDepth=Math.min(body*.23,centralVessels[i]!),diaphragmDepth=Math.min(body*.15,diaphragm[i]!);
+      // Occupied mediastinal structures replace aerated lung where they overlap.
+      const occupiedLung=Math.min(lungDepth,heartDepth+vesselDepth*.82+diaphragmDepth*.58);
+      const aeratedLung=Math.max(0,lungDepth-occupiedLung);
+      const organDepth=Math.min(body*.46,digestive[i]!*0.34+urinary[i]!*0.18+liver[i]!*0.50+spleen[i]!*0.25+kidneys[i]!*0.28);
+      const brainDepth=Math.min(body*.72,brain[i]!);
+      const musclePath=Math.min(Math.max(0,body-aeratedLung),muscleDepth*.44);
+      const specialPath=Math.min(Math.max(0,body-aeratedLung-musclePath),heartDepth+vesselDepth*.70+organDepth+brainDepth*.65);
+      const generalSoftPath=Math.max(0,body-aeratedLung-musclePath-specialPath);
+      const bloodPath=Math.min(specialPath,heartDepth*.72+vesselDepth*.86);
+      const brainPath=Math.min(Math.max(0,specialPath-bloodPath),brainDepth*.65);
+      const organSoftPath=Math.max(0,specialPath-bloodPath-brainPath);
+      let od=generalSoftPath*muSoft+musclePath*muMuscle+aeratedLung*muLung+bloodPath*muBlood+brainPath*muBrain+organSoftPath*muSoft*1.035;
+      // Diaphragm is a muscular sheet superimposed at the lung bases, not an
+      // opaque boundary. Add only the differential muscle/soft component.
+      od+=diaphragmDepth*Math.max(0,muMuscle-muSoft)*.55;
+      low[i]=Math.max(.002,od*spectrumScale);
     }
     const coverageCount=respiratoryMaskRaw.reduce((a,v)=>a+(v>0?1:0),0);if(maxValue(lung)<.8&&coverageCount<rw*rh*.01)console.warn("[Bucky Lab] Respiratory atlas projection and silhouette are unexpectedly sparse; whole-body lung contrast may be degraded.");
-    const softened=blurMap(low,rw,rh);for(let i=0;i<low.length;i++)low[i]=low[i]*.72+softened[i]!*0.28;
+    const softened=blurMap(low,rw,rh);for(let i=0;i<low.length;i++)low[i]=low[i]*.84+softened[i]!*0.16;
     for(const p of atlas.parts)p.mesh.visible=true;scene.overrideMaterial=null;renderer.dispose();target.dispose();fm.dispose();bm.dispose();maskMaterial.dispose();
     const full=new Float32Array(width*height);for(let y=0;y<height;y++){const sy=(1-y/Math.max(1,height-1))*(rh-1);for(let x=0;x<width;x++){const sx=x/Math.max(1,width-1)*(rw-1);full[y*width+x]=sampleBilinear(low,rw,rh,sx,sy);}}return full;
   }catch(err){console.warn("[Bucky Lab] Whole-body tissue atlas projection failed",err);return null;}
