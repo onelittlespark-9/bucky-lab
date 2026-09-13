@@ -403,10 +403,15 @@ export async function wholeBodyAtlasTissueOpticalDensity(args: {
     const muBrain = linearAttenuation("brain", exposureKvp);
     const spectrumScale = 0.70;
     const low = new Float32Array(rw * rh);
+    const lungPixels = respiratoryMaskRaw.reduce((sum, value) => sum + (value > 0 ? 1 : 0), 0);
+    const lungCoverageFraction = lungPixels / Math.max(1, rw * rh);
+    const useEnvelopeFallback = lungCoverageFraction < 0.035;
 
     for (let i = 0; i < low.length; i++) {
       const x = i % rw;
+      const y = Math.floor(i / rw);
       const xNorm = ((x + 0.5) / rw) * 2 - 1;
+      const yNorm = ((y + 0.5) / rh) * 2 - 1;
       const boundaryTaper = Math.pow(smoothstep(0.055, 0.88, skinCoverage[i]!), 1.18);
       const mixedDepth = skin[i]! * 0.24 + skinSoft[i]! * 0.76;
       const tangentLimited = Math.min(mixedDepth, skinSoft[i]! * 1.10 + 0.035);
@@ -419,11 +424,16 @@ export async function wholeBodyAtlasTissueOpticalDensity(args: {
       const musclePath = Math.min(Math.max(0, bodyDepth - fatPath), Math.max(bodyDepth * 0.055, muscleDepth * 0.23));
       const internalCapacity = Math.max(0, bodyDepth - fatPath - musclePath);
 
-      const thoraxMask = clamp01((respiratoryMask[i]! - 0.02) / 0.68);
-      const bilateralGap = smoothstep(0.035, 0.15, Math.abs(xNorm));
-      const lungSilhouette = thoraxMask * (0.12 + 0.88 * bilateralGap);
-      const lungCore = Math.pow(clamp01(lungSilhouette), 0.72);
-      const lungCandidate = Math.min(internalCapacity * 0.94, internalCapacity * 0.92 * lungCore);
+      const atlasThoraxMask = clamp01((respiratoryMask[i]! - 0.02) / 0.68);
+      const leftEnvelope = Math.exp(-Math.pow((xNorm + 0.135) / 0.115, 2) - Math.pow((yNorm - 0.36) / 0.25, 2));
+      const rightEnvelope = Math.exp(-Math.pow((xNorm - 0.135) / 0.115, 2) - Math.pow((yNorm - 0.36) / 0.25, 2));
+      const bodySupportedEnvelope = Math.max(leftEnvelope, rightEnvelope) * smoothstep(0.18, 0.78, skinCoverage[i]!);
+      const envelopeAssist = useEnvelopeFallback ? bodySupportedEnvelope * 0.96 : bodySupportedEnvelope * 0.42;
+      const thoraxMask = clamp01(Math.max(atlasThoraxMask, envelopeAssist));
+      const bilateralGap = smoothstep(0.030, 0.125, Math.abs(xNorm));
+      const lungSilhouette = thoraxMask * (0.08 + 0.92 * bilateralGap);
+      const lungCore = Math.pow(clamp01(lungSilhouette), 0.68);
+      const lungCandidate = Math.min(internalCapacity * 0.96, internalCapacity * 0.94 * lungCore);
 
       const heartShape = clamp01((heartCoverage[i]! - 0.018) / 0.62);
       const mediastinalCore = Math.exp(-Math.pow((xNorm + 0.01) / 0.13, 2)) * thoraxMask;
@@ -471,8 +481,8 @@ export async function wholeBodyAtlasTissueOpticalDensity(args: {
       low[i] = Math.max(0, od * spectrumScale);
     }
 
-    if (respiratoryMaskRaw.reduce((a, v) => a + (v > 0 ? 1 : 0), 0) < rw * rh * 0.01) {
-      console.warn("[Bucky Lab] Lung-specific atlas projection is sparse; respiratory fallback silhouette is active.");
+    if (useEnvelopeFallback) {
+      console.warn(`[Bucky Lab] Lung-specific atlas coverage is sparse (${(lungCoverageFraction * 100).toFixed(1)}%); bounded bilateral lung envelope assist is active.`);
     }
 
     for (const p of atlas.parts) p.mesh.visible = true;
