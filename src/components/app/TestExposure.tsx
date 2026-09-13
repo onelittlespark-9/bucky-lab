@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 const TEST_PATIENT = "amara";
 
 const GROUPS = [
+  "Whole body",
   "Thorax",
   "Abdomen",
   "Pelvis & hips",
@@ -40,21 +41,10 @@ export function TestExposure() {
 
   async function test(projectionId: string) {
     setSelected(projectionId);
-
-    // Build every renderer test from a clean, pathology-free benchmark exam.
-    // startExam resets the patient, projection, equipment placement, pathology and base technique.
     startExam(projectionId, TEST_PATIENT);
-
-    // Apply the exact handbook pose/CR/SID/collimation and then the patient-specific
-    // optimised exposure factors. The projection definition remains the source of truth
-    // for whether a grid is required and for focal-spot selection.
     applyHandbook();
     applySuggestedFactors();
-
-    // Keep the renderer benchmark free from a marker overlay so anatomy can be inspected
-    // without obscuration. This does not alter positioning or exposure physics.
     patchExposure({ marker: null });
-
     await expose();
   }
 
@@ -79,7 +69,7 @@ export function TestExposure() {
             <div className="font-medium">Fixed benchmark patient</div>
             <div className="mt-1 text-xs text-muted">{patient.name} · {patient.habitus} · {patient.heightCm} cm · pathology disabled</div>
             <div className="mt-2 text-xs leading-5 text-muted">
-              Every button starts a fresh benchmark exam and automatically applies the defined handbook patient position, detector setup, central ray, tube angle, SID, collimation, grid requirement, focal spot and patient-adjusted exposure factors before exposing.
+              Every button starts a fresh benchmark exam and automatically applies the defined handbook patient position, detector setup, central ray, tube angle, SID, collimation, grid requirement, focal spot and patient-adjusted exposure factors before exposing. The whole-body benchmark is included so anatomy can be calibrated globally before refining individual projections.
             </div>
           </div>
 
