@@ -6,9 +6,10 @@ export function RoomViewport() {
     <div className="relative h-full min-h-64 w-full bg-bg">
       <Canvas
         camera={{ position: [2.4, 1.6, 2.2], fov: 42 }}
-        dpr={[1, 1.75]}
-        shadows
-        gl={{ antialias: true, alpha: false }}
+        dpr={[1, 1.25]}
+        shadows="basic"
+        performance={{ min: 0.5, max: 1, debounce: 180 }}
+        gl={{ antialias: true, alpha: false, powerPreference: "high-performance" }}
         style={{ touchAction: "none" }}
       >
         <XrayRoom />
