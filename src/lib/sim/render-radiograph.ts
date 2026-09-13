@@ -170,25 +170,38 @@ export async function renderRadiograph(args: {
       const attenuationScale = canonicalView ? (hasAtlas ? 1.06 : 1.04) : (hasAtlas ? .65 + thickness / 45 : .55 + thickness / 40);
       const fallbackSoft = pathsToOD(paths, kvp) * attenuationScale;
       const tissueAtlas = atlasTissueOD?.[i] ?? 0;
-      const physicalAtlasTissue = canonicalView && tissueAtlas > .00005 ? clamp(tissueAtlas, .00005, 6.5) : 0;
+      // The atlas boundary contains extremely small tangent paths. Treating those as a full
+      // detector object created the conspicuous white outline around the body. Keep the path
+      // itself, but blend detector response continuously from air into tissue below.
+      const physicalAtlasTissue = canonicalView && tissueAtlas > .0008 ? clamp(tissueAtlas, .0008, 6.5) : 0;
       const softOd = canonicalView ? Math.max(.00005, physicalAtlasTissue > 0 ? physicalAtlasTissue : fallbackSoft) : fallbackSoft;
-      const boneDelta = atlasOD?.[i] ?? 0;
+      const rawBoneDelta = atlasOD?.[i] ?? 0;
+      // Compress only the strongest cortical peaks while lifting weak skeletal signal. This
+      // preserves ribs/trabeculae without turning long-bone cortices into uniform white tubes.
+      const boneDelta = canonicalView && rawBoneDelta > 0
+        ? Math.min(.20, rawBoneDelta * (1.22 - .32 * clamp(rawBoneDelta / .16, 0, 1)))
+        : rawBoneDelta;
       const od = Math.max(canonicalView ? .00005 : .01, softOd + boneDelta + pathologyDelta(pathologyId, x, y, projection));
       const T = Math.exp(-od);
-      const boneMask = boneDelta > .006 || paths.bone > .15 || paths.cortical > .05 ? 1 : 0;
-      const trabFine = (fbm(x * 3.2, y * 3.2, seed + 31) - .5) * (canonicalView ? .005 : .018);
-      const trabCoarse = (fbm(x * .9, y * .9, seed + 37) - .5) * (canonicalView ? .003 : .012);
+      const boneMask = boneDelta > .0045 || paths.bone > .15 || paths.cortical > .05 ? 1 : 0;
+      const trabFine = (fbm(x * 3.2, y * 3.2, seed + 31) - .5) * (canonicalView ? .007 : .018);
+      const trabCoarse = (fbm(x * .9, y * .9, seed + 37) - .5) * (canonicalView ? .004 : .012);
       const softVar = (fbm(x * .45, y * .45, seed + 11) - .5) * (canonicalView ? .008 : .018) * ((tissueAtlas > .00005 || paths.soft > .08) ? 1 : 0);
       const texture = 1 + boneMask * (trabFine + trabCoarse) + softVar;
-      const bodyHere = canonicalView ? physicalAtlasTissue > .00005 : (tissueAtlas > .0002 || paths.soft + paths.lung > .035 || boneDelta > .005);
+      const bodyWeight = canonicalView ? clamp((tissueAtlas - .0008) / .010, 0, 1) : 1;
+      const bodyHere = canonicalView ? bodyWeight > .015 : (tissueAtlas > .0002 || paths.soft + paths.lung > .035 || boneDelta > .005);
       if (bodyHere) bodyMask[i] = 1;
-      if (canonicalView && physicalAtlasTissue > .006 && boneDelta < .018) softWindowMask[i] = 1;
-      const localScatterScale = canonicalView ? (bodyHere ? .008 + .040 * (1 - Math.exp(-Math.max(0, softOd) * .70)) : .0005) : .5 + .5 * (paths.soft + paths.lung > 0 ? 1 : .15);
+      if (canonicalView && bodyWeight > .55 && physicalAtlasTissue > .006 && boneDelta < .018) softWindowMask[i] = 1;
+      // Scatter should veil contrast, not dominate it. The previous canonical scale was strong
+      // enough to wash the lungs and mediastinum into the same grey field.
+      const localScatterScale = canonicalView
+        ? (bodyHere ? .004 + .022 * (1 - Math.exp(-Math.max(0, softOd) * .70)) : .00025)
+        : .5 + .5 * (paths.soft + paths.lung > 0 ? 1 : .15);
       const scat = I0 * scatterFrac * localScatterScale;
       const bodySignal = I0 * T * texture + scat;
       const airSignal = I0 * 1.02 + I0 * scatterFrac * .00005;
-      let sig = canonicalView ? (bodyHere ? bodySignal : airSignal) : bodySignal;
-      if (!bodyHere) sig = airSignal;
+      let sig = canonicalView ? airSignal * (1 - bodyWeight) + bodySignal * bodyWeight : bodySignal;
+      if (!bodyHere && !canonicalView) sig = airSignal;
       signal[i] = sig;
       sum += sig;
     }
@@ -211,11 +224,13 @@ export async function renderRadiograph(args: {
     const contrastScale = clamp((kvp - 45) / 80, 0, 1);
     const canonicalMaskCount = canonicalView ? softWindowMask.reduce((a, v) => a + (v ? 1 : 0), 0) : 0;
     const canonicalMask = canonicalMaskCount > 128 ? softWindowMask : bodyMask;
-    const canonicalLow = canonicalView ? Math.log(percentileMasked(signal, canonicalMask, .02) + 1e-5) : 0;
-    const canonicalHigh = canonicalView ? Math.log(percentileMasked(signal, canonicalMask, .98) + 1e-5) : 1;
+    const canonicalLow = canonicalView ? Math.log(percentileMasked(signal, canonicalMask, .015) + 1e-5) : 0;
+    const canonicalHigh = canonicalView ? Math.log(percentileMasked(signal, canonicalMask, .985) + 1e-5) : 1;
     const canonicalSpan = Math.max(.18, canonicalHigh - canonicalLow);
-    const windowW = canonicalView ? Math.max(.68, canonicalSpan * 1.25) : 1.7 + contrastScale * 2.2;
-    const windowL = canonicalView ? canonicalLow + canonicalSpan * .52 : logMean + (mean > 100 ? .15 : mean < 10 ? -.25 : 0);
+    // Preserve the physically generated lung/soft-tissue separation instead of flattening it
+    // with an unnecessarily broad canonical window.
+    const windowW = canonicalView ? Math.max(.62, canonicalSpan * 1.10) : 1.7 + contrastScale * 2.2;
+    const windowL = canonicalView ? canonicalLow + canonicalSpan * .50 : logMean + (mean > 100 ? .15 : mean < 10 ? -.25 : 0);
     const baseNoise = .08 + .38 / Math.sqrt(Math.max(.5, mean / 40));
     const noiseGain = canonicalView ? baseNoise * .28 : baseNoise;
     const blurRadius = clamp(Math.round(geometry.geometricUnsharpnessMm * 1.25), 0, 3);
@@ -243,7 +258,7 @@ export async function renderRadiograph(args: {
       if (sig > well) { sig = well; sat++; }
       const L = Math.log(sig + 1e-5);
       let d = 1 - clamp((L - windowL) / windowW + .5, 0, 1);
-      if (kvp >= 100) d = canonicalView ? clamp((d - .5) * 1.015 + .5, 0, 1) : .08 + d * .84;
+      if (kvp >= 100) d = canonicalView ? clamp((d - .5) * 1.025 + .5, 0, 1) : .08 + d * .84;
       else if (kvp <= 55) d = clamp(d < .5 ? d * .9 : .5 + (d - .5) * 1.1, 0, 1);
       let tone = clamp(d, 0, 1);
       tone = tone * tone * (3 - 2 * tone);
