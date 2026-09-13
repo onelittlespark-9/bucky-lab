@@ -10,7 +10,7 @@ const gauss=(x:number,y:number,cx:number,cy:number,rx:number,ry:number,k=1.55)=>
 function torsoHalfWidthCm(yCm:number,widthMorph:number):number{
   if(yCm<21.5)return(8.9+(yCm-17.2)*.78)*widthMorph;
   if(yCm<28)return(12.25+(yCm-21.5)*.22)*widthMorph;
-  if(yCm<43)return13.7*widthMorph;
+  if(yCm<43)return 13.7*widthMorph;
   if(yCm<50)return(13.7-(yCm-43)*.10)*widthMorph;
   return(13.0-(yCm-50)*.20)*widthMorph;
 }
@@ -117,42 +117,34 @@ export function samplePaChest(x:number,y:number,patient:Patient,pose:SimPose,see
   p.soft*=Math.max(.014,1-lungs*.986);p.fat*=Math.max(.05,1-lungs*.95);
   p.lung+=(rightLung+leftLung)*(1.42+depth*.025);
 
-  // Lateral soft-tissue margins and axillary folds remain visible after lung aeration.
   p.soft+=lateralWall*.43+shoulders*.08;
   p.fat+=lateralWall*(patient.habitus==="hypersthenic"?.14:.060);
 
-  // Cardiovascular silhouette.
   p.soft+=svc*.22+rightAtrium*.62+rightVentricle*.44+leftVentricle*1.22+leftAtrium*.39+pulmonaryArtery*.27+aorticKnuckle*.23;
 
-  // Sternum: subtle manubrium/body/xiphoid attenuation, visible without becoming a bright vertical bar.
   const manubrium=gauss(x,y,0,27.0*s,.78*s,2.05*s,1.25);
   const sternalBody=gauss(x,y,0,34.7*s,.55*s,5.65*s,1.15);
   const xiphoid=gauss(x,y,.05*s,40.4*s,.36*s,1.20*s,1.35);
   p.soft+=manubrium*.15+sternalBody*.115+xiphoid*.075;
 
-  // Trachea, carina and main bronchi.
   p.air+=softCapsule(x,y,0,18.5*s,0,28.7*s,.24*s,.24)*3.5;
   p.air+=softCapsule(x,y,0,28.6*s,-2.1*s,31.7*s,.12*s,.28)*1.30;
   p.air+=softCapsule(x,y,0,28.6*s,1.9*s,31.5*s,.12*s,.28)*1.30;
 
-  // Hila and branching pulmonary vascular markings.
   p.soft+=gauss(x,y,-2.4*s,34.4*s,1.08*s,1.55*s)*.17;
   p.soft+=gauss(x,y,2.45*s,33.8*s,1.08*s,1.48*s)*.19;
   addVessels(p,x,y,s,-1);addVessels(p,x,y,s,1);
 
-  // Hemidiaphragm interfaces are generated mainly by the lung/subdiaphragmatic transition.
   const rightCurve=rightDia+.010*((x+4.0*s)**2)/s,leftCurve=leftDia+.013*((x-3.8*s)**2)/s;
   const rightGate=smooth01((x/s+12.4)/.85)*(1-smooth01((x/s+.10)/1.25));
   const leftGate=smooth01((x/s-.10)/1.25)*(1-smooth01((x/s-12.4)/.85));
   const rn=(y-rightCurve)/(.60*s),ln=(y-leftCurve)/(.62*s);
   p.soft+=Math.exp(-(rn*rn))*.072*rightGate+Math.exp(-(ln*ln))*.062*leftGate;
 
-  // Subdiaphragmatic anatomy produces the visible domes, CP angles and gastric bubble.
   p.soft+=gauss(x,y,-5.0*s,rightDia+2.25*s,5.9*s,2.0*s)*.42;
   p.soft+=gauss(x,y,1.5*s,leftDia+2.65*s,3.7*s,1.9*s)*.11;
   p.gas+=gauss(x,y,5.0*s,leftDia+1.95*s,2.15*s,.82*s)*2.45;
 
-  // Fine pulmonary markings: low-contrast, spatially irregular, strongest centrally and basally.
   const coarse=fbm(x*.22,y*.22,seed+19)-.5;
   const fine=fbm(x*1.05,y*1.05,seed+29)-.5;
   const vertical=fbm(x*.58,y*1.75,seed+41)-.5;
