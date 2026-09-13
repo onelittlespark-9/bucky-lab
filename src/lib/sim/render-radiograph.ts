@@ -117,15 +117,15 @@ export async function renderRadiograph(args: { patient: Patient; projection: Pro
           addSharedOrganPaths(paths, x, y, patient, pose);
         }
         addPacemaker(paths, x, y, projection, simCase?.device === "pacemaker");
-        const attenuationScale = isPaChest ? (hasAtlas ? 0.72 : 0.84) : (hasAtlas ? (0.65 + thickness / 45) : (0.55 + thickness / 40));
+        const attenuationScale = isPaChest ? (hasAtlas ? 0.78 : 0.88) : (hasAtlas ? (0.65 + thickness / 45) : (0.55 + thickness / 40));
         const softOd = pathsToOD(paths, kvp) * attenuationScale;
         const atlasOd = atlasOD?.[py * width + px] ?? 0;
         const od = Math.max(0.01, softOd + atlasOd + pathologyDelta(pathologyId, x, y, projection));
         const T = Math.exp(-od);
         const boneMask = atlasOd > 0.012 || paths.bone > 0.22 || paths.cortical > 0.08 ? 1 : 0;
-        const trabFine = (fbm(x * 3.2, y * 3.2, seed + 31) - 0.5) * (isPaChest ? 0.008 : 0.018);
-        const trabCoarse = (fbm(x * 0.9, y * 0.9, seed + 37) - 0.5) * (isPaChest ? 0.005 : 0.012);
-        const softVar = (fbm(x * 0.45, y * 0.45, seed + 11) - 0.5) * (isPaChest ? 0.008 : 0.018) * (paths.soft > 1 ? 1 : 0);
+        const trabFine = (fbm(x * 3.2, y * 3.2, seed + 31) - 0.5) * (isPaChest ? 0.010 : 0.018);
+        const trabCoarse = (fbm(x * 0.9, y * 0.9, seed + 37) - 0.5) * (isPaChest ? 0.006 : 0.012);
+        const softVar = (fbm(x * 0.45, y * 0.45, seed + 11) - 0.5) * (isPaChest ? 0.011 : 0.018) * (paths.soft > 0.6 ? 1 : 0);
         const anatomicalTexture = 1 + boneMask * (trabFine + trabCoarse) + softVar;
         const scat = I0 * scatterFrac * (0.5 + 0.5 * (paths.soft + paths.lung > 0 ? 1 : 0.15));
         let sig = I0 * T * anatomicalTexture + scat;
@@ -148,12 +148,12 @@ export async function renderRadiograph(args: { patient: Patient; projection: Pro
     let sat = 0, noiseAcc = 0, contrastAcc = 0, contrastN = 0;
     const logMean = Math.log(mean + 1e-5);
     const contrastScale = clamp((kvp - 45) / 80, 0, 1);
-    const windowW = isPaChest ? 2.85 : 1.7 + contrastScale * 2.2;
-    const windowL = logMean + (isPaChest ? -0.02 : mean > 100 ? 0.15 : mean < 10 ? -0.25 : 0);
+    const windowW = isPaChest ? 2.10 : 1.7 + contrastScale * 2.2;
+    const windowL = logMean + (isPaChest ? -0.10 : mean > 100 ? 0.15 : mean < 10 ? -0.25 : 0);
     const baseNoiseGain = 0.08 + 0.38 / Math.sqrt(Math.max(0.5, mean / 40));
-    const noiseGain = isPaChest ? baseNoiseGain * 0.34 : baseNoiseGain;
+    const noiseGain = isPaChest ? baseNoiseGain * 0.42 : baseNoiseGain;
     const blurRadius = clamp(Math.round(geometry.geometricUnsharpnessMm * 1.25), 0, 3);
-    const blurWeight = blurRadius > 0 ? Math.min(0.28, geometry.geometricUnsharpnessMm * 0.11) : 0;
+    const blurWeight = blurRadius > 0 ? Math.min(0.24, geometry.geometricUnsharpnessMm * 0.09) : 0;
 
     for (let i = 0; i < n; i++) {
       let sig = signal[i]!;
@@ -169,7 +169,7 @@ export async function renderRadiograph(args: { patient: Patient; projection: Pro
       if (sig > well) { sig = well; sat += 1; }
       const L = Math.log(sig + 1e-5);
       let d = 1 - clamp((L - windowL) / windowW + 0.5, 0, 1);
-      if (kvp >= 100) d = isPaChest ? 0.045 + d * 0.91 : 0.08 + d * 0.84;
+      if (kvp >= 100) d = isPaChest ? 0.02 + d * 0.97 : 0.08 + d * 0.84;
       else if (kvp <= 55) d = clamp(d < 0.5 ? d * 0.9 : 0.5 + (d - 0.5) * 1.1, 0, 1);
       let tone = clamp(d, 0, 1); tone = tone * tone * (3 - 2 * tone);
       const v = Math.round(clamp(tone, 0, 1) * 255), o = i * 4;
