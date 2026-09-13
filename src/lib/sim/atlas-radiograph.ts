@@ -138,7 +138,7 @@ function chestMeshAllowed(mesh:THREE.Mesh,projection:Projection,ribs:THREE.Box3|
   const region=mesh.userData.atlasRegion as string,name=(mesh.userData.atlasName as string)||"";
   if(name.includes("cartilage"))return false;
   if(projection.id==="pa-chest"&&region==="scapula")return false;
-  if(projection.id==="pa-chest"&&region==="axial"&&!name.includes("vertebra")&&!name.includes("spine"))return false;
+  if(projection.id==="pa-chest"&&region==="axial"&&!name.includes("vertebra")&&!name.includes("spine")&&!name.includes("sternum"))return false;
   if((projection.id==="pa-chest"||projection.id==="lat-chest")&&region==="axial"&&ribs){const c=new THREE.Box3().setFromObject(mesh).getCenter(new THREE.Vector3());return c.y>=ribs.min.y+0.006&&c.y<=ribs.max.y-0.010;}
   return true;
 }
@@ -203,9 +203,6 @@ export async function atlasBoneOpticalDensity(args:{patient:Patient;projection:P
     for(const m of atlas.meshes)m.visible=true;scene.overrideMaterial=null;renderer.dispose();renderTarget.dispose();frontMaterial.dispose();backMaterial.dispose();
     const full=new Float32Array(width*height);
     for(let y=0;y<height;y++){
-      // WebGL readRenderTargetPixels uses a bottom-left origin while the image
-      // renderer and anatomy sampler use top-left image coordinates. Flip Y here
-      // so atlas bones align anatomically with the procedural soft-tissue field.
       const sy=(1-y/Math.max(1,height-1))*(rh-1),y0=Math.floor(sy),y1=Math.min(rh-1,y0+1),fy=sy-y0;
       for(let x=0;x<width;x++){
         const sx=x/Math.max(1,width-1)*(rw-1),x0=Math.floor(sx),x1=Math.min(rw-1,x0+1),fx=sx-x0,a=low[y0*rw+x0]!,b=low[y0*rw+x1]!,c=low[y1*rw+x0]!,d=low[y1*rw+x1]!;
