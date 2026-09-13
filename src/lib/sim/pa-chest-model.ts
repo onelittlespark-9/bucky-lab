@@ -7,17 +7,31 @@ const clamp01=(v:number)=>Math.max(0,Math.min(1,v));
 const smooth01=(v:number)=>{const t=clamp01(v);return t*t*(3-2*t);};
 const gauss=(x:number,y:number,cx:number,cy:number,rx:number,ry:number,k=1.55)=>Math.exp(-(((x-cx)/rx)**2+((y-cy)/ry)**2)*k);
 
+function torsoHalfWidthCm(yCm:number,widthMorph:number):number{
+  if(yCm<25)return(10.8+(yCm-17.5)*.39)*widthMorph;
+  if(yCm>45)return(13.7-(yCm-45)*.16)*widthMorph;
+  return 13.7*widthMorph;
+}
+
 function torsoField(x:number,y:number,s:number,w:number):number{
   const yy=y/s;
   if(yy<17.5||yy>57.5)return 0;
   const top=smooth01((yy-17.5)/2.1);
   const bottom=1-smooth01((yy-55.5)/2.0);
-  let half=13.7*w;
-  if(yy<25)half=(10.8+(yy-17.5)*.39)*w;
-  else if(yy>45)half=(13.7-(yy-45)*.16)*w;
+  const half=torsoHalfWidthCm(yy,w);
   const q=Math.abs(x)/(Math.max(.5,half*s));
-  const edge=q<1.08?Math.exp(-Math.pow(q/.95,7.5))*smooth01((1.08-q)/.08):0;
+  const edge=q<1.045?Math.exp(-Math.pow(q/.965,9.5))*smooth01((1.045-q)/.045):0;
   return top*bottom*edge;
+}
+
+function lateralWallField(x:number,y:number,s:number,w:number):number{
+  const yy=y/s;
+  if(yy<20||yy>50.5)return 0;
+  const half=torsoHalfWidthCm(yy,w)*s;
+  const d=Math.abs(Math.abs(x)-half);
+  const vertical=smooth01((yy-20)/2.2)*(1-smooth01((yy-49.5)/1.4));
+  const rim=Math.exp(-Math.pow(d/(0.48*s),2));
+  return rim*vertical;
 }
 
 function lungField(x:number,y:number,side:-1|1,s:number,base:number){
@@ -70,6 +84,7 @@ export function samplePaChest(x:number,y:number,patient:Patient,pose:SimPose,see
   if(torso<.001){p.air=40;return p;}
 
   const yy=y/s;
+  const lateralWall=lateralWallField(x,y,s,w);
   const shoulderBoost=(gauss(x,y,-11.2*w*s,22.8*s,4.0*s,2.2*s)+gauss(x,y,11.2*w*s,22.8*s,4.0*s,2.2*s))*.055;
   const abdominalBoost=smooth01((yy-46.5)/2.0)*.34;
   p.soft=torso*(.54+abdominalBoost)+shoulderBoost;
@@ -90,6 +105,11 @@ export function samplePaChest(x:number,y:number,patient:Patient,pose:SimPose,see
   const lungs=Math.max(rL,lL);
   p.soft*=Math.max(.015,1-lungs*.985);p.fat*=Math.max(.05,1-lungs*.95);
   p.lung+=(rL+lL)*(1.40+depth*.025);
+
+  // Preserve a thin lateral chest-wall band after lung aeration is applied.
+  p.soft+=lateralWall*.34;
+  p.fat+=lateralWall*(patient.habitus==="hypersthenic"?.12:.055);
+
   p.soft+=svc*.22+ra*.60+rv*.46+lv*1.24+la*.40+pa*.28+ao*.24;
 
   p.air+=softCapsule(x,y,0,18.7*s,0,28.8*s,.24*s,.24)*3.5;
