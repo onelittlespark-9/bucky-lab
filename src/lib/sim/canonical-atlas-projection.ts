@@ -18,7 +18,7 @@ const CACHE=new Map<string,Promise<CanonicalMaps>>();
 const VIEW_CACHE=new Map<string,ViewMaps>();
 
 export function usesCanonicalAtlasProjection(projection:Projection){
-  return projection.id==="ap-full-body"||projection.anatomy==="torso-ap"||projection.anatomy==="shoulder-ap";
+  return projection.id==="pa-chest"||projection.id==="ap-full-body"||projection.anatomy==="torso-ap"||projection.anatomy==="shoulder-ap";
 }
 
 function sampleBilinear(src:Float32Array,sw:number,sh:number,u:number,v:number){if(u<0||v<0||u>sw-1||v>sh-1)return 0;const x0=Math.floor(u),y0=Math.floor(v),x1=Math.min(sw-1,x0+1),y1=Math.min(sh-1,y0+1),fx=u-x0,fy=v-y0,a=src[y0*sw+x0]!,b=src[y0*sw+x1]!,c=src[y1*sw+x0]!,d=src[y1*sw+x1]!;return a*(1-fx)*(1-fy)+b*fx*(1-fy)+c*(1-fx)*fy+d*fx*fy;}
@@ -45,5 +45,7 @@ export async function canonicalAtlasProjection(args:{patient:Patient;projection:
   const cached=VIEW_CACHE.get(viewKey);if(cached){touchView(viewKey,cached);return cached;}
   const maps=await canonicalMaps({patient,projection,tube,geometry});
   const tissueScale=linearAttenuation("soft",exposureKvp)/linearAttenuation("soft",REFERENCE_KVP),boneNow=.68*linearAttenuation("corticalBone",exposureKvp)+.32*linearAttenuation("trabecularBone",exposureKvp),boneRef=.68*linearAttenuation("corticalBone",REFERENCE_KVP)+.32*linearAttenuation("trabecularBone",REFERENCE_KVP),boneScale=boneNow/boneRef;
-  const result={bone:cropCanonical(maps.bone,maps.width,maps.height,tube,geometry,width,height,boneScale),tissue:cropCanonical(maps.tissue,maps.width,maps.height,tube,geometry,width,height,tissueScale)};touchView(viewKey,result);return result;
+  // The current atlas soft-tissue depth projection produces faceted cross-mesh slabs in the chest. Keep the atlas skeleton, but use the dedicated projection models for thoracic/full-body tissue until the atlas tissue ray integration is volumetric.
+  const preferProceduralTissue=projection.id==="pa-chest"||projection.id==="ap-full-body";
+  const result={bone:cropCanonical(maps.bone,maps.width,maps.height,tube,geometry,width,height,boneScale),tissue:preferProceduralTissue?null:cropCanonical(maps.tissue,maps.width,maps.height,tube,geometry,width,height,tissueScale)};touchView(viewKey,result);return result;
 }
