@@ -76,25 +76,24 @@ function blurScalar(src: Float32Array, w: number, h: number, radius: number) {
 }
 function smooth01(v: number) { const t = clamp(v, 0, 1); return t * t * (3 - 2 * t); }
 
-function detectorTone(detectorOD: number, localOD: number, boneOD: number, bodyWeight: number, anchors: { low: number; mid: number; high: number }, chest: boolean) {
-  if (bodyWeight <= .002 && detectorOD < .004) return .035;
-  const lowSpan = Math.max(.030, anchors.mid - anchors.low);
-  const highSpan = Math.max(.055, anchors.high - anchors.mid);
+function detectorTone(detectorOD: number, localOD: number, bodyWeight: number, anchors: { low: number; mid: number; high: number }, chest: boolean) {
+  if (bodyWeight <= .002 && detectorOD < .004) return .025;
+  const lowSpan = Math.max(.035, anchors.mid - anchors.low);
+  const highSpan = Math.max(.060, anchors.high - anchors.mid);
   let base: number;
   if (detectorOD <= anchors.mid) {
     const t = clamp((detectorOD - anchors.low) / lowSpan, 0, 1);
-    base = (chest ? .105 : .095) + (chest ? .39 : .42) * Math.pow(t, chest ? .88 : .82);
+    base = (chest ? .070 : .065) + (chest ? .405 : .410) * Math.pow(t, chest ? .92 : .88);
   } else {
     const t = clamp((detectorOD - anchors.mid) / highSpan, 0, 1);
-    base = (chest ? .495 : .515) + (chest ? .37 : .35) * Math.pow(t, .72);
+    base = (chest ? .475 : .475) + (chest ? .385 : .365) * Math.pow(t, .78);
   }
-  const span = Math.max(.10, anchors.high - anchors.low);
-  const detail = clamp((detectorOD - localOD) / span, -.32, .32);
-  const boneStrength = 1 - Math.exp(-Math.max(0, boneOD) / .10);
-  let tone = base + detail * (chest ? .035 : .028) + boneStrength * (chest ? .035 : .045);
-  tone = clamp(tone, .050, .955);
-  const pathWeight = smooth01(clamp(bodyWeight * 1.12, 0, 1));
-  return .035 * (1 - pathWeight) + tone * pathWeight;
+  const span = Math.max(.12, anchors.high - anchors.low);
+  const detail = clamp((detectorOD - localOD) / span, -.24, .24);
+  let tone = base + detail * (chest ? .018 : .014);
+  tone = clamp(tone, .035, .940);
+  const pathWeight = smooth01(clamp((bodyWeight - .045) / .955, 0, 1));
+  return .025 * (1 - pathWeight) + tone * pathWeight;
 }
 
 export async function renderRadiograph(args: { patient: Patient; projection: Projection; pose: SimPose; tube: TubeState; exposure: ExposureState; pathologyId?: PathologyId; caseId?: string | null; width?: number; height?: number; }): Promise<RadiographResult> {
@@ -151,13 +150,13 @@ export async function renderRadiograph(args: { patient: Patient; projection: Pro
       const od = Math.max(.00001, softOD + bone + metalOD + pathOD);
       softODMap[i] = softOD; totalOD[i] = od; boneOD[i] = bone;
 
-      const tissueWeight = smooth01(clamp((softOD - .00008) / .030, 0, 1));
-      const boneWeight = smooth01(clamp(bone / .020, 0, 1)) * .85;
-      const proceduralWeight = clamp((paths.soft + paths.lung + paths.fat) / .08, 0, 1);
+      const tissueWeight = smooth01(clamp((softOD - .0030) / .060, 0, 1));
+      const boneWeight = smooth01(clamp((bone - .0015) / .030, 0, 1)) * .74;
+      const proceduralWeight = clamp((paths.soft + paths.lung + paths.fat) / .10, 0, 1);
       const bodyWeight = Math.max(tissueWeight, boneWeight, useTissueAtlas ? 0 : proceduralWeight);
       bodyWeightMap[i] = bodyWeight;
 
-      const scatterScale = bodyWeight > .02 ? .002 + .011 * (1 - Math.exp(-Math.max(0, softOD) * .55)) : .00004;
+      const scatterScale = bodyWeight > .04 ? .0016 + .0085 * (1 - Math.exp(-Math.max(0, softOD) * .50)) : .00003;
       const scat = I0 * scatterFrac * scatterScale;
       const bodySignal = I0 * Math.exp(-od) + scat;
       const airSignal = I0 * 1.02 + I0 * scatterFrac * .00002;
@@ -176,37 +175,37 @@ export async function renderRadiograph(args: { patient: Patient; projection: Pro
       if (bodyWeightMap[i] > .50 && detectorOD[i]! > .002 && boneOD[i] < .16) detectorSamples.push(detectorOD[i]!);
     }
     const anchors = {
-      low: percentile([...detectorSamples], isPaChest ? .025 : .035),
-      mid: percentile([...detectorSamples], isPaChest ? .46 : .52),
-      high: percentile([...detectorSamples], isPaChest ? .995 : .990),
+      low: percentile([...detectorSamples], isPaChest ? .10 : .055),
+      mid: percentile([...detectorSamples], isPaChest ? .58 : .56),
+      high: percentile([...detectorSamples], isPaChest ? .995 : .992),
     };
-    if (anchors.mid <= anchors.low + .030) anchors.mid = anchors.low + .030;
-    if (anchors.high <= anchors.mid + .055) anchors.high = anchors.mid + .055;
-    const localDetectorOD = blurScalar(detectorOD, width, height, isPaChest ? 3 : Math.max(2, Math.min(5, Math.round(Math.min(width, height) / 220))));
+    if (anchors.mid <= anchors.low + .035) anchors.mid = anchors.low + .035;
+    if (anchors.high <= anchors.mid + .060) anchors.high = anchors.mid + .060;
+    const localDetectorOD = blurScalar(detectorOD, width, height, isPaChest ? 2 : Math.max(1, Math.min(3, Math.round(Math.min(width, height) / 300))));
 
     const canvas = document.createElement("canvas"); canvas.width = width; canvas.height = height;
     const g = canvas.getContext("2d"); if (!g) throw new Error("Render failed — could not obtain 2D canvas context.");
     const img = g.createImageData(width, height);
     let sat = 0, noiseAcc = 0, contrastAcc = 0, contrastN = 0;
-    const quantumNoise = .0014 + .0050 / Math.sqrt(Math.max(.6, exposure.mas));
-    const blurRadius = geometry.geometricUnsharpnessMm > .16 ? 1 : 0;
-    const blurWeight = blurRadius ? Math.min(.10, geometry.geometricUnsharpnessMm * .05) : 0;
+    const quantumNoise = .0012 + .0042 / Math.sqrt(Math.max(.6, exposure.mas));
+    const blurRadius = geometry.geometricUnsharpnessMm > .24 ? 1 : 0;
+    const blurWeight = blurRadius ? Math.min(.055, geometry.geometricUnsharpnessMm * .028) : 0;
 
     for (let i = 0; i < n; i++) {
       const nx = i % width, ny = i / width | 0;
-      let tone = detectorTone(detectorOD[i]!, localDetectorOD[i]!, boneOD[i]!, bodyWeightMap[i]!, anchors, isPaChest);
+      let tone = detectorTone(detectorOD[i]!, localDetectorOD[i]!, bodyWeightMap[i]!, anchors, isPaChest);
       if (blurRadius > 0 && nx > 1 && nx < width - 2 && ny > 1 && ny < height - 2) {
         let neighbour = 0, count = 0;
         for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
           if (!dx && !dy) continue;
           const j = (ny + dy) * width + nx + dx, wt = (dx === 0 || dy === 0) ? 1 : .7;
-          neighbour += detectorTone(detectorOD[j]!, localDetectorOD[j]!, boneOD[j]!, bodyWeightMap[j]!, anchors, isPaChest) * wt; count += wt;
+          neighbour += detectorTone(detectorOD[j]!, localDetectorOD[j]!, bodyWeightMap[j]!, anchors, isPaChest) * wt; count += wt;
         }
         if (count > 0) tone = tone * (1 - blurWeight) + neighbour / count * blurWeight;
       }
-      const bodyNoise = quantumNoise * (.20 + .80 * bodyWeightMap[i]!);
+      const bodyNoise = quantumNoise * (.16 + .84 * bodyWeightMap[i]!);
       const fine = (fbm(nx * .61, ny * .61, seed + 4) - .5) * 2 * bodyNoise;
-      const detector = (fbm(nx * .13, ny * .13, seed + 17) - .5) * .0016;
+      const detector = (fbm(nx * .13, ny * .13, seed + 17) - .5) * .0012;
       const nse = fine + detector;
       tone = clamp(tone + nse, 0, 1); noiseAcc += Math.abs(nse);
       if (signal[i]! > well) sat++;
