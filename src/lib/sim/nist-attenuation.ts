@@ -8,8 +8,10 @@
 // https://physics.nist.gov/PhysRefData/XrayMassCoef/ComTab/lung.html
 // https://physics.nist.gov/PhysRefData/XrayMassCoef/ComTab/adipose.html
 // https://physics.nist.gov/PhysRefData/XrayMassCoef/ComTab/blood.html
-// Densities follow ICRU-44 reference tissues. Inflated lung is 0.260 g/cm3;
-// cortical bone, adipose, muscle, blood and brain use their ICRU values.
+// Reference attenuation curves come from NIST/ICRU data. Effective densities are
+// renderer calibration values: deeply inspired whole-body lung is modelled at
+// 0.210 g/cm3 so an atlas lung path genuinely replaces soft tissue, while
+// cancellous bone is 0.62 g/cm3 to retain cortical/trabecular separation.
 
 export type RadiographicMaterial =
   | "air"
@@ -37,13 +39,13 @@ const MASS_MU: Record<RadiographicMaterial, Curve> = {
 };
 const DENSITY_G_CM3: Record<RadiographicMaterial, number> = {
   air: 0.001205,
-  inflatedLung: 0.260,
+  inflatedLung: 0.210,
   adipose: 0.95,
   soft: 1.06,
   muscle: 1.05,
   blood: 1.06,
   brain: 1.04,
-  trabecularBone: 0.72,
+  trabecularBone: 0.62,
   corticalBone: 1.92,
 };
 function lerp(a:number,b:number,t:number){return a+(b-a)*t;}
