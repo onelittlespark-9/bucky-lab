@@ -106,7 +106,7 @@ export async function projectAtlasTissueOD(args:{patient:Patient;projection:Proj
     for (const p of atlas.parts) { p.mesh.visible = true; p.mesh.quaternion.identity(); }
     atlas.root.updateMatrixWorld(true);
     const bounds = new THREE.Box3().setFromObject(atlas.root), centre = bounds.getCenter(new THREE.Vector3()); centre.x = 0;
-    const rw = Math.min(512, Math.max(224, width)), rh = Math.min(1024, Math.max(384, height));
+    const rw = Math.min(640, Math.max(256, width)), rh = Math.min(1600, Math.max(512, height));
     let target = centre.clone();
     if (!wholeBody) { const targetYcm = projection.cr.y * patient.heightCm / 170; target = new THREE.Vector3(projection.cr.x / 100, patient.heightCm / 100 - targetYcm / 100, 0); }
     const lateral = projection.anatomy === "torso-lat" || projection.anatomy === "cspine-lat" || projection.anatomy === "skull-lat";
@@ -115,76 +115,66 @@ export async function projectAtlasTissueOD(args:{patient:Patient;projection:Proj
     camera.position.copy(lateral ? new THREE.Vector3(target.x + 2.5, target.y, target.z) : new THREE.Vector3(target.x, target.y, target.z + 2.5));
     camera.lookAt(target); camera.updateProjectionMatrix();
 
-    const renderer = new THREE.WebGLRenderer({ antialias:false, alpha:false, preserveDrawingBuffer:false }); renderer.setSize(rw,rh,false); renderer.setPixelRatio(1); renderer.outputColorSpace = THREE.LinearSRGBColorSpace; renderer.setClearColor(0xffffff,1);
+    const renderer = new THREE.WebGLRenderer({ antialias:false, alpha:false, preserveDrawingBuffer:false, powerPreference:"high-performance" }); renderer.setSize(rw,rh,false); renderer.setPixelRatio(1); renderer.outputColorSpace = THREE.LinearSRGBColorSpace; renderer.setClearColor(0xffffff,1);
     const scene = new THREE.Scene(); scene.background = new THREE.Color(0xffffff); scene.add(atlas.root);
     const rt = new THREE.WebGLRenderTarget(rw,rh,{format:THREE.RGBAFormat,type:THREE.UnsignedByteType,depthBuffer:true,stencilBuffer:false});
     const vs = `varying float vDepth;void main(){vec4 mv=modelViewMatrix*vec4(position,1.0);gl_Position=projectionMatrix*mv;vDepth=gl_Position.z/gl_Position.w*.5+.5;}`;
     const fs = `varying float vDepth;vec3 packDepth24(float v){v=clamp(v,0.0,0.999999);vec3 enc=fract(v*vec3(1.0,255.0,65025.0));enc-=enc.yzz*vec3(1.0/255.0,1.0/255.0,0.0);return enc;}void main(){gl_FragColor=vec4(packDepth24(vDepth),1.0);}`;
     const fm = new THREE.ShaderMaterial({vertexShader:vs,fragmentShader:fs,side:THREE.FrontSide,depthTest:true,depthWrite:true}), bm = new THREE.ShaderMaterial({vertexShader:vs,fragmentShader:fs,side:THREE.BackSide,depthTest:true,depthWrite:true});
 
-    const skin = blur(projectVisible(scene,atlas,p => p.system === "integumentary",camera,renderer,rt,fm,bm,rw,rh),rw,rh,2);
-    const muscle = blur(projectVisible(scene,atlas,p => p.system === "muscular" && !/diaphragm/i.test(p.name),camera,renderer,rt,fm,bm,rw,rh),rw,rh,2);
-    const lung = blur(projectParts(scene,atlas,p => p.system === "respiratory" && /lung/i.test(p.name),camera,renderer,rt,fm,bm,rw,rh,34,44),rw,rh,1);
+    const skin = blur(projectVisible(scene,atlas,p => p.system === "integumentary",camera,renderer,rt,fm,bm,rw,rh),rw,rh,1);
+    const muscle = blur(projectVisible(scene,atlas,p => p.system === "muscular" && !/diaphragm/i.test(p.name),camera,renderer,rt,fm,bm,rw,rh),rw,rh,1);
+    const lung = projectParts(scene,atlas,p => p.system === "respiratory" && /lung/i.test(p.name),camera,renderer,rt,fm,bm,rw,rh,36,46);
     const heart = blur(projectParts(scene,atlas,p => p.system === "cardiac",camera,renderer,rt,fm,bm,rw,rh,13,19),rw,rh,1);
-    const vessels = blur(projectParts(scene,atlas,p => p.system === "arterial" || p.system === "venous",camera,renderer,rt,fm,bm,rw,rh,.9,4.2),rw,rh,2);
-    const digestive = blur(projectParts(scene,atlas,p => p.system === "digestive",camera,renderer,rt,fm,bm,rw,rh,11,28),rw,rh,1);
-    const urinary = blur(projectParts(scene,atlas,p => p.system === "urinary",camera,renderer,rt,fm,bm,rw,rh,9,16),rw,rh,1);
+    const vessels = blur(projectParts(scene,atlas,p => p.system === "arterial" || p.system === "venous",camera,renderer,rt,fm,bm,rw,rh,.8,3.6),rw,rh,1);
+    const digestive = blur(projectParts(scene,atlas,p => p.system === "digestive",camera,renderer,rt,fm,bm,rw,rh,9,22),rw,rh,1);
+    const urinary = blur(projectParts(scene,atlas,p => p.system === "urinary",camera,renderer,rt,fm,bm,rw,rh,6,10),rw,rh,1);
     const brain = blur(projectParts(scene,atlas,p => p.system === "nervous" && /brain|cerebr|encephal/i.test(p.name),camera,renderer,rt,fm,bm,rw,rh,16,20),rw,rh,1);
-    const diaphragm = blur(projectParts(scene,atlas,p => p.system === "muscular" && /diaphragm/i.test(p.name),camera,renderer,rt,fm,bm,rw,rh,4.5,7),rw,rh,1);
+    const diaphragm = projectParts(scene,atlas,p => p.system === "muscular" && /diaphragm/i.test(p.name),camera,renderer,rt,fm,bm,rw,rh,4.5,7);
 
     const muSoft = linearAttenuation("soft",exposureKvp), muFat = linearAttenuation("adipose",exposureKvp), muLung = linearAttenuation("inflatedLung",exposureKvp), muMuscle = linearAttenuation("muscle",exposureKvp), muBlood = linearAttenuation("blood",exposureKvp), muBrain = linearAttenuation("brain",exposureKvp);
     const out = new Float32Array(rw * rh);
     for (let i = 0; i < out.length; i++) {
       const body = skin[i]!; if (body <= .003) continue;
-
-      // Start from a continuous body chord, then replace portions with the material actually
-      // occupying them. This is intentionally different from additive 'organ opacity': aerated
-      // lung must REMOVE soft-tissue attenuation or two genuine radiolucent lung fields cannot form.
-      const musclePath = Math.min(body * .47, muscle[i]! * .34);
-      const fatPath = Math.min(body * .20, Math.max(body * .045, (body - musclePath) * .17));
+      const musclePath = Math.min(body * .40, muscle[i]! * .25);
+      const fatPath = Math.min(body * .18, Math.max(body * .040, (body - musclePath) * .15));
       const internal = Math.max(0, body - musclePath - fatPath);
       const baseline = fatPath * muFat + musclePath * muMuscle + internal * muSoft;
 
-      const lungPath = Math.min(internal * .95, lung[i]! * 1.03);
-      const brainPath = Math.min(internal, brain[i]! * .92);
-      const heartPath = Math.min(internal * .78, heart[i]! * .98);
-      const vesselPath = Math.min(internal * .24, vessels[i]! * .28);
-      const digestivePath = Math.min(internal * .80, digestive[i]! * .43);
-      const urinaryPath = Math.min(internal * .34, urinary[i]! * .50);
-      const diaphragmPath = Math.min(internal * .20, diaphragm[i]! * .68);
+      const lungPath = Math.min(internal * .98, lung[i]! * 1.18);
+      const brainPath = Math.min(internal, brain[i]! * .90);
+      const heartPath = Math.min(internal * .72, heart[i]! * .90);
+      const vesselPath = Math.min(internal * .18, vessels[i]! * .22);
+      const digestivePath = Math.min(internal * .55, digestive[i]! * .28);
+      const urinaryPath = Math.min(internal * .20, urinary[i]! * .24);
+      const diaphragmPath = Math.min(internal * .18, diaphragm[i]! * .55);
 
-      // Lung is a negative replacement relative to the soft-tissue baseline. Structures that
-      // project through lung restore attenuation in proportion to their overlap, producing a
-      // natural mediastinal/cardiac silhouette, hila and diaphragmatic bases without global contrast hacks.
       const lungReplacement = lungPath * (muLung - muSoft);
       let availableAerated = lungPath;
-      const heartOverlap = Math.min(availableAerated, heartPath * .92); availableAerated -= heartOverlap;
-      const diaphragmOverlap = Math.min(availableAerated, diaphragmPath * .90); availableAerated -= diaphragmOverlap;
-      const vesselOverlap = Math.min(availableAerated, vesselPath * .72);
-      const restoreFromHeart = heartOverlap * (muSoft - muLung) * .98;
-      const restoreFromDiaphragm = diaphragmOverlap * (muSoft - muLung) * .96;
-      const restoreFromVessels = vesselOverlap * (muSoft - muLung) * .74;
+      const heartOverlap = Math.min(availableAerated, heartPath * .84); availableAerated -= heartOverlap;
+      const diaphragmOverlap = Math.min(availableAerated, diaphragmPath * .78); availableAerated -= diaphragmOverlap;
+      const vesselOverlap = Math.min(availableAerated, vesselPath * .62);
+      const restoreFromHeart = heartOverlap * (muSoft - muLung) * .84;
+      const restoreFromDiaphragm = diaphragmOverlap * (muSoft - muLung) * .82;
+      const restoreFromVessels = vesselOverlap * (muSoft - muLung) * .58;
 
-      const brainReplacement = brainPath * (muBrain - muSoft);
-      const heartMaterial = heartPath * (muBlood * 1.045 - muSoft);
-      const vesselMaterial = vesselPath * (muBlood * 1.08 - muSoft);
-      const digestiveMaterial = digestivePath * (muSoft * 1.030 - muSoft);
-      const urinaryMaterial = urinaryPath * (muSoft * 1.060 - muSoft);
-      const diaphragmMaterial = diaphragmPath * (muMuscle * 1.035 - muSoft);
-
-      // Preserve a small interstitial component so the lungs are radiolucent rather than empty.
-      const interstitial = lungPath * .028 * (muSoft - muLung);
-      const edge = clamp01(body / 1.15), bodyFeather = edge * edge * (3 - 2 * edge);
+      const brainReplacement = brainPath * (muBrain - muSoft) * .72;
+      const heartMaterial = heartPath * (muBlood * 1.018 - muSoft);
+      const vesselMaterial = vesselPath * (muBlood * 1.028 - muSoft);
+      const digestiveMaterial = digestivePath * (muSoft * 1.010 - muSoft);
+      const urinaryMaterial = urinaryPath * (muSoft * 1.008 - muSoft);
+      const diaphragmMaterial = diaphragmPath * (muMuscle * 1.018 - muSoft);
+      const interstitial = lungPath * .018 * (muSoft - muLung);
+      const edge = clamp01(body / 1.45), bodyFeather = edge * edge * (3 - 2 * edge);
       out[i] = Math.max(0,
         baseline + lungReplacement + interstitial +
         restoreFromHeart + restoreFromDiaphragm + restoreFromVessels +
         brainReplacement + heartMaterial + vesselMaterial +
         digestiveMaterial + urinaryMaterial + diaphragmMaterial
-      ) * (.70 + .08 * bodyFeather);
+      ) * (.56 + .16 * bodyFeather);
     }
 
-    // Mild detector MTF smoothing removes polygonal segmentation while retaining organ interfaces.
-    const physical = blur(out, rw, rh, 1);
+    const physical = out;
     for (const p of atlas.parts) p.mesh.visible = true;
     scene.overrideMaterial = null; renderer.dispose(); rt.dispose(); fm.dispose(); bm.dispose();
     const full = new Float32Array(width * height);
