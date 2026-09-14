@@ -25,6 +25,9 @@ export type RadiographicMaterial =
 
 export type MaterialPath = Partial<Record<RadiographicMaterial, number>>;
 
+const MATERIALS: readonly RadiographicMaterial[] = [
+  "air","inflatedLung","adipose","soft","muscle","blood","brain","trabecularBone","corticalBone","metal",
+];
 const ENERGY_KEV = [20, 30, 40, 50, 60, 80, 100, 120, 150] as const;
 type Curve = readonly [number, number, number, number, number, number, number, number, number];
 
@@ -36,11 +39,8 @@ const MASS_MU: Record<RadiographicMaterial, Curve> = {
   muscle: [0.8205, 0.3783, 0.2685, 0.2262, 0.2048, 0.1823, 0.1693, 0.1608, 0.1492],
   blood: [0.8290, 0.3810, 0.2690, 0.2268, 0.2052, 0.1827, 0.1695, 0.1610, 0.1494],
   brain: [0.8120, 0.3770, 0.2680, 0.2260, 0.2045, 0.1820, 0.1690, 0.1605, 0.1489],
-  // Trabecular bone is represented as lower-density mineralised bone. The curve
-  // remains distinct from cortical bone while density captures its reduced mineral fraction.
   trabecularBone: [2.28, 0.770, 0.460, 0.335, 0.275, 0.215, 0.188, 0.171, 0.151],
   corticalBone: [4.001, 1.331, 0.6655, 0.4242, 0.3148, 0.2229, 0.1855, 0.1644, 0.1480],
-  // Elemental titanium (NIST XCOM) used for pacemaker/device metal paths.
   metal: [15.85, 4.972, 2.214, 1.213, 0.7661, 0.4052, 0.2721, 0.2140, 0.1649],
 };
 
@@ -57,9 +57,7 @@ const DENSITY_G_CM3: Record<RadiographicMaterial, number> = {
   metal: 4.54,
 };
 
-export function materialDensity(material:RadiographicMaterial):number{
-  return DENSITY_G_CM3[material];
-}
+export function materialDensity(material:RadiographicMaterial):number{return DENSITY_G_CM3[material];}
 
 const AL_MASS_MU: Curve = [3.441, 1.128, 0.5685, 0.3681, 0.2778, 0.2018, 0.1704, 0.1540, 0.1378];
 const AL_DENSITY_G_CM3 = 2.699;
@@ -80,83 +78,77 @@ function interpolate(curve:Curve,energyKev:number):number{
 export function linearAttenuationAtEnergy(material:RadiographicMaterial,energyKev:number):number{
   return interpolate(MASS_MU[material],energyKev)*DENSITY_G_CM3[material];
 }
+export function aluminiumLinearAttenuationAtEnergy(energyKev:number):number{return interpolate(AL_MASS_MU,energyKev)*AL_DENSITY_G_CM3;}
+function aluminiumTransmission(energyKev:number,filtrationMmAl:number){return Math.exp(-aluminiumLinearAttenuationAtEnergy(energyKev)*Math.max(0,filtrationMmAl)/10);}
 
-export function aluminiumLinearAttenuationAtEnergy(energyKev:number):number{
-  return interpolate(AL_MASS_MU,energyKev)*AL_DENSITY_G_CM3;
-}
-
-function aluminiumTransmission(energyKev:number,filtrationMmAl:number){
-  const pathCm=Math.max(0,filtrationMmAl)/10;
-  return Math.exp(-aluminiumLinearAttenuationAtEnergy(energyKev)*pathCm);
-}
-
-export interface SpectrumBin {
-  energyKev:number;
-  sourceWeight:number;
-  detectorResponse:number;
-  weight:number;
-}
-
+export interface SpectrumBin { energyKev:number; sourceWeight:number; detectorResponse:number; weight:number; }
 const spectrumCache=new Map<string,readonly SpectrumBin[]>();
-
 export function diagnosticSpectrum(kvp:number,filtrationMmAl=DEFAULT_FILTRATION_MM_AL):readonly SpectrumBin[]{
-  const k=Math.round(Math.max(40,Math.min(150,kvp)));
-  const filtration=Math.max(0,Math.min(10,filtrationMmAl));
-  const key=`${k}:${filtration.toFixed(2)}`;
-  const cached=spectrumCache.get(key);if(cached)return cached;
-  const raw:Array<Omit<SpectrumBin,"weight">>=[];
-  const maxEnergy=Math.max(MIN_DIAGNOSTIC_ENERGY_KEV,k-2);
+  const k=Math.round(Math.max(40,Math.min(150,kvp))),filtration=Math.max(0,Math.min(10,filtrationMmAl)),key=`${k}:${filtration.toFixed(2)}`,cached=spectrumCache.get(key);if(cached)return cached;
+  const raw:Array<Omit<SpectrumBin,"weight">>=[],maxEnergy=Math.max(MIN_DIAGNOSTIC_ENERGY_KEV,k-2);
   for(let e=MIN_DIAGNOSTIC_ENERGY_KEV;e<=maxEnergy;e+=SPECTRUM_BIN_WIDTH_KEV){
-    // Kramers-like tungsten continuum, aluminium filtration and detector weighting.
-    // At 60 kVp this yields 20 active bins; higher kVp values use progressively more.
-    const continuum=Math.max(0,(k-e)*e);
-    const filterTransmission=aluminiumTransmission(e,filtration);
-    const tungstenLines=k>=72?(Math.exp(-Math.pow((e-59.3)/2.8,2))*.18+Math.exp(-Math.pow((e-67.2)/3.1,2))*.10):0;
-    const sourceWeight=continuum*filterTransmission*(1+tungstenLines);
-    const detectorResponse=Math.pow(e/60,.28);
+    const continuum=Math.max(0,(k-e)*e),filterTransmission=aluminiumTransmission(e,filtration),tungstenLines=k>=72?(Math.exp(-Math.pow((e-59.3)/2.8,2))*.18+Math.exp(-Math.pow((e-67.2)/3.1,2))*.10):0,sourceWeight=continuum*filterTransmission*(1+tungstenLines),detectorResponse=Math.pow(e/60,.28);
     if(sourceWeight>0)raw.push({energyKev:e,sourceWeight,detectorResponse});
   }
-  const total=raw.reduce((s,b)=>s+b.sourceWeight*b.detectorResponse,0)||1;
-  const normalised=raw.map(b=>({...b,weight:(b.sourceWeight*b.detectorResponse)/total}));
-  spectrumCache.set(key,normalised);return normalised;
+  const total=raw.reduce((s,b)=>s+b.sourceWeight*b.detectorResponse,0)||1,normalised=raw.map(b=>({...b,weight:(b.sourceWeight*b.detectorResponse)/total}));spectrumCache.set(key,normalised);return normalised;
 }
 
-export function effectivePhotonEnergyKev(kvp:number,filtrationMmAl=DEFAULT_FILTRATION_MM_AL):number{
-  const spectrum=diagnosticSpectrum(kvp,filtrationMmAl);
-  return spectrum.reduce((s,b)=>s+b.energyKev*b.weight,0);
+export function effectivePhotonEnergyKev(kvp:number,filtrationMmAl=DEFAULT_FILTRATION_MM_AL):number{return diagnosticSpectrum(kvp,filtrationMmAl).reduce((s,b)=>s+b.energyKev*b.weight,0);}
+export function spectrumWeightedLinearAttenuation(material:RadiographicMaterial,kvp:number):number{return diagnosticSpectrum(kvp).reduce((s,b)=>s+b.weight*linearAttenuationAtEnergy(material,b.energyKev),0);}
+
+export interface PrimaryBeamBin {
+  energyKev:number;
+  weight:number;
+  mu:Readonly<Record<RadiographicMaterial,number>>;
+}
+export interface PrimaryRayTraceBin {
+  energyKev:number;
+  spectrumWeight:number;
+  opticalDepth:number;
+  transmission:number;
+  contributions:Array<{material:RadiographicMaterial;pathCm:number;muCmInv:number;muTimesPath:number}>;
+}
+export interface PrimaryRayTrace {
+  kvp:number;
+  materials:Array<{material:RadiographicMaterial;pathCm:number}>;
+  bins:PrimaryRayTraceBin[];
+  transmission:number;
+  effectiveOpticalDepth:number;
+}
+export interface PrimaryBeamModel {
+  kvp:number;
+  bins:readonly PrimaryBeamBin[];
+  transmission(paths:MaterialPath):number;
+  opticalDepth(paths:MaterialPath):number;
+  trace(paths:MaterialPath):PrimaryRayTrace;
 }
 
-/** Spectrum-weighted coefficient for reporting only. Do not use mu_eff*x for projection. */
-export function spectrumWeightedLinearAttenuation(material:RadiographicMaterial,kvp:number):number{
-  return diagnosticSpectrum(kvp).reduce((s,b)=>s+b.weight*linearAttenuationAtEnergy(material,b.energyKev),0);
+const beamModelCache=new Map<string,PrimaryBeamModel>();
+function normalisedPaths(paths:MaterialPath){
+  const out:Array<{material:RadiographicMaterial;pathCm:number}>=[];
+  for(const material of MATERIALS){const pathCm=Math.max(0,paths[material]??0);if(pathCm>0)out.push({material,pathCm});}
+  return out;
 }
 
-export function materialTransmission(material:RadiographicMaterial,pathCm:number,kvp:number):number{
-  const path=Math.max(0,pathCm);if(path===0)return 1;
-  let transmission=0;
-  for(const bin of diagnosticSpectrum(kvp))transmission+=bin.weight*Math.exp(-linearAttenuationAtEnergy(material,bin.energyKev)*path);
-  return Math.max(1e-12,transmission);
+export function createPrimaryBeamModel(kvp:number,filtrationMmAl=DEFAULT_FILTRATION_MM_AL):PrimaryBeamModel{
+  const k=Math.round(Math.max(40,Math.min(150,kvp))),filtration=Math.max(0,Math.min(10,filtrationMmAl)),key=`${k}:${filtration.toFixed(2)}`,cached=beamModelCache.get(key);if(cached)return cached;
+  const bins=diagnosticSpectrum(k,filtration).map(bin=>{const mu={} as Record<RadiographicMaterial,number>;for(const material of MATERIALS)mu[material]=linearAttenuationAtEnergy(material,bin.energyKev);return{energyKev:bin.energyKev,weight:bin.weight,mu:Object.freeze(mu)};});
+  const transmission=(paths:MaterialPath)=>{
+    const active=normalisedPaths(paths);if(!active.length)return 1;let total=0;
+    for(const bin of bins){let tau=0;for(const p of active)tau+=bin.mu[p.material]*p.pathCm;total+=bin.weight*Math.exp(-tau);}
+    return Math.max(1e-12,Math.min(1,total));
+  };
+  const model:PrimaryBeamModel={kvp:k,bins,transmission,opticalDepth:(paths)=>-Math.log(transmission(paths)),trace:(paths)=>{
+    const materials=normalisedPaths(paths);let total=0;const tracedBins:PrimaryRayTraceBin[]=[];
+    for(const bin of bins){let opticalDepth=0;const contributions=materials.map(p=>{const muCmInv=bin.mu[p.material],muTimesPath=muCmInv*p.pathCm;opticalDepth+=muTimesPath;return{...p,muCmInv,muTimesPath};});const t=Math.exp(-opticalDepth);total+=bin.weight*t;tracedBins.push({energyKev:bin.energyKev,spectrumWeight:bin.weight,opticalDepth,transmission:t,contributions});}
+    total=Math.max(1e-12,Math.min(1,total));return{kvp:k,materials,bins:tracedBins,transmission:total,effectiveOpticalDepth:-Math.log(total)};
+  }};
+  beamModelCache.set(key,model);return model;
 }
 
-export function materialOpticalDepth(material:RadiographicMaterial,pathCm:number,kvp:number):number{
-  return -Math.log(materialTransmission(material,pathCm,kvp));
-}
-
-export function primaryTransmission(paths:MaterialPath,kvp:number):number{
-  let transmission=0;
-  for(const bin of diagnosticSpectrum(kvp)){
-    let tau=0;
-    for(const material of Object.keys(paths) as RadiographicMaterial[]){
-      const path=Math.max(0,paths[material]??0);
-      if(path>0)tau+=linearAttenuationAtEnergy(material,bin.energyKev)*path;
-    }
-    transmission+=bin.weight*Math.exp(-tau);
-  }
-  return Math.max(1e-12,Math.min(1,transmission));
-}
-
-export function primaryOpticalDepth(paths:MaterialPath,kvp:number):number{
-  return -Math.log(primaryTransmission(paths,kvp));
-}
-
+export function materialTransmission(material:RadiographicMaterial,pathCm:number,kvp:number):number{return createPrimaryBeamModel(kvp).transmission({[material]:Math.max(0,pathCm)});}
+export function materialOpticalDepth(material:RadiographicMaterial,pathCm:number,kvp:number):number{return -Math.log(materialTransmission(material,pathCm,kvp));}
+export function primaryTransmission(paths:MaterialPath,kvp:number):number{return createPrimaryBeamModel(kvp).transmission(paths);}
+export function primaryOpticalDepth(paths:MaterialPath,kvp:number):number{return createPrimaryBeamModel(kvp).opticalDepth(paths);}
+export function tracePrimaryRay(paths:MaterialPath,kvp:number):PrimaryRayTrace{return createPrimaryBeamModel(kvp).trace(paths);}
 export function relativeTubeOutput(kvp:number):number{return Math.pow(Math.max(40,kvp)/80,1.85);}
