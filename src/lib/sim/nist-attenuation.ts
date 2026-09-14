@@ -57,7 +57,7 @@ const DENSITY_G_CM3: Record<RadiographicMaterial, number> = {
 // NIST elemental aluminium mass attenuation coefficients used to model beam
 // hardening from tube + added filtration. 2.5 mm Al is the simulator baseline.
 const AL_MASS_MU: Curve = [1.128, 0.5685, 0.3681, 0.2778, 0.2018, 0.1704, 0.1540, 0.1378];
-const AL_DENSITY_G_CM3 = 2.699;
+export const ALUMINIUM_DENSITY_G_CM3 = 2.699;
 export const DEFAULT_FILTRATION_MM_AL = 2.5;
 
 function lerp(a:number,b:number,t:number){return a+(b-a)*t;}
@@ -75,9 +75,14 @@ export function linearAttenuationAtEnergy(material:RadiographicMaterial,energyKe
   return interpolate(MASS_MU[material],energyKev)*DENSITY_G_CM3[material];
 }
 
+/** Elemental aluminium linear attenuation coefficient mu(E), cm^-1. */
+export function aluminiumLinearAttenuationAtEnergy(energyKev:number):number{
+  return interpolate(AL_MASS_MU,energyKev)*ALUMINIUM_DENSITY_G_CM3;
+}
+
 function aluminiumTransmission(energyKev:number,filtrationMmAl:number){
   const pathCm=Math.max(0,filtrationMmAl)/10;
-  return Math.exp(-interpolate(AL_MASS_MU,energyKev)*AL_DENSITY_G_CM3*pathCm);
+  return Math.exp(-aluminiumLinearAttenuationAtEnergy(energyKev)*pathCm);
 }
 
 export interface SpectrumBin {
