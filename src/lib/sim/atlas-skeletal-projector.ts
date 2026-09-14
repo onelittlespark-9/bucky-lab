@@ -26,14 +26,14 @@ function regionFor(name:string):BoneRegion {
   if(n.includes("clavicle"))return"clavicle";
   if(n.includes("humerus"))return"humerus";
   if(n.includes("radius")||n.includes("ulna"))return"forearm";
-  if(n.includes("hand")||n.includes("metacarp")||n.includes("phalan")||n.includes("carpal"))return"hand";
+  if(n.includes("hand")||n.includes("metacarp")||n.includes("phalan")||n.includes("carpal")||n.includes("finger")||n.includes("digit"))return"hand";
   if(n.includes("femur"))return"femur";
   if(n.includes("patella"))return"patella";
   if(n.includes("tibia")||n.includes("fibula"))return"lowerleg";
-  if(n.includes("foot")||n.includes("metatars")||n.includes("talus")||n.includes("calcaneus")||n.includes("tarsal"))return"foot";
+  if(n.includes("foot")||n.includes("metatars")||n.includes("talus")||n.includes("calcaneus")||n.includes("tarsal")||n.includes("toe"))return"foot";
   if(n.includes("pelvis")||n.includes("ilium")||n.includes("ischium")||n.includes("pubis")||n.includes("sacrum")||n.includes("hip bone")||n.includes("coxal")||n.includes("innominate")||n.includes("acetabul")||n.includes("os cox"))return"pelvis";
   if(n.includes("vertebra")||n.includes("spine")||n.includes("sternum")||n.includes("coccyx"))return"axial";
-  if(n.includes("skull")||n.includes("mandible")||n.includes("maxilla")||n.includes("zygomatic")||n.includes("temporal")||n.includes("frontal")||n.includes("parietal"))return"skull";
+  if(n.includes("skull")||n.includes("mandible")||n.includes("maxilla")||n.includes("zygomatic")||n.includes("temporal")||n.includes("frontal")||n.includes("parietal")||n.includes("occipital")||n.includes("sphenoid")||n.includes("ethmoid")||n.includes("nasal")||n.includes("lacrimal")||n.includes("vomer")||n.includes("palatine"))return"skull";
   return"other";
 }
 function sideFor(b:[number[],number[]]):Side{return((b[0][0]+b[1][0])*.5)<0?-1:1;}
@@ -110,27 +110,30 @@ function projectThickness(scene:THREE.Scene,atlas:LoadedAtlas,part:LoadedPart,ca
  * Approximate layered cortical/trabecular/marrow geometry from the real atlas
  * chord length. Cortex is a finite shell rather than a percentage of the whole
  * chord, so thicker shafts naturally develop a radiolucent medullary canal.
+ * Thin thoracic and craniofacial bones deliberately use smaller shells so their
+ * overlap remains visible without becoming uniformly radio-opaque.
  */
 function materialPaths(region:BoneRegion,name:string,path:number){
   const n=name.toLowerCase();
-  let shell=.16,trabFrac=.44;
-  if(region==="humerus"||region==="femur"){shell=.30;trabFrac=.11;}
-  else if(region==="forearm"||region==="lowerleg"){shell=.24;trabFrac=.10;}
-  else if(region==="rib"){shell=.055;trabFrac=.28;}
-  else if(region==="axial"){shell=.070;trabFrac=.43;}
-  else if(region==="pelvis"){shell=n.includes("sacrum")?.070:.085;trabFrac=.50;}
-  else if(region==="scapula"){shell=.055;trabFrac=.42;}
-  else if(region==="clavicle"){shell=.13;trabFrac=.22;}
-  else if(region==="hand"||region==="foot"){shell=.080;trabFrac=.36;}
-  else if(region==="patella"){shell=.070;trabFrac=.50;}
-  else if(region==="skull"){shell=n.includes("mandible")?.14:.105;trabFrac=.38;}
+  let shell=.14,trabFrac=.40;
+  if(region==="humerus"||region==="femur"){shell=.26;trabFrac=.10;}
+  else if(region==="forearm"||region==="lowerleg"){shell=.20;trabFrac=.09;}
+  else if(region==="rib"){shell=.040;trabFrac=.20;}
+  else if(region==="axial"){shell=.050;trabFrac=.34;}
+  else if(region==="pelvis"){shell=n.includes("sacrum")?.060:.075;trabFrac=.46;}
+  else if(region==="scapula"){shell=.045;trabFrac=.36;}
+  else if(region==="clavicle"){shell=.105;trabFrac=.20;}
+  else if(region==="hand"||region==="foot"){shell=.065;trabFrac=.30;}
+  else if(region==="patella"){shell=.060;trabFrac=.46;}
+  else if(region==="skull"){shell=n.includes("mandible")?.12:.075;trabFrac=.30;}
 
   const cortical=Math.min(path,shell*2);
   const interior=Math.max(0,path-cortical);
-  // Central rays through long bones contain proportionally more marrow than
-  // grazing rays. This gives shafts a canal without drawing an image-space line.
-  const canalWeight=(region==="humerus"||region==="femur"||region==="forearm"||region==="lowerleg")?Math.min(1,interior/1.1):0;
-  const effectiveTrabFrac=trabFrac*(1-.55*canalWeight);
+  const longBone=region==="humerus"||region==="femur"||region==="forearm"||region==="lowerleg";
+  const canalWeight=longBone?Math.min(1,interior/.95):0;
+  const centralWeight=(region==="rib"||region==="axial")?Math.min(1,interior/.75):0;
+  let effectiveTrabFrac=trabFrac*(1-.68*canalWeight);
+  effectiveTrabFrac*=1-.28*centralWeight;
   const trabecular=interior*effectiveTrabFrac;
   const marrow=interior-trabecular;
   return{cortical,trabecular,marrow};
