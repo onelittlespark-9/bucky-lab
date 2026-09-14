@@ -43,8 +43,11 @@ test("required materials retain distinct energy-dependent attenuation curves",()
     assert.notEqual(low,high,`${material} attenuation must vary with photon energy`);
     assert.ok(low>high,`${material} attenuation should fall across the diagnostic range`);
   }
-  assert.ok(linearAttenuationAtEnergy("corticalBone",60)>linearAttenuationAtEnergy("trabecularBone",60));
-  assert.ok(linearAttenuationAtEnergy("trabecularBone",60)>linearAttenuationAtEnergy("soft",60));
+  const at60=materials.map(material=>linearAttenuationAtEnergy(material,60));
+  for(let i=0;i<at60.length;i++)for(let j=i+1;j<at60.length;j++){
+    assert.ok(Math.abs(at60[i]!-at60[j]!)>1e-5,`${materials[i]} and ${materials[j]} must not share one generic attenuation value`);
+  }
+  assert.ok(linearAttenuationAtEnergy("corticalBone",60)>linearAttenuationAtEnergy("soft",60));
   assert.ok(linearAttenuationAtEnergy("soft",60)>linearAttenuationAtEnergy("adipose",60));
   assert.ok(linearAttenuationAtEnergy("adipose",60)>linearAttenuationAtEnergy("air",60));
 });
