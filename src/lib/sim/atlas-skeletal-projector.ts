@@ -8,6 +8,7 @@ const MODEL_ROOT = "/models/human-atlas/";
 const ATLAS_HEIGHT_M = 1.7;
 const MAX_BONE_PATH_CM = 15;
 const LOOKUP_STEP_CM = 0.05;
+const DIAMETER_BUCKET_CM = 0.25;
 
 type BoneRegion = "rib"|"scapula"|"clavicle"|"humerus"|"forearm"|"hand"|"femur"|"patella"|"lowerleg"|"foot"|"pelvis"|"axial"|"skull"|"other";
 type Side = -1|1;
@@ -37,6 +38,7 @@ function regionFor(name:string):BoneRegion {
   return"other";
 }
 function sideFor(b:[number[],number[]]):Side{return((b[0][0]+b[1][0])*.5)<0?-1:1;}
+function isLongBone(region:BoneRegion){return region==="humerus"||region==="femur"||region==="forearm"||region==="lowerleg";}
 
 async function loadAtlas():Promise<LoadedAtlas>{
   if(atlasCache)return atlasCache;
@@ -106,18 +108,29 @@ function projectThickness(scene:THREE.Scene,atlas:LoadedAtlas,part:LoadedPart,ca
   return out;
 }
 
+function shellChord(path:number,outerDiameter:number,shell:number){
+  const diameter=Math.max(path,outerDiameter,shell*2);
+  const radius=diameter*.5;
+  const halfChord=Math.min(radius,path*.5);
+  const offsetSq=Math.max(0,radius*radius-halfChord*halfChord);
+  const innerRadius=Math.max(0,radius-shell);
+  const innerHalf=Math.sqrt(Math.max(0,innerRadius*innerRadius-offsetSq));
+  const interior=Math.max(0,Math.min(path,innerHalf*2));
+  return{cortical:Math.max(0,path-interior),interior};
+}
+
 /**
  * Approximate layered cortical/trabecular/marrow geometry from the real atlas
- * chord length. Cortex is a finite shell rather than a percentage of the whole
- * chord, so thicker shafts naturally develop a radiolucent medullary canal.
- * Thin thoracic and craniofacial bones deliberately use smaller shells so their
- * overlap remains visible without becoming uniformly radio-opaque.
+ * chord length. Long bones use a local cylindrical shell model so tangent rays
+ * naturally traverse more cortex than centre-line rays, creating a cortical rim
+ * around a relatively radiolucent medullary canal rather than a uniformly dense
+ * solid shaft. Thin thoracic/craniofacial bones retain finite-shell behaviour.
  */
-function materialPaths(region:BoneRegion,name:string,path:number){
+function materialPaths(region:BoneRegion,name:string,path:number,outerDiameter=path){
   const n=name.toLowerCase();
   let shell=.14,trabFrac=.40;
-  if(region==="humerus"||region==="femur"){shell=.26;trabFrac=.10;}
-  else if(region==="forearm"||region==="lowerleg"){shell=.20;trabFrac=.09;}
+  if(region==="humerus"||region==="femur"){shell=.24;trabFrac=.085;}
+  else if(region==="forearm"||region==="lowerleg"){shell=.17;trabFrac=.075;}
   else if(region==="rib"){shell=.040;trabFrac=.20;}
   else if(region==="axial"){shell=.050;trabFrac=.34;}
   else if(region==="pelvis"){shell=n.includes("sacrum")?.060:.075;trabFrac=.46;}
@@ -127,22 +140,22 @@ function materialPaths(region:BoneRegion,name:string,path:number){
   else if(region==="patella"){shell=.060;trabFrac=.46;}
   else if(region==="skull"){shell=n.includes("mandible")?.12:.075;trabFrac=.30;}
 
-  const cortical=Math.min(path,shell*2);
-  const interior=Math.max(0,path-cortical);
-  const longBone=region==="humerus"||region==="femur"||region==="forearm"||region==="lowerleg";
-  const canalWeight=longBone?Math.min(1,interior/.95):0;
+  const shellGeometry=isLongBone(region)?shellChord(path,outerDiameter,shell):{cortical:Math.min(path,shell*2),interior:Math.max(0,path-Math.min(path,shell*2))};
+  const cortical=shellGeometry.cortical;
+  const interior=shellGeometry.interior;
+  const canalWeight=isLongBone(region)?Math.min(1,interior/.80):0;
   const centralWeight=(region==="rib"||region==="axial")?Math.min(1,interior/.75):0;
-  let effectiveTrabFrac=trabFrac*(1-.68*canalWeight);
+  let effectiveTrabFrac=trabFrac*(1-.72*canalWeight);
   effectiveTrabFrac*=1-.28*centralWeight;
   const trabecular=interior*effectiveTrabFrac;
   const marrow=interior-trabecular;
   return{cortical,trabecular,marrow};
 }
 
-function buildExcessLookup(region:BoneRegion,name:string,kvp:number){
+function buildExcessLookup(region:BoneRegion,name:string,kvp:number,outerDiameter=MAX_BONE_PATH_CM){
   const count=Math.round(MAX_BONE_PATH_CM/LOOKUP_STEP_CM)+1,out=new Float32Array(count);
   for(let i=0;i<count;i++){
-    const path=i*LOOKUP_STEP_CM,m=materialPaths(region,name,path);
+    const path=i*LOOKUP_STEP_CM,m=materialPaths(region,name,path,outerDiameter);
     const boneOD=primaryOpticalDepth({corticalBone:m.cortical,trabecularBone:m.trabecular,adipose:m.marrow},kvp);
     const displacedSoftOD=materialOpticalDepth("soft",path,kvp);
     out[i]=Math.max(0,boneOD-displacedSoftOD);
@@ -173,9 +186,26 @@ export async function projectAtlasSkeletalOD(args:{patient:Patient;projection:Pr
 
     for(const part of atlas.parts){
       if(part.region==="other")continue;
-      const raw=projectThickness(scene,atlas,part,camera,renderer,targetRT,fm,bm,rw,rh),key=`${part.region}|${part.sourceName}`;
-      let table=lookupCache.get(key);if(!table){table=buildExcessLookup(part.region,part.sourceName,exposureKvp);lookupCache.set(key,table);}
-      for(let i=0;i<optical.length;i++){const path=raw[i]!;if(path>0)optical[i]+=lookupExcess(table,path);}
+      const raw=projectThickness(scene,atlas,part,camera,renderer,targetRT,fm,bm,rw,rh);
+      if(isLongBone(part.region)){
+        const rowDiameter=new Float32Array(rh);
+        for(let y=0;y<rh;y++){
+          let localMax=0;
+          for(let x=0;x<rw;x++)localMax=Math.max(localMax,raw[y*rw+x]!);
+          rowDiameter[y]=Math.max(DIAMETER_BUCKET_CM,Math.round(localMax/DIAMETER_BUCKET_CM)*DIAMETER_BUCKET_CM);
+        }
+        for(let y=0;y<rh;y++){
+          const diameter=rowDiameter[y]!;
+          if(diameter<=DIAMETER_BUCKET_CM)continue;
+          const key=`${part.region}|${part.sourceName}|${diameter.toFixed(2)}`;
+          let table=lookupCache.get(key);if(!table){table=buildExcessLookup(part.region,part.sourceName,exposureKvp,diameter);lookupCache.set(key,table);}
+          for(let x=0;x<rw;x++){const i=y*rw+x,path=raw[i]!;if(path>0)optical[i]+=lookupExcess(table,path);}
+        }
+      }else{
+        const key=`${part.region}|${part.sourceName}`;
+        let table=lookupCache.get(key);if(!table){table=buildExcessLookup(part.region,part.sourceName,exposureKvp);lookupCache.set(key,table);}
+        for(let i=0;i<optical.length;i++){const path=raw[i]!;if(path>0)optical[i]+=lookupExcess(table,path);}
+      }
     }
 
     for(const p of atlas.parts)p.mesh.visible=true;scene.overrideMaterial=null;renderer.dispose();targetRT.dispose();fm.dispose();bm.dispose();
