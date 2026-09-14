@@ -31,10 +31,6 @@ async function canonicalMaps(args:{patient:Patient;projection:Projection;tube:Tu
   const existing=CACHE.get(key);if(existing){touchCache(key,existing);return existing;}
   const canonicalTube:TubeState={...tube,crX:0,crY:CANONICAL_CR_Y_CM,collimationW:CANONICAL_W_CM,collimationH:CANONICAL_H_CM};
   const objectGeometry:ProjectionGeometry={...geometry,magnification:1,effectiveObjectScale:1};
-  // Build the canonical material projection at the requested tube potential.
-  // Previously an 80 kVp optical-density image was multiplied by a single
-  // coefficient ratio. That cannot preserve spectral coupling or beam hardening
-  // because bone, lung, fat and soft tissue change differently with energy.
   const pending=Promise.all([
     projectAtlasSkeletalOD({patient,projection,tube:canonicalTube,exposureKvp,width:BASE_WIDTH,height:BASE_HEIGHT,geometry:objectGeometry,wholeBody:true}),
     projectAtlasTissueOD({patient,projection,tube:canonicalTube,exposureKvp,width:BASE_WIDTH,height:BASE_HEIGHT,geometry:objectGeometry,wholeBody:true}),
@@ -43,7 +39,6 @@ async function canonicalMaps(args:{patient:Patient;projection:Projection;tube:Tu
 }
 
 function cropCanonical(src:Float32Array|null,sw:number,sh:number,tube:TubeState,geometry:ProjectionGeometry,width:number,height:number){if(!src)return null;const out=new Float32Array(width*height);for(let py=0;py<height;py++){const cmY=((py+.5)/height-.5)*tube.collimationH/geometry.magnification,globalY=tube.crY+cmY,v=(globalY/CANONICAL_H_CM)*(sh-1);for(let px=0;px<width;px++){const cmX=((px+.5)/width-.5)*tube.collimationW/geometry.magnification,globalX=tube.crX+cmX,u=(.5+globalX/CANONICAL_W_CM)*(sw-1);out[py*width+px]=sampleBilinear(src,sw,sh,u,v);}}return out;}
-function suppressProceduralFallback(src:Float32Array|null){if(!src)return null;const out=new Float32Array(src.length);for(let i=0;i<src.length;i++)out[i]=Math.max(.00026,src[i]!);return out;}
 
 /** Clinically constrain dedicated chest views to apices/C7 through the CP angles. */
 function clinicallyFramedTube(tube:TubeState,projection:Projection):TubeState{
@@ -59,11 +54,12 @@ export async function canonicalAtlasProjection(args:{patient:Patient;projection:
   const cached=VIEW_CACHE.get(viewKey);if(cached){touchView(viewKey,cached);return cached;}
   const maps=await canonicalMaps({patient,projection,tube:framedTube,geometry,exposureKvp});
 
-  // This stage performs only atlas cache/crop/resampling. No painted lung
-  // darkening, cortical edge enhancement, local contrast manipulation, or
-  // post-hoc kVp scaling is permitted here. Those effects must emerge from the
-  // material path lengths and the polychromatic Beer-Lambert calculation.
-  const tissue=suppressProceduralFallback(cropCanonical(maps.tissue,maps.width,maps.height,framedTube,geometry,width,height));
+  // Preserve true zero/near-zero atlas tissue rays. The renderer deliberately
+  // falls back to its procedural material-path model where the tissue atlas has
+  // no meaningful coverage. Flooring the canonical tissue map above the
+  // renderer's atlas threshold disabled that fallback everywhere and made sparse
+  // atlas regions look like an unnaturally transparent anatomical shell.
+  const tissue=cropCanonical(maps.tissue,maps.width,maps.height,framedTube,geometry,width,height);
   const bone=cropCanonical(maps.bone,maps.width,maps.height,framedTube,geometry,width,height);
   const result={bone,tissue};touchView(viewKey,result);return result;
 }
