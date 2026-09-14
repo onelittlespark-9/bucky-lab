@@ -43,6 +43,7 @@ async function canonicalMaps(args:{patient:Patient;projection:Projection;tube:Tu
 function cropCanonical(src:Float32Array|null,sw:number,sh:number,tube:TubeState,geometry:ProjectionGeometry,width:number,height:number,scale:number){if(!src)return null;const out=new Float32Array(width*height);for(let py=0;py<height;py++){const cmY=((py+.5)/height-.5)*tube.collimationH/geometry.magnification,globalY=tube.crY+cmY,v=(globalY/CANONICAL_H_CM)*(sh-1);for(let px=0;px<width;px++){const cmX=((px+.5)/width-.5)*tube.collimationW/geometry.magnification,globalX=tube.crX+cmX,u=(.5+globalX/CANONICAL_W_CM)*(sw-1);out[py*width+px]=sampleBilinear(src,sw,sh,u,v)*scale;}}return out;}
 function suppressProceduralFallback(src:Float32Array|null){if(!src)return null;const out=new Float32Array(src.length);for(let i=0;i<src.length;i++)out[i]=Math.max(.00026,src[i]!);return out;}
 function smoothstep(a:number,b:number,v:number){const t=Math.max(0,Math.min(1,(v-a)/(b-a)));return t*t*(3-2*t);}
+function localMean(src:Float32Array,width:number,height:number,x:number,y:number,radius:number){let sum=0,weight=0;for(let dy=-radius;dy<=radius;dy++){const yy=Math.max(0,Math.min(height-1,y+dy));for(let dx=-radius;dx<=radius;dx++){const xx=Math.max(0,Math.min(width-1,x+dx)),w=radius+1-Math.max(Math.abs(dx),Math.abs(dy));sum+=src[yy*width+xx]!*w;weight+=w;}}return weight?sum/weight:0;}
 
 /**
  * Keep dedicated chest views clinically framed even when a stored/default field
@@ -64,33 +65,64 @@ function applyFrontalThoraxMaterial(src:Float32Array|null,width:number,height:nu
   const out=new Float32Array(src);
   for(let py=0;py<height;py++){
     const y=tube.crY+((py+.5)/height-.5)*tube.collimationH/geometry.magnification;
-    // Atlas coordinates are measured downwards from the vertex. The previous
-    // 108-154 cm window was in the lower limbs, so the lung correction never
-    // touched the thorax. Apply it from the apices/C7 region to the diaphragms.
     const vertical=smoothstep(21.5,24.5,y)*(1-smoothstep(49.0,54.0,y));
     if(vertical<=0)continue;
     for(let px=0;px<width;px++){
       const i=py*width+px,original=src[i]!;
       if(original<.001)continue;
-      const x=tube.crX+((px+.5)/width-.5)*tube.collimationW/geometry.magnification;
-      const ax=Math.abs(x);
+      const x=tube.crX+((px+.5)/width-.5)*tube.collimationW/geometry.magnification,ax=Math.abs(x);
       const lateral=smoothstep(2.6,5.0,ax)*(1-smoothstep(14.0,17.5,ax));
       if(lateral<=0)continue;
       const lower=smoothstep(34,48,y),heartCentre=2.0,heartHalf=3.8+3.0*lower;
       const heart=Math.max(0,1-Math.abs(x-heartCentre)/heartHalf)*smoothstep(30,34,y)*(1-smoothstep(47,52,y));
       const mediastinum=Math.max(0,1-ax/4.2)*smoothstep(23,27,y)*(1-smoothstep(47,51,y));
-      const aeration=vertical*lateral*(1-.78*Math.max(heart,mediastinum));
-      // Replace most of the soft-tissue path in aerated lung rather than
-      // painting a dark overlay. Keep a physical residual for chest wall,
-      // vessels and superimposed structures.
-      const floor=Math.max(.0045,original*.16);
-      out[i]=Math.max(floor,original*(1-.82*aeration));
+      const diaphragm=smoothstep(44.5,49.0,y)*(1-smoothstep(52.0,55.0,y))*smoothstep(3.8,6.2,ax)*(1-smoothstep(14.5,17.0,ax));
+      const protectedSoft=Math.max(heart,mediastinum,diaphragm*.72);
+      const aeration=vertical*lateral*(1-.82*protectedSoft);
+
+      // Use the atlas itself to retain vessels and superimposed soft tissue.
+      // Aerated lung replaces the low-frequency soft-tissue path, while positive
+      // local attenuation survives as pulmonary vascular/interstitial structure.
+      const near=localMean(src,width,height,px,py,1),broad=localMean(src,width,height,px,py,4);
+      const vascular=Math.max(0,original-broad),localStructure=Math.max(0,near-broad);
+      const floor=Math.max(.0044,broad*.095+original*.055);
+      const aerated=original*(1-.845*aeration);
+      const retained=aeration*(vascular*1.35+localStructure*.42);
+      out[i]=Math.max(floor,aerated+retained);
     }
   }
   return out;
 }
 
-function localMean(src:Float32Array,width:number,height:number,x:number,y:number,radius:number){let sum=0,weight=0;for(let dy=-radius;dy<=radius;dy++){const yy=Math.max(0,Math.min(height-1,y+dy));for(let dx=-radius;dx<=radius;dx++){const xx=Math.max(0,Math.min(width-1,x+dx)),w=radius+1-Math.max(Math.abs(dx),Math.abs(dy));sum+=src[yy*width+xx]!*w;weight+=w;}}return weight?sum/weight:0;}
+function refineAtlasTissue(src:Float32Array|null,width:number,height:number,tube:TubeState,geometry:ProjectionGeometry,projection:Projection){
+  if(!src||projection.anatomy==="torso-lat")return src;
+  const out=new Float32Array(src);
+  for(let py=0;py<height;py++){
+    const y=tube.crY+((py+.5)/height-.5)*tube.collimationH/geometry.magnification;
+    const abdomen=smoothstep(49,55,y)*(1-smoothstep(88,96,y));
+    for(let px=0;px<width;px++){
+      const i=py*width+px,v=src[i]!;
+      if(v<=.0003)continue;
+      const x=tube.crX+((px+.5)/width-.5)*tube.collimationW/geometry.magnification,ax=Math.abs(x);
+      const near=localMean(src,width,height,px,py,1),broad=localMean(src,width,height,px,py,5);
+
+      // The atlas already contains digestive, urinary and muscular geometry.
+      // Preserve that geometry but expand its very small material separation so
+      // overlapping psoas/renal/bowel soft tissues do not collapse into one fog.
+      const abdominalInterior=abdomen*(1-smoothstep(16,22,ax));
+      const delta=Math.max(-.018,Math.min(.022,v-broad));
+      const organDetail=delta*(delta<0?.62:.46)*abdominalInterior;
+      let corrected=v+organDetail;
+
+      // Feather only low-attenuation boundary pixels. This removes the hard CG
+      // cut-out edge without globally blurring internal anatomy.
+      const edgeBand=(1-smoothstep(.004,.026,v))*smoothstep(.0007,.006,broad);
+      if(edgeBand>0)corrected=corrected*(1-.24*edgeBand)+near*.24*edgeBand;
+      out[i]=Math.max(.00026,corrected);
+    }
+  }
+  return out;
+}
 
 function refineWholeBodyBone(src:Float32Array|null,width:number,height:number,tube:TubeState,geometry:ProjectionGeometry,projection:Projection){
   if(!src||projection.id!=="ap-full-body")return src;
@@ -98,21 +130,30 @@ function refineWholeBodyBone(src:Float32Array|null,width:number,height:number,tu
   for(let py=0;py<height;py++){
     const y=tube.crY+((py+.5)/height-.5)*tube.collimationH/geometry.magnification;
     for(let px=0;px<width;px++){
-      const i=py*width+px,v=src[i]!,near=localMean(src,width,height,px,py,1),broad=localMean(src,width,height,px,py,3);
+      const i=py*width+px,v=src[i]!,near=localMean(src,width,height,px,py,1),broad=localMean(src,width,height,px,py,3),far=localMean(src,width,height,px,py,5);
       if(v<=.0005&&broad<=.0015)continue;
       const x=tube.crX+((px+.5)/width-.5)*tube.collimationW/geometry.magnification,ax=Math.abs(x),edgeExcess=Math.max(0,v-near);
-      let scale=1-.28*smoothstep(.014,.10,edgeExcess);
-      // Correct coordinate ranges: thorax is ~22-55 cm from the vertex and the
-      // skull is the first ~20 cm. Suppress stacked thoracic cortical spikes,
-      // not the legs as the old 108-157 cm ranges inadvertently did.
+      let scale=1-.30*smoothstep(.014,.10,edgeExcess);
       const thorax=smoothstep(21,25,y)*(1-smoothstep(51,56,y)),centralThorax=thorax*(1-smoothstep(12.5,17.5,ax));
-      scale*=1-.12*centralThorax*smoothstep(.020,.10,broad);
-      const skull=1-smoothstep(17,22,y);scale*=1-.08*skull*smoothstep(.028,.14,edgeExcess);
-      // A projection radiograph contains attenuation through the entire bone
-      // volume. Re-introduce a restrained low-frequency component inside thin
-      // cortical outlines so shafts and flat bones do not render as wireframes.
-      const supportedFill=Math.min(.055,broad*(skull?.42:.34));
-      const fine=Math.max(-.010,Math.min(.010,v-near))*.10;
+      const uniformity=1-smoothstep(.004,.030,Math.abs(v-broad));
+      scale*=1-.15*centralThorax*smoothstep(.020,.10,broad)-.08*thorax*uniformity;
+
+      // Skull needs volume overlap rather than a luminous outer ring. Suppress
+      // cortical spikes while retaining a restrained low-frequency calvarial fill.
+      const skull=1-smoothstep(17,22,y);
+      scale*=1-.12*skull*smoothstep(.025,.13,edgeExcess);
+
+      // Avoid filling medullary canals in the limbs. Hands/feet receive more
+      // local definition, but only from detail already present in atlas geometry.
+      const limb=smoothstep(70,82,y)*(1-smoothstep(158,166,y))*smoothstep(5.5,8.0,ax)*(1-smoothstep(17,21,ax));
+      const hands=smoothstep(60,70,y)*(1-smoothstep(98,106,y))*smoothstep(15,18,ax);
+      const feet=smoothstep(154,163,y)*(1-smoothstep(177,180,y));
+      const distal=Math.max(hands,feet);
+      const fillFactor=skull?.48:limb>.25?.22:.32;
+      const supportedFill=Math.min(skull?.070:.052,far*fillFactor);
+      const localDelta=Math.max(-.012,Math.min(.012,v-near));
+      const detailGain=distal>.1?.27:limb>.1?.20:.11;
+      const fine=localDelta*(localDelta<0?detailGain*1.35:detailGain);
       out[i]=Math.max(0,Math.max(v*scale,supportedFill)+fine);
     }
   }
@@ -125,7 +166,8 @@ export async function canonicalAtlasProjection(args:{patient:Patient;projection:
   const maps=await canonicalMaps({patient,projection,tube:framedTube,geometry});
   const tissueScale=linearAttenuation("soft",exposureKvp)/linearAttenuation("soft",REFERENCE_KVP),boneNow=.68*linearAttenuation("corticalBone",exposureKvp)+.32*linearAttenuation("trabecularBone",exposureKvp),boneRef=.68*linearAttenuation("corticalBone",REFERENCE_KVP)+.32*linearAttenuation("trabecularBone",REFERENCE_KVP),boneScale=boneNow/boneRef;
   const croppedTissue=cropCanonical(maps.tissue,maps.width,maps.height,framedTube,geometry,width,height,tissueScale);
-  const materialCorrected=applyFrontalThoraxMaterial(croppedTissue,width,height,framedTube,geometry,projection);
+  const thoraxCorrected=applyFrontalThoraxMaterial(croppedTissue,width,height,framedTube,geometry,projection);
+  const materialCorrected=refineAtlasTissue(thoraxCorrected,width,height,framedTube,geometry,projection);
   const tissue=suppressProceduralFallback(materialCorrected);
   const croppedBone=cropCanonical(maps.bone,maps.width,maps.height,framedTube,geometry,width,height,boneScale),bone=refineWholeBodyBone(croppedBone,width,height,framedTube,geometry,projection);
   const result={bone,tissue};touchView(viewKey,result);return result;
