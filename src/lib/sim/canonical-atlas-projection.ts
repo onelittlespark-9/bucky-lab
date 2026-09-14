@@ -41,6 +41,7 @@ async function canonicalMaps(args:{patient:Patient;projection:Projection;tube:Tu
 }
 
 function cropCanonical(src:Float32Array|null,sw:number,sh:number,tube:TubeState,geometry:ProjectionGeometry,width:number,height:number,scale:number){if(!src)return null;const out=new Float32Array(width*height);for(let py=0;py<height;py++){const cmY=((py+.5)/height-.5)*tube.collimationH/geometry.magnification,globalY=tube.crY+cmY,v=(globalY/CANONICAL_H_CM)*(sh-1);for(let px=0;px<width;px++){const cmX=((px+.5)/width-.5)*tube.collimationW/geometry.magnification,globalX=tube.crX+cmX,u=(.5+globalX/CANONICAL_W_CM)*(sw-1);out[py*width+px]=sampleBilinear(src,sw,sh,u,v)*scale;}}return out;}
+function suppressProceduralFallback(src:Float32Array|null){if(!src)return null;const out=new Float32Array(src.length);for(let i=0;i<src.length;i++)out[i]=Math.max(.00026,src[i]!);return out;}
 
 export async function canonicalAtlasProjection(args:{patient:Patient;projection:Projection;tube:TubeState;exposureKvp:number;width:number;height:number;geometry:ProjectionGeometry;}){
   const{patient,projection,tube,exposureKvp,width,height,geometry}=args,baseKey=canonicalKey(patient,projection),viewKey=[baseKey,projection.id,exposureKvp,width,height,tube.crX.toFixed(3),tube.crY.toFixed(3),tube.collimationW.toFixed(3),tube.collimationH.toFixed(3),geometry.magnification.toFixed(5)].join("|");
@@ -49,5 +50,8 @@ export async function canonicalAtlasProjection(args:{patient:Patient;projection:
   const tissueScale=linearAttenuation("soft",exposureKvp)/linearAttenuation("soft",REFERENCE_KVP),boneNow=.68*linearAttenuation("corticalBone",exposureKvp)+.32*linearAttenuation("trabecularBone",exposureKvp),boneRef=.68*linearAttenuation("corticalBone",REFERENCE_KVP)+.32*linearAttenuation("trabecularBone",REFERENCE_KVP),boneScale=boneNow/boneRef;
   // Keep the atlas as the anatomical source for whole-body tissue. The procedural full-body fallback is intentionally not used here: it produces primitive capsule/ellipse anatomy and destroys the atlas silhouette. Chest-only views can still use the dedicated procedural thoracic model while the atlas tissue projector is improved separately.
   const preferProceduralTissue=projection.id==="pa-chest"||projection.anatomy==="torso-lat";
-  const result={bone:cropCanonical(maps.bone,maps.width,maps.height,tube,geometry,width,height,boneScale),tissue:preferProceduralTissue?null:cropCanonical(maps.tissue,maps.width,maps.height,tube,geometry,width,height,tissueScale)};touchView(viewKey,result);return result;
+  const croppedTissue=cropCanonical(maps.tissue,maps.width,maps.height,tube,geometry,width,height,tissueScale);
+  // render-radiograph.ts historically falls back pixel-by-pixel when atlas OD is <= .00025. For whole-body views that re-introduces the primitive procedural mannequin anywhere the atlas is thin or air-filled. A sub-visible floor just above that routing threshold keeps successful whole-body renders atlas-only without affecting detector tone or atlas coverage metrics.
+  const tissue=projection.id==="ap-full-body"?suppressProceduralFallback(croppedTissue):croppedTissue;
+  const result={bone:cropCanonical(maps.bone,maps.width,maps.height,tube,geometry,width,height,boneScale),tissue:preferProceduralTissue?null:tissue};touchView(viewKey,result);return result;
 }
