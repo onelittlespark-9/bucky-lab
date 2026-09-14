@@ -7,8 +7,8 @@ export const MU = {
   fat: 0.16,
   soft: 0.205,
   muscle: 0.22,
-  bone: 0.42,
-  cortical: 0.72,
+  trabecularBone: 0.42,
+  corticalBone: 0.72,
   metal: 8,
 } as const;
 
@@ -21,11 +21,9 @@ export function muEffective(tissue: Tissue, kvp: number): number {
     case "fat": return linearAttenuation("adipose", kvp);
     case "soft": return linearAttenuation("soft", kvp);
     case "muscle": return linearAttenuation("muscle", kvp);
-    case "bone": return linearAttenuation("trabecularBone", kvp);
-    case "cortical": return linearAttenuation("corticalBone", kvp);
+    case "trabecularBone": return linearAttenuation("trabecularBone", kvp);
+    case "corticalBone": return linearAttenuation("corticalBone", kvp);
     case "metal": {
-      // Keep metal phenomenological; the simulator does not yet distinguish
-      // implant alloy composition.
       const ref = 75;
       return MU.metal * Math.pow(ref / Math.max(40, kvp), 1.2);
     }
@@ -35,8 +33,6 @@ export function muEffective(tissue: Tissue, kvp: number): number {
 export function incidentFluence(kvp: number, mas: number, sidCm: number, grid: boolean): number {
   const output = relativeTubeOutput(kvp);
   const dist = Math.pow(100 / Math.max(60, sidCm), 2);
-  // A grid reduces primary receptor fluence as well as scatter. 0.34 is a
-  // deliberately moderate transmission for a general-purpose focused grid.
   const gridFactor = grid ? 0.34 : 1;
   return mas * output * dist * gridFactor * 42;
 }
@@ -88,31 +84,18 @@ export function classifyEI(ei: number): ExposureMetrics["eiStatus"] {
   return "optimal";
 }
 
-/**
- * First-order beam attenuation for the representative part thickness.
- * The actual radiograph renderer performs the same exponential attenuation
- * per pixel from its sampled tissue paths; this function supplies the global
- * technique/EI model and keeps the two responses on the same physical curve.
- */
 export function representativeTransmission(patient: Patient, projection: Projection, kvp: number): number {
   const t = partThickness(patient, projection);
   const muSoft = muEffective("soft", kvp);
-  const muBone = muEffective("bone", kvp);
+  const muTrabecularBone = muEffective("trabecularBone", kvp);
   const muLung = muEffective("lung", kvp);
   const isChest = projection.region === "Thorax";
-  // Fractions are effective path fractions, not volume percentages. Lung
-  // replaces soft tissue rather than being added on top of it.
   const effectiveMu = isChest
-    ? muSoft * 0.34 + muLung * 0.46 + muBone * 0.055
-    : muSoft * 0.76 + muBone * 0.11;
+    ? muSoft * 0.34 + muLung * 0.46 + muTrabecularBone * 0.055
+    : muSoft * 0.76 + muTrabecularBone * 0.11;
   return Math.exp(-effectiveMu * t);
 }
 
-/**
- * Superimposition is not a cosmetic overlay: attenuation from every structure
- * crossed by the beam is accumulated in the renderer. This index describes the
- * expected burden of overlapping tissue for feedback and assessment.
- */
 export function superimpositionIndex(patient: Patient, projection: Projection): number {
   const t = partThickness(patient, projection);
   const thicknessBurden = Math.min(1, t / 35);
