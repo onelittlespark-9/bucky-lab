@@ -8,7 +8,10 @@ function gradeFromError(err: number, excellent: number, acceptable: number): Gra
 function requiredAnatomyRange(projection: Projection, patient: Patient): { top: number; bottom: number; halfWidth: number } {
   const scale = patient.heightCm / 170;
   const a = projection.anatomy;
-  if (projection.id === "pa-chest" || projection.id === "lat-chest") return { top: 10 * scale, bottom: 57 * scale, halfWidth: 17 * patient.morph.torsoWidth };
+  // Chest coverage is an anatomical requirement, not simply the nominal 43 cm detector height.
+  // Keep the field around C7/lung apices through both hemidiaphragms and costophrenic angles;
+  // the mandible should not be deliberately included in a correctly centred PA/lateral chest.
+  if (projection.id === "pa-chest" || projection.id === "lat-chest") return { top: 20.5 * scale, bottom: 55 * scale, halfWidth: 16.5 * patient.morph.torsoWidth };
   if (projection.id.includes("abdomen")) return { top: 42 * scale, bottom: 87 * scale, halfWidth: 17 * patient.morph.torsoWidth };
   if (projection.id.includes("pelvis") || projection.id.includes("hip")) return { top: 61 * scale, bottom: 99 * scale, halfWidth: 18 * patient.morph.torsoWidth };
   if (projection.id.includes("lumbar")) return { top: 43 * scale, bottom: 91 * scale, halfWidth: 11 * patient.morph.torsoWidth };
@@ -41,11 +44,14 @@ export function scoreExposure(args: { patient: Patient; projection: Projection; 
 
   const coverage = fieldCoverage(projection, patient, tube, pose);
   const anatomyGrade: Grade = coverage.vertical >= 0.96 && coverage.horizontal >= 0.95 ? "excellent" : coverage.vertical >= 0.82 && coverage.horizontal >= 0.85 ? "acceptable" : "repeat";
-  let anatomyDetail = `The exposed field covers ${Math.round(coverage.vertical * 100)}% of the required anatomy.`;
+  let anatomyDetail = projection.id === "pa-chest" || projection.id === "lat-chest"
+    ? `The exposed field covers ${Math.round(coverage.vertical * 100)}% of the expected chest range from the lung apices/C7 region to the costophrenic angles.`
+    : `The exposed field covers ${Math.round(coverage.vertical * 100)}% of the required anatomy.`;
   if (coverage.vertical < 0.82) {
     const missingTop = Math.max(0, coverage.range.top - coverage.top), missingBottom = Math.max(0, coverage.bottom - coverage.range.bottom);
     anatomyDetail += missingTop > missingBottom ? " Superior anatomy is clipped — the field is too low." : missingBottom > missingTop ? " Inferior anatomy is clipped — the field is too high." : " Required anatomy is clipped by the field.";
   } else if (coverage.centreError > 5) anatomyDetail += " The field is visibly displaced from the anatomical region of interest.";
+  if ((projection.id === "pa-chest" || projection.id === "lat-chest") && coverage.top < 16 * patient.heightCm / 170) anatomyDetail += " The superior field extends unnecessarily towards the mandible; centre/collimate lower while retaining both apices.";
   scores.push({ id: "anatomy-coverage", label: "Anatomy included", weight: 1.5, grade: anatomyGrade, detail: anatomyDetail });
 
   const area = tube.collimationW * tube.collimationH, targetA = projection.collimationW * projection.collimationH, ratio = area / targetA;
@@ -84,7 +90,11 @@ export function scoreExposure(args: { patient: Patient; projection: Projection; 
     const sc = pose.shoulderRoll >= 0.7 ? "excellent" : pose.shoulderRoll >= 0.4 ? "acceptable" : "repeat";
     scores.push({ id: "scapulae", label: "Shoulder roll", weight: 0.8, grade: sc, detail: pose.shoulderRoll >= 0.7 ? "Scapulae rolled clear of the lungs." : "Roll the shoulders forward so the scapulae leave the lung fields." });
     const br = pose.breath === "inspiration" ? "excellent" : "repeat";
-    scores.push({ id: "breath", label: "Respiration", weight: 0.7, grade: br, detail: pose.breath === "inspiration" ? "Arrested full inspiration." : "Chest radiographs are taken on arrested inspiration." });
+    scores.push({ id: "breath", label: "Respiration", weight: 0.7, grade: br, detail: pose.breath === "inspiration" ? "Arrested full inspiration; aim to demonstrate approximately the 10th posterior rib above the diaphragm." : "PA chest should be exposed on arrested full inspiration; inadequate inspiration elevates the diaphragms and crowds basal lung markings." });
+  }
+  if (projection.id === "lat-chest") {
+    const arm = pose.armRaise >= .7 ? "excellent" : pose.armRaise >= .45 ? "acceptable" : "repeat";
+    scores.push({ id:"arms-clear", label:"Arm elevation", weight:.8, grade:arm, detail:arm==="excellent"?"Arms are elevated clear of the lung apices.":"Raise both arms higher so humeri and arm soft tissue do not overlap the apices." });
   }
   if (projection.id === "ap-pelvis" || projection.id === "ap-hip") { const hip = pose.hipInternal >= 12 ? "excellent" : pose.hipInternal >= 5 ? "acceptable" : "repeat"; scores.push({ id: "feet", label: "Internal rotation of hips", weight: 0.8, grade: hip, detail: pose.hipInternal >= 12 ? "Femoral necks parallel to the IR." : "Internally rotate both feet 15–20° so the necks are not foreshortened." }); }
   if (projection.id === "lat-knee") { const kf = Math.abs(pose.kneeFlex - 25); scores.push({ id: "flex", label: "Knee flexion", weight: 0.6, grade: gradeFromError(kf, 8, 18), detail: `Flexed ${pose.kneeFlex.toFixed(0)}° (handbook 20–30°).` }); }
@@ -94,7 +104,14 @@ export function scoreExposure(args: { patient: Patient; projection: Projection; 
   if (metrics.eiStatus === "over" && ei < 420) eiGrade = "acceptable";
   if (metrics.eiStatus === "under" && ei > 140) eiGrade = "acceptable";
   const t = partThickness(patient, projection);
-  scores.push({ id: "exposure", label: "Exposure / EI", weight: 1.5, grade: eiGrade, detail: metrics.eiStatus === "under" ? `Underexposed (EI ${ei.toFixed(0)}). Quantum mottle will hide trabeculae. ${patient.name} is ${t.toFixed(0)} cm through the part — raise mAs or kVp.` : metrics.eiStatus === "over" ? `Overexposed (EI ${ei.toFixed(0)}). Detector signal is excessive and dose is unjustified. Reduce mAs.` : `EI ${ei.toFixed(0)} — within the target window. Contrast and noise are balanced.` });
+  const exposureDetail = metrics.eiStatus === "under"
+    ? `Underexposed (EI ${ei.toFixed(0)}). Quantum mottle will hide trabeculae. ${patient.name} is ${t.toFixed(0)} cm through the part — raise mAs or kVp.`
+    : metrics.eiStatus === "over"
+      ? `Overexposed (EI ${ei.toFixed(0)}). Detector signal is excessive and dose is unjustified. Reduce mAs.`
+      : projection.region === "Thorax"
+        ? `EI ${ei.toFixed(0)} — within the target window. A good chest image should still show a broad grey scale: radiolucent lungs with vascular markings, faint thoracic spine through the mediastinum/heart, and bone that is radiopaque without becoming a white outline.`
+        : `EI ${ei.toFixed(0)} — within the target window. Contrast and noise are balanced; cortical and trabecular bone should remain internally differentiated rather than edge-only.`;
+  scores.push({ id: "exposure", label: "Exposure / EI", weight: 1.5, grade: eiGrade, detail: exposureDetail });
   if (!exposure.grid && projection.grid) scores.push({ id: "grid", label: "Grid", weight: 0.9, grade: t > 12 ? "repeat" : "acceptable", detail: "Handbook asks for a grid. Scatter will flatten contrast on a thick part." });
   else if (exposure.grid && !projection.grid) scores.push({ id: "grid", label: "Grid", weight: 0.5, grade: "acceptable", detail: "Grid on a thin part. You will need more mAs and may underexpose." });
   scores.push({ id: "marker", label: "Laterality marker", weight: 0.6, grade: exposure.marker ? "excellent" : "repeat", detail: exposure.marker ? `${exposure.marker} marker present.` : "No laterality marker — a legal identification fail." });
