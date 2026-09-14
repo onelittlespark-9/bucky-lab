@@ -63,14 +63,37 @@ function applyFrontalThoraxMaterial(src:Float32Array|null,width:number,height:nu
       const ax=Math.abs(x);
       const lateral=smoothstep(2.8,6.2,ax)*(1-smoothstep(16.5,20.5,ax));
       if(lateral<=0)continue;
-      // Cardiomediastinal preservation: wider inferiorly and slightly left-weighted in detector coordinates.
       const inferior=1-smoothstep(128,145,y),heartCentre=-2.1,heartHalf=5.0+4.0*inferior;
       const heart=Math.max(0,1-Math.abs(x-heartCentre)/heartHalf)*smoothstep(111,121,y)*(1-smoothstep(137,149,y));
       const mediastinum=Math.max(0,1-ax/5.2);
       const aeration=vertical*lateral*baseTaper*(1-.72*Math.max(heart,mediastinum));
-      // Retain chest wall/interstitial attenuation; replace the majority of deep soft-tissue OD in aerated lung.
       const floor=Math.max(.010,original*.24);
       out[i]=Math.max(floor,original*(1-.70*aeration));
+    }
+  }
+  return out;
+}
+
+function localMean(src:Float32Array,width:number,height:number,x:number,y:number,radius:number){let sum=0,weight=0;for(let dy=-radius;dy<=radius;dy++){const yy=Math.max(0,Math.min(height-1,y+dy));for(let dx=-radius;dx<=radius;dx++){const xx=Math.max(0,Math.min(width-1,x+dx)),w=radius+1-Math.max(Math.abs(dx),Math.abs(dy));sum+=src[yy*width+xx]!*w;weight+=w;}}return weight?sum/weight:0;}
+
+// Whole-body atlas bone already contains cortical/trabecular/marrow modelling. This pass only corrects the presentation failure
+// seen in the clinical review: isolated cortical rims read as uniformly white line art while ribs/spine stack too densely.
+// It is local and anatomy-preserving: no synthetic bones are added and low-density medullary/trabecular interiors are not filled in.
+function refineWholeBodyBone(src:Float32Array|null,width:number,height:number,tube:TubeState,geometry:ProjectionGeometry,projection:Projection){
+  if(!src||projection.id!=="ap-full-body")return src;
+  const out=new Float32Array(src);
+  for(let py=0;py<height;py++){
+    const y=tube.crY+((py+.5)/height-.5)*tube.collimationH/geometry.magnification;
+    for(let px=0;px<width;px++){
+      const i=py*width+px,v=src[i]!;if(v<=.0005)continue;
+      const x=tube.crX+((px+.5)/width-.5)*tube.collimationW/geometry.magnification,ax=Math.abs(x),near=localMean(src,width,height,px,py,1),broad=localMean(src,width,height,px,py,3),edgeExcess=Math.max(0,v-near);
+      let scale=1-.24*smoothstep(.018,.12,edgeExcess);
+      const thorax=smoothstep(108,116,y)*(1-smoothstep(151,157,y)),centralThorax=thorax*(1-smoothstep(12.5,18.5,ax));
+      scale*=1-.14*centralThorax*smoothstep(.025,.12,broad);
+      const skull=smoothstep(151,158,y);scale*=1-.07*skull*smoothstep(.035,.16,edgeExcess);
+      const distal=(1-smoothstep(28,42,y))+smoothstep(72,92,y)*(1-smoothstep(8,13,ax));
+      const fine=v-near,detail=distal*Math.max(-.012,Math.min(.012,fine))*.16;
+      out[i]=Math.max(0,v*scale+detail);
     }
   }
   return out;
@@ -83,7 +106,7 @@ export async function canonicalAtlasProjection(args:{patient:Patient;projection:
   const tissueScale=linearAttenuation("soft",exposureKvp)/linearAttenuation("soft",REFERENCE_KVP),boneNow=.68*linearAttenuation("corticalBone",exposureKvp)+.32*linearAttenuation("trabecularBone",exposureKvp),boneRef=.68*linearAttenuation("corticalBone",REFERENCE_KVP)+.32*linearAttenuation("trabecularBone",REFERENCE_KVP),boneScale=boneNow/boneRef;
   const croppedTissue=cropCanonical(maps.tissue,maps.width,maps.height,tube,geometry,width,height,tissueScale);
   const materialCorrected=applyFrontalThoraxMaterial(croppedTissue,width,height,tube,geometry,projection);
-  // A successful canonical atlas projection is authoritative for anatomical support. The floor is below visible body weighting and only prevents procedural anatomy leaking into thin/air-filled atlas pixels.
   const tissue=suppressProceduralFallback(materialCorrected);
-  const result={bone:cropCanonical(maps.bone,maps.width,maps.height,tube,geometry,width,height,boneScale),tissue};touchView(viewKey,result);return result;
+  const croppedBone=cropCanonical(maps.bone,maps.width,maps.height,tube,geometry,width,height,boneScale),bone=refineWholeBodyBone(croppedBone,width,height,tube,geometry,projection);
+  const result={bone,tissue};touchView(viewKey,result);return result;
 }
