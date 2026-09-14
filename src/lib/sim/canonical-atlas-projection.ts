@@ -8,10 +8,13 @@ const CANONICAL_W_CM=60;
 const CANONICAL_H_CM=180;
 const CANONICAL_CR_Y_CM=85;
 const REFERENCE_KVP=80;
-const BASE_WIDTH=640;
-const BASE_HEIGHT=1920;
-const MAX_CACHE_ENTRIES=6;
-const MAX_VIEW_CACHE_ENTRIES=12;
+// The canonical maps are repeatedly read back from WebGL. 640x1920 was visually excessive for the final detector matrix
+// and made first-exposure renders very expensive on mobile GPUs. 448x1344 keeps ~7.5 px/cm vertically while cutting
+// canonical pixel work and Float32 cache memory by roughly half.
+const BASE_WIDTH=448;
+const BASE_HEIGHT=1344;
+const MAX_CACHE_ENTRIES=3;
+const MAX_VIEW_CACHE_ENTRIES=6;
 type CanonicalMaps={bone:Float32Array|null;tissue:Float32Array|null;width:number;height:number};
 type ViewMaps={bone:Float32Array|null;tissue:Float32Array|null};
 const CACHE=new Map<string,Promise<CanonicalMaps>>();
@@ -44,10 +47,6 @@ function cropCanonical(src:Float32Array|null,sw:number,sh:number,tube:TubeState,
 function suppressProceduralFallback(src:Float32Array|null){if(!src)return null;const out=new Float32Array(src.length);for(let i=0;i<src.length;i++)out[i]=Math.max(.00026,src[i]!);return out;}
 function smoothstep(a:number,b:number,v:number){const t=Math.max(0,Math.min(1,(v-a)/(b-a)));return t*t*(3-2*t);}
 
-// The atlas respiratory meshes currently under-report usable front/back depth in frontal projection.
-// Correct material composition only inside the existing atlas body support: geometry/silhouette still comes from the atlas.
-// This is deliberately not a contrast operation. It removes soft-tissue optical depth where an inflated lung would replace it,
-// while preserving a central mediastinum, cardiac overlap and denser basal/diaphragmatic transition.
 function applyFrontalThoraxMaterial(src:Float32Array|null,width:number,height:number,tube:TubeState,geometry:ProjectionGeometry,projection:Projection){
   if(!src||projection.anatomy==="torso-lat")return src;
   const out=new Float32Array(src);
@@ -76,9 +75,6 @@ function applyFrontalThoraxMaterial(src:Float32Array|null,width:number,height:nu
 
 function localMean(src:Float32Array,width:number,height:number,x:number,y:number,radius:number){let sum=0,weight=0;for(let dy=-radius;dy<=radius;dy++){const yy=Math.max(0,Math.min(height-1,y+dy));for(let dx=-radius;dx<=radius;dx++){const xx=Math.max(0,Math.min(width-1,x+dx)),w=radius+1-Math.max(Math.abs(dx),Math.abs(dy));sum+=src[yy*width+xx]!*w;weight+=w;}}return weight?sum/weight:0;}
 
-// Whole-body atlas bone already contains cortical/trabecular/marrow modelling. This pass only corrects the presentation failure
-// seen in the clinical review: isolated cortical rims read as uniformly white line art while ribs/spine stack too densely.
-// It is local and anatomy-preserving: no synthetic bones are added and low-density medullary/trabecular interiors are not filled in.
 function refineWholeBodyBone(src:Float32Array|null,width:number,height:number,tube:TubeState,geometry:ProjectionGeometry,projection:Projection){
   if(!src||projection.id!=="ap-full-body")return src;
   const out=new Float32Array(src);
