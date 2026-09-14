@@ -7,7 +7,7 @@ import { sampleFullBody } from "./full-body-model";
 import { buildMetrics, fieldScatter, incidentFluence, partThickness } from "./exposure";
 import { clamp, fbm } from "./geometry";
 import { projectionGeometry } from "./projection-physics";
-import { atlasBoneOpticalDensity, muFromHU } from "./atlas-radiograph";
+import { atlasBoneOpticalDensity } from "./atlas-radiograph";
 import { primaryOpticalDepth } from "./nist-attenuation";
 import { projectAtlasTissueOD } from "./atlas-tissue-projector";
 import { canonicalAtlasProjection, usesCanonicalAtlasProjection } from "./canonical-atlas-projection";
@@ -17,20 +17,19 @@ import type { PathologyId } from "./requests";
 
 /**
  * Convert procedural material path lengths into one heterogeneous primary-beam
- * optical depth. Every material is accumulated inside each energy bin before
- * Beer-Lambert exponentiation. This deliberately replaces the old sum of
- * spectrum-averaged mu*x terms, which is not correct for a polychromatic beam.
+ * optical depth. Every material, including device metal, is accumulated inside
+ * each energy bin before Beer-Lambert exponentiation.
  */
 function pathsToOD(p: Paths, kvp: number) {
-  const primary = primaryOpticalDepth({
+  return primaryOpticalDepth({
     air: Math.max(0,p.air + p.gas*40),
     inflatedLung: Math.max(0,p.lung),
     adipose: Math.max(0,p.fat),
     soft: Math.max(0,p.soft*1.05),
     trabecularBone: Math.max(0,p.bone),
     corticalBone: Math.max(0,p.cortical),
+    metal: Math.max(0,p.metal),
   },kvp);
-  return primary + (p.metal>0 ? muFromHU(3000,kvp)*p.metal : 0);
 }
 export function preloadRadiographAssets(_p: Projection[]) {}
 function localCoords(projection:Projection,patient:Patient,pose:SimPose,px:number,py:number,w:number,h:number,tube:TubeState,geometry:ReturnType<typeof projectionGeometry>){const cmX=((px+.5)/w-.5)*tube.collimationW/geometry.magnification,cmY=((py+.5)/h-.5)*tube.collimationH/geometry.magnification,angle=tube.angle*Math.PI/180,ry=cmY*Math.cos(pose.oblique*Math.PI/180)-cmX*Math.sin(pose.oblique*Math.PI/180)*.18-Math.tan(angle)*geometry.oidCm,lateral=projection.anatomy==="torso-lat"||projection.anatomy==="cspine-lat"||projection.anatomy==="skull-lat";if(lateral)return{x:tube.crX+cmX,y:tube.crY+ry};const rx=cmX*Math.cos(pose.rotationY*Math.PI/180);if(projection.anatomy==="torso-ap"||projection.anatomy==="shoulder-ap"||projection.anatomy==="full-body-ap")return{x:tube.crX+rx,y:tube.crY+ry};return{x:rx+tube.crX*.15,y:ry+(tube.crY-projection.cr.y)*.25};}
