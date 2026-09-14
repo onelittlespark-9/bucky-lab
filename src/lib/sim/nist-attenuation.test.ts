@@ -1,12 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  createPrimaryBeamModel,
   diagnosticSpectrum,
   effectivePhotonEnergyKev,
   linearAttenuationAtEnergy,
   materialTransmission,
   primaryOpticalDepth,
   primaryTransmission,
+  tracePrimaryRay,
 } from "./nist-attenuation.ts";
 
 function close(actual:number,expected:number,tolerance:number,message:string){
@@ -44,9 +46,7 @@ test("required materials retain distinct energy-dependent attenuation curves",()
     assert.ok(low>high,`${material} attenuation should fall across the diagnostic range`);
   }
   const at60=materials.map(material=>linearAttenuationAtEnergy(material,60));
-  for(let i=0;i<at60.length;i++)for(let j=i+1;j<at60.length;j++){
-    assert.ok(Math.abs(at60[i]!-at60[j]!)>1e-5,`${materials[i]} and ${materials[j]} must not share one generic attenuation value`);
-  }
+  for(let i=0;i<at60.length;i++)for(let j=i+1;j<at60.length;j++)assert.ok(Math.abs(at60[i]!-at60[j]!)>1e-5,`${materials[i]} and ${materials[j]} must not share one generic attenuation value`);
   assert.ok(linearAttenuationAtEnergy("corticalBone",60)>linearAttenuationAtEnergy("soft",60));
   assert.ok(linearAttenuationAtEnergy("soft",60)>linearAttenuationAtEnergy("adipose",60));
   assert.ok(linearAttenuationAtEnergy("adipose",60)>linearAttenuationAtEnergy("air",60));
@@ -59,18 +59,31 @@ test("primary transmission is a true heterogeneous Beer-Lambert energy integral"
   close(primaryOpticalDepth(paths,80),-Math.log(transmission),1e-12,"OD must equal -ln transmission");
 });
 
+test("debug ray trace reconstructs every energy bin and the measured primary pixel",()=>{
+  const paths={soft:15,adipose:2.5,inflatedLung:6,corticalBone:0.65} as const,trace=tracePrimaryRay(paths,100),beam=createPrimaryBeamModel(100);
+  assert.deepEqual(trace.materials.map(m=>m.material),["inflatedLung","adipose","soft","corticalBone"]);
+  for(const bin of trace.bins){
+    const tau=bin.contributions.reduce((sum,c)=>sum+c.muCmInv*c.pathCm,0);
+    close(bin.opticalDepth,tau,1e-12,`${bin.energyKev} keV optical depth must equal sum(mu*l)`);
+    close(bin.transmission,Math.exp(-tau),1e-12,`${bin.energyKev} keV transmission must equal exp(-tau)`);
+  }
+  const measuredPixel=beam.transmission(paths),measuredOD=-Math.log(measuredPixel),errorPct=Math.abs(measuredOD-trace.effectiveOpticalDepth)/Math.max(trace.effectiveOpticalDepth,1e-12)*100;
+  assert.ok(errorPct<0.01,`debug OD versus -ln(measured primary pixel) must agree well inside 1-2%, got ${errorPct}%`);
+  close(trace.transmission,measuredPixel,1e-12,"trace and production beam model must use the same polychromatic transmission");
+});
+
+test("compiled beam model is cached per technique",()=>{
+  assert.equal(createPrimaryBeamModel(80),createPrimaryBeamModel(80),"same kVp/filtration must reuse the compiled mu table");
+});
+
 test("polychromatic beam hardening is preserved rather than forcing a monoenergetic square law",()=>{
-  const t10=materialTransmission("soft",10,80);
-  const t20=materialTransmission("soft",20,80);
+  const t10=materialTransmission("soft",10,80),t20=materialTransmission("soft",20,80);
   assert.ok(t20>t10*t10,"polychromatic hardening must survive thickness doubling");
 });
 
 test("raising kVp increases penetration and reduces cortical-to-soft subject contrast",()=>{
-  const soft={soft:20} as const;
-  const bone={soft:19,corticalBone:1} as const;
-  const t60=primaryTransmission(soft,60),t120=primaryTransmission(soft,120);
+  const soft={soft:20} as const,bone={soft:19,corticalBone:1} as const,t60=primaryTransmission(soft,60),t120=primaryTransmission(soft,120);
   assert.ok(t120>t60,"higher kVp must increase soft-tissue transmission");
-  const contrast60=Math.abs(primaryTransmission(bone,60)-t60)/t60;
-  const contrast120=Math.abs(primaryTransmission(bone,120)-t120)/t120;
+  const contrast60=Math.abs(primaryTransmission(bone,60)-t60)/t60,contrast120=Math.abs(primaryTransmission(bone,120)-t120)/t120;
   assert.ok(contrast120<contrast60,"bone-soft subject contrast must decrease as kVp rises");
 });
