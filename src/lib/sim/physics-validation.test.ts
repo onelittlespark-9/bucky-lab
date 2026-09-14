@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  DEFAULT_KVP_SWEEP,
   DEFAULT_SLAB_VALIDATION_CASES,
   formatPhysicsValidationReport,
+  runKvpSweepValidation,
   runPhysicsValidation,
   validateThicknessDoubling,
   validateUniformSlab,
@@ -41,6 +43,32 @@ test("doubling a uniform slab squares transmission in effective-energy validatio
     }
   }
   assert.equal(failures.length, 0, failures.length ? `Thickness-doubling failures:\n${failures.join("\n")}` : undefined);
+});
+
+test("polychromatic kVp sweep reduces normalised bone-soft-tissue contrast as beam energy rises", () => {
+  const report = runKvpSweepValidation({ kvps: DEFAULT_KVP_SWEEP });
+  const diagnostic = report.points
+    .map(point =>
+      `${point.kvp} kVp: Eeff=${point.effectiveEnergyKev.toFixed(2)}keV ` +
+      `Tsoft=${point.softTissueTransmission.toFixed(6)} ` +
+      `Tbone=${point.boneTransmission.toFixed(6)} ` +
+      `contrast=${point.normalisedBoneSoftContrast.toFixed(6)}`,
+    )
+    .join("\n");
+
+  assert.equal(
+    report.passed,
+    true,
+    `kVp sweep failed with fixed ${report.mAs} mAs and ${report.filtrationMmAl} mm Al:\n${diagnostic}\n${report.failures.join("\n")}`,
+  );
+
+  assert.deepEqual(report.points.map(point => point.kvp), [...DEFAULT_KVP_SWEEP]);
+  for (let i = 1; i < report.points.length; i++) {
+    assert.ok(
+      report.points[i]!.normalisedBoneSoftContrast < report.points[i - 1]!.normalisedBoneSoftContrast,
+      `Contrast must fall from ${report.points[i - 1]!.kvp} to ${report.points[i]!.kvp} kVp`,
+    );
+  }
 });
 
 test("validation report fails as a single CI gate if any phantom case exceeds tolerance", () => {
