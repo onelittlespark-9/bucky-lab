@@ -149,8 +149,8 @@ function refineWholeBodyBone(src:Float32Array|null,width:number,height:number,tu
       const hands=smoothstep(60,70,y)*(1-smoothstep(98,106,y))*smoothstep(15,18,ax);
       const feet=smoothstep(154,163,y)*(1-smoothstep(177,180,y));
       const distal=Math.max(hands,feet);
-      const fillFactor=skull?.48:limb>.25?.22:.32;
-      const supportedFill=Math.min(skull?.070:.052,far*fillFactor);
+      const fillFactor=skull>.01?.48:limb>.25?.22:.32;
+      const supportedFill=Math.min(skull>.01?.070:.052,far*fillFactor);
       const localDelta=Math.max(-.012,Math.min(.012,v-near));
       const detailGain=distal>.1?.27:limb>.1?.20:.11;
       const fine=localDelta*(localDelta<0?detailGain*1.35:detailGain);
