@@ -1,6 +1,6 @@
 // Diagnostic primary-beam attenuation model derived from NIST XCOM / ICRU-44 tissue tables.
 // Values below are mass attenuation coefficients (mu/rho, cm^2/g) sampled at
-// 30, 40, 50, 60, 80 and 100 keV. Linear attenuation is (mu/rho)*density.
+// 30, 40, 50, 60, 80, 100, 120 and 150 keV. Linear attenuation is (mu/rho)*density.
 //
 // IMPORTANT: radiographic primary transmission is calculated as
 //   I / I0 = sum_E S(E) D(E) exp[-sum_m mu_m(E) x_m] / sum_E S(E) D(E)
@@ -23,18 +23,23 @@ export type RadiographicMaterial =
 
 export type MaterialPath = Partial<Record<RadiographicMaterial, number>>;
 
-const ENERGY_KEV = [30, 40, 50, 60, 80, 100] as const;
-type Curve = readonly [number, number, number, number, number, number];
+const ENERGY_KEV = [30, 40, 50, 60, 80, 100, 120, 150] as const;
+type Curve = readonly [number, number, number, number, number, number, number, number];
+
+// Soft tissue and cortical-bone anchors follow NIST ICRU-44 tables directly at
+// tabulated energies. Other biological materials use the same XCOM-derived
+// composition trend with their own densities. The 120-keV entries are log-
+// interpolated between the NIST 100- and 150-keV anchors.
 const MASS_MU: Record<RadiographicMaterial, Curve> = {
-  air: [0.353, 0.248, 0.208, 0.188, 0.166, 0.154],
-  inflatedLung: [0.3815, 0.2699, 0.2270, 0.2053, 0.1826, 0.1695],
-  adipose: [0.3063, 0.2396, 0.2123, 0.1974, 0.1800, 0.1688],
-  soft: [0.378, 0.269, 0.2265, 0.2050, 0.1824, 0.1694],
-  muscle: [0.3783, 0.2685, 0.2262, 0.2048, 0.1823, 0.1693],
-  blood: [0.379, 0.269, 0.2268, 0.2052, 0.1827, 0.1695],
-  brain: [0.377, 0.268, 0.2260, 0.2045, 0.1820, 0.1690],
-  trabecularBone: [0.77, 0.46, 0.335, 0.275, 0.215, 0.188],
-  corticalBone: [1.331, 0.6655, 0.4242, 0.3148, 0.2229, 0.1855],
+  air: [0.353, 0.248, 0.208, 0.188, 0.166, 0.154, 0.146, 0.136],
+  inflatedLung: [0.3815, 0.2699, 0.2270, 0.2053, 0.1826, 0.1695, 0.1608, 0.1494],
+  adipose: [0.3063, 0.2396, 0.2123, 0.1974, 0.1800, 0.1688, 0.1607, 0.1493],
+  soft: [0.3790, 0.2688, 0.2264, 0.2048, 0.1823, 0.1693, 0.1608, 0.1492],
+  muscle: [0.3783, 0.2685, 0.2262, 0.2048, 0.1823, 0.1693, 0.1608, 0.1492],
+  blood: [0.3790, 0.2690, 0.2268, 0.2052, 0.1827, 0.1695, 0.1610, 0.1494],
+  brain: [0.3770, 0.2680, 0.2260, 0.2045, 0.1820, 0.1690, 0.1605, 0.1489],
+  trabecularBone: [0.770, 0.460, 0.335, 0.275, 0.215, 0.188, 0.171, 0.151],
+  corticalBone: [1.331, 0.6655, 0.4242, 0.3148, 0.2229, 0.1855, 0.1644, 0.1480],
 };
 
 const DENSITY_G_CM3: Record<RadiographicMaterial, number> = {
@@ -48,6 +53,12 @@ const DENSITY_G_CM3: Record<RadiographicMaterial, number> = {
   trabecularBone: 0.62,
   corticalBone: 1.92,
 };
+
+// NIST elemental aluminium mass attenuation coefficients used to model beam
+// hardening from tube + added filtration. 2.5 mm Al is the simulator baseline.
+const AL_MASS_MU: Curve = [1.128, 0.5685, 0.3681, 0.2778, 0.2018, 0.1704, 0.1540, 0.1378];
+const AL_DENSITY_G_CM3 = 2.699;
+export const DEFAULT_FILTRATION_MM_AL = 2.5;
 
 function lerp(a:number,b:number,t:number){return a+(b-a)*t;}
 function interpolate(curve:Curve,energyKev:number):number{
@@ -64,46 +75,57 @@ export function linearAttenuationAtEnergy(material:RadiographicMaterial,energyKe
   return interpolate(MASS_MU[material],energyKev)*DENSITY_G_CM3[material];
 }
 
+function aluminiumTransmission(energyKev:number,filtrationMmAl:number){
+  const pathCm=Math.max(0,filtrationMmAl)/10;
+  return Math.exp(-interpolate(AL_MASS_MU,energyKev)*AL_DENSITY_G_CM3*pathCm);
+}
+
 export interface SpectrumBin {
   energyKev:number;
-  /** Relative tungsten source fluence before detector weighting. */
+  /** Relative tungsten source fluence before filtration/detector weighting. */
   sourceWeight:number;
   /** Relative detector energy response / absorption efficiency. */
   detectorResponse:number;
-  /** Normalised S(E)D(E) weight used by the transmission integral. */
+  /** Normalised S(E)F(E)D(E) weight used by the transmission integral. */
   weight:number;
 }
 
-const spectrumCache=new Map<number,readonly SpectrumBin[]>();
+const spectrumCache=new Map<string,readonly SpectrumBin[]>();
 
 /**
  * Compact filtered tungsten spectrum for browser primary-beam calculations.
- * This is a fast discrete approximation, not a substitute for SpekPy/TASMIP
- * or Monte-Carlo validation. Detector response is kept explicit so the code
- * follows the physical S(E)D(E) integral rather than hiding it in a grey LUT.
+ * The spectrum is evaluated through to the selected tube potential instead of
+ * being capped at 100 keV, which preserves the expected loss of subject contrast
+ * at 120-150 kVp. The default filtration is 2.5 mm Al-equivalent.
+ *
+ * This remains a compact deterministic spectrum model, not a replacement for a
+ * fully validated SpekPy/TASMIP spectrum or Monte-Carlo transport calculation.
  */
-export function diagnosticSpectrum(kvp:number):readonly SpectrumBin[]{
+export function diagnosticSpectrum(kvp:number,filtrationMmAl=DEFAULT_FILTRATION_MM_AL):readonly SpectrumBin[]{
   const k=Math.round(Math.max(40,Math.min(150,kvp)));
-  const cached=spectrumCache.get(k);if(cached)return cached;
+  const filtration=Math.max(0,Math.min(10,filtrationMmAl));
+  const key=`${k}:${filtration.toFixed(2)}`;
+  const cached=spectrumCache.get(key);if(cached)return cached;
   const raw:Array<Omit<SpectrumBin,"weight">>=[];
-  for(let e=30;e<=Math.min(100,k-2);e+=6){
+  const maxEnergy=Math.max(30,k-2);
+  for(let e=24;e<=maxEnergy;e+=4){
+    // Kramers-law-like tungsten bremsstrahlung continuum.
     const continuum=Math.max(0,(k-e)*e);
-    // Approximate inherent + added filtration. This hardens the low-energy tail.
-    const filtration=Math.exp(-52/Math.pow(e,1.42));
-    const tungstenLines=k>=72?(Math.exp(-Math.pow((e-59)/4.8,2))*.20+Math.exp(-Math.pow((e-67)/5.5,2))*.11):0;
-    const sourceWeight=continuum*filtration*(1+tungstenLines);
-    // Generic CsI-like detector response proxy: absorbed signal increases with
-    // energy over this range but not in direct proportion to photon energy.
-    const detectorResponse=Math.pow(e/60,.22);
+    const filterTransmission=aluminiumTransmission(e,filtration);
+    const tungstenLines=k>=72?(Math.exp(-Math.pow((e-59.3)/2.8,2))*.18+Math.exp(-Math.pow((e-67.2)/3.1,2))*.10):0;
+    const sourceWeight=continuum*filterTransmission*(1+tungstenLines);
+    // CsI-like energy-integrating detector response proxy. Keeping this explicit
+    // prevents display-window choices from masquerading as detector physics.
+    const detectorResponse=Math.pow(e/60,.28);
     if(sourceWeight>0)raw.push({energyKev:e,sourceWeight,detectorResponse});
   }
   const total=raw.reduce((s,b)=>s+b.sourceWeight*b.detectorResponse,0)||1;
   const normalised=raw.map(b=>({...b,weight:(b.sourceWeight*b.detectorResponse)/total}));
-  spectrumCache.set(k,normalised);return normalised;
+  spectrumCache.set(key,normalised);return normalised;
 }
 
-export function effectivePhotonEnergyKev(kvp:number):number{
-  const spectrum=diagnosticSpectrum(kvp);
+export function effectivePhotonEnergyKev(kvp:number,filtrationMmAl=DEFAULT_FILTRATION_MM_AL):number{
+  const spectrum=diagnosticSpectrum(kvp,filtrationMmAl);
   return spectrum.reduce((s,b)=>s+b.energyKev*b.weight,0);
 }
 
