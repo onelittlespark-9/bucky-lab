@@ -119,6 +119,7 @@ export async function projectAtlasTissueOD(args:{patient:Patient;projection:Proj
     const resp=(p:LoadedPart)=>p.system==="respiratory"&&!isAirway(p);
     const leftLung=blur(projectVisible(scene,atlas,p=>resp(p)&&p.mesh.getWorldPosition(new THREE.Vector3()).x<0,camera,renderer,rt,fm,bm,rw,rh),rw,rh,3);
     const rightLung=blur(projectVisible(scene,atlas,p=>resp(p)&&p.mesh.getWorldPosition(new THREE.Vector3()).x>=0,camera,renderer,rt,fm,bm,rw,rh),rw,rh,3);
+    const airway=blur(projectParts(scene,atlas,p=>p.system==="respiratory"&&isAirway(p),camera,renderer,rt,fm,bm,rw,rh,1.6,4.5),rw,rh,2);
     const heart=blur(projectVisible(scene,atlas,p=>p.system==="cardiac",camera,renderer,rt,fm,bm,rw,rh),rw,rh,3);
     const vessels=blur(projectParts(scene,atlas,p=>p.system==="arterial"||p.system==="venous",camera,renderer,rt,fm,bm,rw,rh,.55,2.3),rw,rh,2);
     const digestive=blur(projectParts(scene,atlas,p=>p.system==="digestive",camera,renderer,rt,fm,bm,rw,rh,6,12),rw,rh,4);
@@ -144,16 +145,26 @@ export async function projectAtlasTissueOD(args:{patient:Patient;projection:Proj
       let brainPath=0;
       let airPath=0;
 
-      // Heart, great vessels and diaphragm physically replace part of the
-      // aerated lung path where they overlap it. This creates natural
-      // superimposition instead of drawing a separate mediastinal silhouette.
+      // Myocardium is predominantly muscle, with intracardiac blood contributing
+      // a smaller fraction. Replace the material already on the ray rather than
+      // adding a bright cardiac mask on top of the thorax.
       const heartTarget=Math.min(internal*.62,heart[i]!*.78);
-      let take=Math.min(lungPath,heartTarget*.78);lungPath-=take;bloodPath+=take;
-      let remain=heartTarget-take;take=Math.min(softPath,remain);softPath-=take;bloodPath+=take;
+      let heartReplaced=0;
+      let take=Math.min(lungPath,heartTarget*.78);lungPath-=take;heartReplaced+=take;
+      let remain=heartTarget-heartReplaced;take=Math.min(softPath,remain);softPath-=take;heartReplaced+=take;
+      musclePath+=heartReplaced*.72;
+      bloodPath+=heartReplaced*.28;
 
       const vesselTarget=Math.min(internal*.10,vessels[i]!*.13);
       take=Math.min(lungPath,vesselTarget*.68);lungPath-=take;bloodPath+=take;
       remain=vesselTarget-take;take=Math.min(softPath,remain);softPath-=take;bloodPath+=take;
+
+      // Tracheal and major bronchial lumen is a genuine air path. Keeping it
+      // separate from the lung volume allows central airway lucency to emerge
+      // from attenuation rather than from a post-processing overlay.
+      const airwayTarget=Math.min(internal*.075,airway[i]!*.48);
+      take=Math.min(softPath,airwayTarget);softPath-=take;airPath+=take;
+      remain=airwayTarget-take;take=Math.min(lungPath,remain);lungPath-=take;airPath+=take;
 
       const diaphragmTarget=Math.min(internal*.13,diaphragm[i]!*.38);
       take=Math.min(lungPath,diaphragmTarget*.70);lungPath-=take;musclePath+=take;
