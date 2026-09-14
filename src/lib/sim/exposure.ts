@@ -1,34 +1,5 @@
 import type { Patient, Projection, ExposureState, TubeState, ExposureMetrics } from "./types";
-import { linearAttenuation, relativeTubeOutput } from "./nist-attenuation";
-
-export const MU = {
-  air: 0.0003,
-  lung: 0.045,
-  fat: 0.16,
-  soft: 0.205,
-  muscle: 0.22,
-  trabecularBone: 0.42,
-  corticalBone: 0.72,
-  metal: 8,
-} as const;
-
-export type Tissue = keyof typeof MU;
-
-export function muEffective(tissue: Tissue, kvp: number): number {
-  switch (tissue) {
-    case "air": return linearAttenuation("air", kvp);
-    case "lung": return linearAttenuation("inflatedLung", kvp);
-    case "fat": return linearAttenuation("adipose", kvp);
-    case "soft": return linearAttenuation("soft", kvp);
-    case "muscle": return linearAttenuation("muscle", kvp);
-    case "trabecularBone": return linearAttenuation("trabecularBone", kvp);
-    case "corticalBone": return linearAttenuation("corticalBone", kvp);
-    case "metal": {
-      const ref = 75;
-      return MU.metal * Math.pow(ref / Math.max(40, kvp), 1.2);
-    }
-  }
-}
+import { primaryTransmission, relativeTubeOutput } from "./nist-attenuation";
 
 export function incidentFluence(kvp: number, mas: number, sidCm: number, grid: boolean): number {
   const output = relativeTubeOutput(kvp);
@@ -84,16 +55,26 @@ export function classifyEI(ei: number): ExposureMetrics["eiStatus"] {
   return "optimal";
 }
 
+/**
+ * Representative subject transmission for EI/dose metrics. This is deliberately
+ * evaluated through the same multi-bin spectrum as the renderer, rather than
+ * combining fixed or spectrum-averaged mu values into one effective exponent.
+ */
 export function representativeTransmission(patient: Patient, projection: Projection, kvp: number): number {
   const t = partThickness(patient, projection);
-  const muSoft = muEffective("soft", kvp);
-  const muTrabecularBone = muEffective("trabecularBone", kvp);
-  const muLung = muEffective("lung", kvp);
   const isChest = projection.region === "Thorax";
-  const effectiveMu = isChest
-    ? muSoft * 0.34 + muLung * 0.46 + muTrabecularBone * 0.055
-    : muSoft * 0.76 + muTrabecularBone * 0.11;
-  return Math.exp(-effectiveMu * t);
+  return isChest
+    ? primaryTransmission({
+        soft: t * 0.34,
+        inflatedLung: t * 0.46,
+        trabecularBone: t * 0.055,
+        adipose: t * 0.145,
+      }, kvp)
+    : primaryTransmission({
+        soft: t * 0.76,
+        trabecularBone: t * 0.11,
+        adipose: t * 0.13,
+      }, kvp);
 }
 
 export function superimpositionIndex(patient: Patient, projection: Projection): number {
