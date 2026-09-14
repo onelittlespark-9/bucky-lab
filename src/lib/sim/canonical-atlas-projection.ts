@@ -42,6 +42,39 @@ async function canonicalMaps(args:{patient:Patient;projection:Projection;tube:Tu
 
 function cropCanonical(src:Float32Array|null,sw:number,sh:number,tube:TubeState,geometry:ProjectionGeometry,width:number,height:number,scale:number){if(!src)return null;const out=new Float32Array(width*height);for(let py=0;py<height;py++){const cmY=((py+.5)/height-.5)*tube.collimationH/geometry.magnification,globalY=tube.crY+cmY,v=(globalY/CANONICAL_H_CM)*(sh-1);for(let px=0;px<width;px++){const cmX=((px+.5)/width-.5)*tube.collimationW/geometry.magnification,globalX=tube.crX+cmX,u=(.5+globalX/CANONICAL_W_CM)*(sw-1);out[py*width+px]=sampleBilinear(src,sw,sh,u,v)*scale;}}return out;}
 function suppressProceduralFallback(src:Float32Array|null){if(!src)return null;const out=new Float32Array(src.length);for(let i=0;i<src.length;i++)out[i]=Math.max(.00026,src[i]!);return out;}
+function smoothstep(a:number,b:number,v:number){const t=Math.max(0,Math.min(1,(v-a)/(b-a)));return t*t*(3-2*t);}
+
+// The atlas respiratory meshes currently under-report usable front/back depth in frontal projection.
+// Correct material composition only inside the existing atlas body support: geometry/silhouette still comes from the atlas.
+// This is deliberately not a contrast operation. It removes soft-tissue optical depth where an inflated lung would replace it,
+// while preserving a central mediastinum, cardiac overlap and denser basal/diaphragmatic transition.
+function applyFrontalThoraxMaterial(src:Float32Array|null,width:number,height:number,tube:TubeState,geometry:ProjectionGeometry,projection:Projection){
+  if(!src||projection.anatomy==="torso-lat")return src;
+  const out=new Float32Array(src);
+  for(let py=0;py<height;py++){
+    const y=tube.crY+((py+.5)/height-.5)*tube.collimationH/geometry.magnification;
+    const vertical=smoothstep(108,118,y)*(1-smoothstep(148,154,y));
+    if(vertical<=0)continue;
+    const baseTaper=1-.58*smoothstep(108,119,y);
+    for(let px=0;px<width;px++){
+      const i=py*width+px,original=src[i]!;
+      if(original<.008)continue;
+      const x=tube.crX+((px+.5)/width-.5)*tube.collimationW/geometry.magnification;
+      const ax=Math.abs(x);
+      const lateral=smoothstep(2.8,6.2,ax)*(1-smoothstep(16.5,20.5,ax));
+      if(lateral<=0)continue;
+      // Cardiomediastinal preservation: wider inferiorly and slightly left-weighted in detector coordinates.
+      const inferior=1-smoothstep(128,145,y),heartCentre=-2.1,heartHalf=5.0+4.0*inferior;
+      const heart=Math.max(0,1-Math.abs(x-heartCentre)/heartHalf)*smoothstep(111,121,y)*(1-smoothstep(137,149,y));
+      const mediastinum=Math.max(0,1-ax/5.2);
+      const aeration=vertical*lateral*baseTaper*(1-.72*Math.max(heart,mediastinum));
+      // Retain chest wall/interstitial attenuation; replace the majority of deep soft-tissue OD in aerated lung.
+      const floor=Math.max(.010,original*.24);
+      out[i]=Math.max(floor,original*(1-.70*aeration));
+    }
+  }
+  return out;
+}
 
 export async function canonicalAtlasProjection(args:{patient:Patient;projection:Projection;tube:TubeState;exposureKvp:number;width:number;height:number;geometry:ProjectionGeometry;}){
   const{patient,projection,tube,exposureKvp,width,height,geometry}=args,baseKey=canonicalKey(patient,projection),viewKey=[baseKey,projection.id,exposureKvp,width,height,tube.crX.toFixed(3),tube.crY.toFixed(3),tube.collimationW.toFixed(3),tube.collimationH.toFixed(3),geometry.magnification.toFixed(5)].join("|");
@@ -49,7 +82,8 @@ export async function canonicalAtlasProjection(args:{patient:Patient;projection:
   const maps=await canonicalMaps({patient,projection,tube,geometry});
   const tissueScale=linearAttenuation("soft",exposureKvp)/linearAttenuation("soft",REFERENCE_KVP),boneNow=.68*linearAttenuation("corticalBone",exposureKvp)+.32*linearAttenuation("trabecularBone",exposureKvp),boneRef=.68*linearAttenuation("corticalBone",REFERENCE_KVP)+.32*linearAttenuation("trabecularBone",REFERENCE_KVP),boneScale=boneNow/boneRef;
   const croppedTissue=cropCanonical(maps.tissue,maps.width,maps.height,tube,geometry,width,height,tissueScale);
-  // A successful canonical atlas projection is authoritative for anatomical support. render-radiograph.ts historically substitutes procedural anatomy whenever atlas OD <= .00025; the resulting PA/lateral chest primitives are visibly non-anatomical. Keep a sub-visible routing floor on every canonical atlas tissue map so air remains black through bodyWeight while procedural ellipses/capsules cannot leak into thin or aerated atlas pixels.
-  const tissue=suppressProceduralFallback(croppedTissue);
+  const materialCorrected=applyFrontalThoraxMaterial(croppedTissue,width,height,tube,geometry,projection);
+  // A successful canonical atlas projection is authoritative for anatomical support. The floor is below visible body weighting and only prevents procedural anatomy leaking into thin/air-filled atlas pixels.
+  const tissue=suppressProceduralFallback(materialCorrected);
   const result={bone:cropCanonical(maps.bone,maps.width,maps.height,tube,geometry,width,height,boneScale),tissue};touchView(viewKey,result);return result;
 }
