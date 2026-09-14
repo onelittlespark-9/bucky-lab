@@ -56,6 +56,15 @@ test("polychromatic kVp sweep reduces normalised bone-soft-tissue contrast as be
     )
     .join("\n");
 
+  console.log("\n[kVp sweep] fixed mAs and filtration");
+  console.table(report.points.map(point => ({
+    kVp: point.kvp,
+    effectiveEnergyKeV: Number(point.effectiveEnergyKev.toFixed(2)),
+    softTransmission: Number(point.softTissueTransmission.toFixed(6)),
+    boneTransmission: Number(point.boneTransmission.toFixed(6)),
+    normalisedBoneSoftContrast: Number(point.normalisedBoneSoftContrast.toFixed(6)),
+  })));
+
   assert.equal(
     report.passed,
     true,
