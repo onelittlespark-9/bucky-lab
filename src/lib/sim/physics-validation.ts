@@ -2,7 +2,7 @@ import {
   aluminiumLinearAttenuationAtEnergy,
   effectivePhotonEnergyKev,
   linearAttenuationAtEnergy,
-} from "./nist-attenuation";
+} from "./nist-attenuation.ts";
 
 export type ValidationSlabMaterial = "soft" | "pmma" | "aluminium" | "corticalBone";
 
@@ -43,10 +43,6 @@ export interface PhysicsValidationReport {
 
 const ENERGY_KEV = [30, 40, 50, 60, 80, 100, 120, 150] as const;
 type Curve = readonly [number, number, number, number, number, number, number, number];
-
-// PMMA (C5H8O2, density 1.19 g/cm^3) XCOM-equivalent mass attenuation
-// coefficients in cm^2/g at the ENERGY_KEV anchors above. This is kept in the
-// validation module deliberately: PMMA is a phantom material, not patient tissue.
 const PMMA_MASS_MU: Curve = [0.3296, 0.2445, 0.2108, 0.1926, 0.1743, 0.1642, 0.1574, 0.1490];
 const PMMA_DENSITY_G_CM3 = 1.19;
 
@@ -73,11 +69,6 @@ function interpolate(curve: Curve, energyKev: number): number {
   return curve[curve.length - 1]!;
 }
 
-/**
- * Linear attenuation coefficient used by the effective-energy phantom mode.
- * Patient tissues and aluminium share the production attenuation tables;
- * PMMA is validation-only and uses its own XCOM-equivalent curve.
- */
 export function validationLinearAttenuation(material: ValidationSlabMaterial, energyKev: number): number {
   switch (material) {
     case "soft": return linearAttenuationAtEnergy("soft", energyKev);
@@ -91,17 +82,6 @@ export function beerLambertTransmission(muCmInv: number, thicknessCm: number): n
   return Math.exp(-Math.max(0, muCmInv) * Math.max(0, thicknessCm));
 }
 
-/**
- * Render a deliberately simple raw detector phantom before any display LUT,
- * scatter, sharpening, window/level or noise. The slab occupies the central
- * 60% of the field and the stored values are I/I0, so the central ROI can be
- * compared directly with Beer-Lambert transmission.
- *
- * This mode intentionally uses the current spectrum's effective photon energy
- * because the acceptance criterion requested for the phantom is the
- * monoenergetic Beer-Lambert relation I/I0 = exp(-mu*x). The production renderer
- * remains polychromatic and is therefore expected to show beam hardening.
- */
 export function renderUniformSlabRaw(args: {
   material: ValidationSlabMaterial;
   thicknessCm: number;
@@ -122,7 +102,6 @@ export function renderUniformSlabRaw(args: {
   return { pixels, width, height, effectiveEnergyKev, muCmInv };
 }
 
-/** Average a central ROI covering 30% of each detector dimension. */
 export function centralRawMean(pixels: Float32Array, width: number, height: number): number {
   const x0 = Math.floor(width * 0.35), x1 = Math.ceil(width * 0.65);
   const y0 = Math.floor(height * 0.35), y1 = Math.ceil(height * 0.65);
