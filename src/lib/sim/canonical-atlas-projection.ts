@@ -47,7 +47,7 @@ export async function canonicalAtlasProjection(args:{patient:Patient;projection:
   const cached=VIEW_CACHE.get(viewKey);if(cached){touchView(viewKey,cached);return cached;}
   const maps=await canonicalMaps({patient,projection,tube,geometry});
   const tissueScale=linearAttenuation("soft",exposureKvp)/linearAttenuation("soft",REFERENCE_KVP),boneNow=.68*linearAttenuation("corticalBone",exposureKvp)+.32*linearAttenuation("trabecularBone",exposureKvp),boneRef=.68*linearAttenuation("corticalBone",REFERENCE_KVP)+.32*linearAttenuation("trabecularBone",REFERENCE_KVP),boneScale=boneNow/boneRef;
-  // The current atlas soft-tissue depth projection produces faceted surface-mesh slabs in chest views. Preserve its skeletal geometry, but use the dedicated procedural tissue path for frontal and lateral chest/full-body projections until tissue integration is genuinely volumetric.
-  const preferProceduralTissue=projection.id==="pa-chest"||projection.id==="ap-full-body"||projection.anatomy==="torso-lat";
+  // Keep the atlas as the anatomical source for whole-body tissue. The procedural full-body fallback is intentionally not used here: it produces primitive capsule/ellipse anatomy and destroys the atlas silhouette. Chest-only views can still use the dedicated procedural thoracic model while the atlas tissue projector is improved separately.
+  const preferProceduralTissue=projection.id==="pa-chest"||projection.anatomy==="torso-lat";
   const result={bone:cropCanonical(maps.bone,maps.width,maps.height,tube,geometry,width,height,boneScale),tissue:preferProceduralTissue?null:cropCanonical(maps.tissue,maps.width,maps.height,tube,geometry,width,height,tissueScale)};touchView(viewKey,result);return result;
 }
