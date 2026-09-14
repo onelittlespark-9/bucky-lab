@@ -10,8 +10,8 @@ const CANONICAL_CR_Y_CM=85;
 const REFERENCE_KVP=80;
 const BASE_WIDTH=640;
 const BASE_HEIGHT=1920;
-const MAX_CACHE_ENTRIES=4;
-const MAX_VIEW_CACHE_ENTRIES=10;
+const MAX_CACHE_ENTRIES=6;
+const MAX_VIEW_CACHE_ENTRIES=12;
 type CanonicalMaps={bone:Float32Array|null;tissue:Float32Array|null;width:number;height:number};
 type ViewMaps={bone:Float32Array|null;tissue:Float32Array|null};
 const CACHE=new Map<string,Promise<CanonicalMaps>>();
@@ -48,10 +48,8 @@ export async function canonicalAtlasProjection(args:{patient:Patient;projection:
   const cached=VIEW_CACHE.get(viewKey);if(cached){touchView(viewKey,cached);return cached;}
   const maps=await canonicalMaps({patient,projection,tube,geometry});
   const tissueScale=linearAttenuation("soft",exposureKvp)/linearAttenuation("soft",REFERENCE_KVP),boneNow=.68*linearAttenuation("corticalBone",exposureKvp)+.32*linearAttenuation("trabecularBone",exposureKvp),boneRef=.68*linearAttenuation("corticalBone",REFERENCE_KVP)+.32*linearAttenuation("trabecularBone",REFERENCE_KVP),boneScale=boneNow/boneRef;
-  // Keep the atlas as the anatomical source for whole-body tissue. The procedural full-body fallback is intentionally not used here: it produces primitive capsule/ellipse anatomy and destroys the atlas silhouette. Chest-only views can still use the dedicated procedural thoracic model while the atlas tissue projector is improved separately.
-  const preferProceduralTissue=projection.id==="pa-chest"||projection.anatomy==="torso-lat";
   const croppedTissue=cropCanonical(maps.tissue,maps.width,maps.height,tube,geometry,width,height,tissueScale);
-  // render-radiograph.ts historically falls back pixel-by-pixel when atlas OD is <= .00025. For whole-body views that re-introduces the primitive procedural mannequin anywhere the atlas is thin or air-filled. A sub-visible floor just above that routing threshold keeps successful whole-body renders atlas-only without affecting detector tone or atlas coverage metrics.
-  const tissue=projection.id==="ap-full-body"?suppressProceduralFallback(croppedTissue):croppedTissue;
-  const result={bone:cropCanonical(maps.bone,maps.width,maps.height,tube,geometry,width,height,boneScale),tissue:preferProceduralTissue?null:tissue};touchView(viewKey,result);return result;
+  // A successful canonical atlas projection is authoritative for anatomical support. render-radiograph.ts historically substitutes procedural anatomy whenever atlas OD <= .00025; the resulting PA/lateral chest primitives are visibly non-anatomical. Keep a sub-visible routing floor on every canonical atlas tissue map so air remains black through bodyWeight while procedural ellipses/capsules cannot leak into thin or aerated atlas pixels.
+  const tissue=suppressProceduralFallback(croppedTissue);
+  const result={bone:cropCanonical(maps.bone,maps.width,maps.height,tube,geometry,width,height,boneScale),tissue};touchView(viewKey,result);return result;
 }
