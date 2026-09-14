@@ -5,7 +5,8 @@ import { runPhysicsValidation } from "../src/lib/sim/physics-validation.ts";
 import { validateQuantitativeRois } from "../src/lib/sim/quantitative-roi-validation.ts";
 import { runBeamHardeningValidation } from "../src/lib/sim/beam-hardening-validation.ts";
 import { runKvpSweepValidation } from "../src/lib/sim/physics-validation.ts";
-import { tracePrimaryRay, diagnosticSpectrum, linearAttenuationAtEnergy } from "../src/lib/sim/nist-attenuation.ts";
+import { tracePrimaryRay, diagnosticSpectrum, linearAttenuationAtEnergy, primaryTransmission } from "../src/lib/sim/nist-attenuation.ts";
+import { simulateReferenceRay, simulateReferenceCylinderProfile } from "../src/lib/sim/reference-attenuation-simulator.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -126,6 +127,41 @@ function runPathIntegritySuite(kvp = 80) {
   return { passed: rows.every(r => r.passed), rows };
 }
 
+function runReferenceSimulatorSuite() {
+  const tolerance = 0.03;
+  const rays = [
+    ["open-air", {}],
+    ["10cm-soft", { soft: 10 }],
+    ["lung", { soft: 2.5, inflatedLung: 17 }],
+    ["abdomen", { adipose: 2, soft: 18 }],
+    ["femur-cortex", { soft: 10.8, corticalBone: 0.8, trabecularBone: 0.4 }],
+    ["femur-medulla", { soft: 10.2, adipose: 1.3, trabecularBone: 0.5 }],
+    ["pelvis", { adipose: 2, soft: 17, trabecularBone: 1.2, corticalBone: 0.7 }],
+    ["mixed-thorax", { adipose: 1.5, muscle: 2, inflatedLung: 14, blood: 1.2, soft: 2, corticalBone: 0.25 }],
+  ];
+  const rows = [];
+  for (const kvp of [60, 80, 100, 120]) {
+    for (const [ray, paths] of rays) {
+      const production = primaryTransmission(paths, kvp);
+      const reference = simulateReferenceRay(paths, kvp).transmission;
+      const error = relErr(production, reference);
+      rows.push({
+        kVp: kvp,
+        ray,
+        productionTransmission: production,
+        referenceTransmission: reference,
+        errorPercent: error * 100,
+        passed: error <= tolerance,
+      });
+    }
+  }
+  const profile = simulateReferenceCylinderProfile({ diameterCm: 20, kvp: 80 });
+  const centre = profile[0];
+  const edge = profile[profile.length - 1];
+  const physicalProfile = centre.transmission < edge.transmission && centre.opticalDepth > edge.opticalDepth && centre.apparentMuCmInv < edge.apparentMuCmInv;
+  return { passed: rows.every(r => r.passed) && physicalProfile, tolerance, rows, profile, physicalProfile };
+}
+
 export async function RunFullPhysicsValidation() {
   const sections = [];
 
@@ -176,15 +212,22 @@ export async function RunFullPhysicsValidation() {
   console.log(`\n[6] ${status(pathIntegrity.passed)} Path-length integrity (8 sample rays)`);
   console.table(pathIntegrity.rows);
 
+  const reference = runReferenceSimulatorSuite();
+  sections.push({ name: "7. Independent reference simulator", passed: reference.passed });
+  console.log(`\n[7] ${status(reference.passed)} Independent 1 keV-bin reference simulator`);
+  console.log(`Acceptance: production/reference transmission disagreement <= ${(reference.tolerance * 100).toFixed(1)}% for 8 representative rays at 60/80/100/120 kVp.`);
+  console.table(reference.rows);
+  console.log(`Reference 20 cm cylinder physical profile: ${reference.physicalProfile ? "PASS" : "FAIL"}`);
+
   const passed = sections.every(s => s.passed);
   console.log("\n================ FULL PHYSICS VALIDATION ================");
   console.table(sections.map(s => ({ test: s.name, result: status(s.passed) })));
   console.log(passed
-    ? "PASS: all attenuation physics gates passed. The attenuation model meets the current diagnostic-grade physics gate."
-    : "FAIL: attenuation model is NOT diagnostic-grade. All six physics gates must pass before that label is permitted.");
+    ? "PASS: all attenuation physics gates, including the independent reference simulator, passed. The attenuation model meets the current diagnostic-grade physics gate."
+    : "FAIL: attenuation model is NOT diagnostic-grade. All seven physics gates must pass before that label is permitted.");
   console.log("=========================================================\n");
 
-  return { passed, sections, materialAudit, slabs, roi, hardening, sweep, pathIntegrity };
+  return { passed, sections, materialAudit, slabs, roi, hardening, sweep, pathIntegrity, reference };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
