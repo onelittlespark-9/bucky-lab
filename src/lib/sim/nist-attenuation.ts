@@ -75,9 +75,7 @@ function interpolate(curve:Curve,energyKev:number):number{
   return curve[curve.length-1]!;
 }
 
-export function linearAttenuationAtEnergy(material:RadiographicMaterial,energyKev:number):number{
-  return interpolate(MASS_MU[material],energyKev)*DENSITY_G_CM3[material];
-}
+export function linearAttenuationAtEnergy(material:RadiographicMaterial,energyKev:number):number{return interpolate(MASS_MU[material],energyKev)*DENSITY_G_CM3[material];}
 export function aluminiumLinearAttenuationAtEnergy(energyKev:number):number{return interpolate(AL_MASS_MU,energyKev)*AL_DENSITY_G_CM3;}
 function aluminiumTransmission(energyKev:number,filtrationMmAl:number){return Math.exp(-aluminiumLinearAttenuationAtEnergy(energyKev)*Math.max(0,filtrationMmAl)/10);}
 
@@ -96,47 +94,21 @@ export function diagnosticSpectrum(kvp:number,filtrationMmAl=DEFAULT_FILTRATION_
 export function effectivePhotonEnergyKev(kvp:number,filtrationMmAl=DEFAULT_FILTRATION_MM_AL):number{return diagnosticSpectrum(kvp,filtrationMmAl).reduce((s,b)=>s+b.energyKev*b.weight,0);}
 export function spectrumWeightedLinearAttenuation(material:RadiographicMaterial,kvp:number):number{return diagnosticSpectrum(kvp).reduce((s,b)=>s+b.weight*linearAttenuationAtEnergy(material,b.energyKev),0);}
 
-export interface PrimaryBeamBin {
-  energyKev:number;
-  weight:number;
-  mu:Readonly<Record<RadiographicMaterial,number>>;
-}
-export interface PrimaryRayTraceBin {
-  energyKev:number;
-  spectrumWeight:number;
-  opticalDepth:number;
-  transmission:number;
-  contributions:Array<{material:RadiographicMaterial;pathCm:number;muCmInv:number;muTimesPath:number}>;
-}
-export interface PrimaryRayTrace {
-  kvp:number;
-  materials:Array<{material:RadiographicMaterial;pathCm:number}>;
-  bins:PrimaryRayTraceBin[];
-  transmission:number;
-  effectiveOpticalDepth:number;
-}
-export interface PrimaryBeamModel {
-  kvp:number;
-  bins:readonly PrimaryBeamBin[];
-  transmission(paths:MaterialPath):number;
-  opticalDepth(paths:MaterialPath):number;
-  trace(paths:MaterialPath):PrimaryRayTrace;
-}
+export interface PrimaryBeamBin { energyKev:number; weight:number; mu:Readonly<Record<RadiographicMaterial,number>>; }
+export interface PrimaryRayTraceBin { energyKev:number; spectrumWeight:number; opticalDepth:number; transmission:number; contributions:Array<{material:RadiographicMaterial;pathCm:number;muCmInv:number;muTimesPath:number}>; }
+export interface PrimaryRayTrace { kvp:number; materials:Array<{material:RadiographicMaterial;pathCm:number}>; bins:PrimaryRayTraceBin[]; transmission:number; effectiveOpticalDepth:number; }
+export interface PrimaryBeamModel { kvp:number; bins:readonly PrimaryBeamBin[]; transmission(paths:MaterialPath):number; opticalDepth(paths:MaterialPath):number; trace(paths:MaterialPath):PrimaryRayTrace; }
 
 const beamModelCache=new Map<string,PrimaryBeamModel>();
-function normalisedPaths(paths:MaterialPath){
-  const out:Array<{material:RadiographicMaterial;pathCm:number}>=[];
-  for(const material of MATERIALS){const pathCm=Math.max(0,paths[material]??0);if(pathCm>0)out.push({material,pathCm});}
-  return out;
-}
+function normalisedPaths(paths:MaterialPath){const out:Array<{material:RadiographicMaterial;pathCm:number}>=[];for(const material of MATERIALS){const pathCm=Math.max(0,paths[material]??0);if(pathCm>0)out.push({material,pathCm});}return out;}
 
 export function createPrimaryBeamModel(kvp:number,filtrationMmAl=DEFAULT_FILTRATION_MM_AL):PrimaryBeamModel{
   const k=Math.round(Math.max(40,Math.min(150,kvp))),filtration=Math.max(0,Math.min(10,filtrationMmAl)),key=`${k}:${filtration.toFixed(2)}`,cached=beamModelCache.get(key);if(cached)return cached;
   const bins=diagnosticSpectrum(k,filtration).map(bin=>{const mu={} as Record<RadiographicMaterial,number>;for(const material of MATERIALS)mu[material]=linearAttenuationAtEnergy(material,bin.energyKev);return{energyKev:bin.energyKev,weight:bin.weight,mu:Object.freeze(mu)};});
   const transmission=(paths:MaterialPath)=>{
-    const active=normalisedPaths(paths);if(!active.length)return 1;let total=0;
-    for(const bin of bins){let tau=0;for(const p of active)tau+=bin.mu[p.material]*p.pathCm;total+=bin.weight*Math.exp(-tau);}
-    return Math.max(1e-12,Math.min(1,total));
+    let total=0,hasPath=false;
+    for(const bin of bins){let tau=0;for(const material of MATERIALS){const path=Math.max(0,paths[material]??0);if(path>0){hasPath=true;tau+=bin.mu[material]*path;}}total+=bin.weight*Math.exp(-tau);}
+    if(!hasPath)return 1;return Math.max(1e-12,Math.min(1,total));
   };
   const model:PrimaryBeamModel={kvp:k,bins,transmission,opticalDepth:(paths)=>-Math.log(transmission(paths)),trace:(paths)=>{
     const materials=normalisedPaths(paths);let total=0;const tracedBins:PrimaryRayTraceBin[]=[];
