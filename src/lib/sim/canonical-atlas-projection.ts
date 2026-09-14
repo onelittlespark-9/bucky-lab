@@ -40,6 +40,15 @@ async function canonicalMaps(args:{patient:Patient;projection:Projection;tube:Tu
 
 function cropCanonical(src:Float32Array|null,sw:number,sh:number,tube:TubeState,geometry:ProjectionGeometry,width:number,height:number){if(!src)return null;const out=new Float32Array(width*height);for(let py=0;py<height;py++){const cmY=((py+.5)/height-.5)*tube.collimationH/geometry.magnification,globalY=tube.crY+cmY,v=(globalY/CANONICAL_H_CM)*(sh-1);for(let px=0;px<width;px++){const cmX=((px+.5)/width-.5)*tube.collimationW/geometry.magnification,globalX=tube.crX+cmX,u=(.5+globalX/CANONICAL_W_CM)*(sw-1);out[py*width+px]=sampleBilinear(src,sw,sh,u,v);}}return out;}
 
+/**
+ * Canonical atlas views and the procedural fallback do not share exactly the
+ * same silhouette/coordinate model. Mixing them pixel-by-pixel creates duplicate
+ * head/shoulder contours outside the atlas body. Keep zero rays just above the
+ * renderer's atlas-validity sentinel so they remain air-like but cannot select a
+ * second anatomical model. This is a routing sentinel, not display contrast.
+ */
+function keepCanonicalAtlasRouting(src:Float32Array|null){if(!src)return null;const out=new Float32Array(src.length);for(let i=0;i<src.length;i++)out[i]=src[i]!>.00025?src[i]!.000251;return out;}
+
 /** Clinically constrain dedicated chest views to apices/C7 through the CP angles. */
 function clinicallyFramedTube(tube:TubeState,projection:Projection):TubeState{
   if(projection.id!=="pa-chest"&&projection.id!=="lat-chest")return tube;
@@ -53,13 +62,7 @@ export async function canonicalAtlasProjection(args:{patient:Patient;projection:
   const{patient,projection,tube,exposureKvp,width,height,geometry}=args,framedTube=clinicallyFramedTube(tube,projection),baseKey=canonicalKey(patient,projection,exposureKvp),viewKey=[baseKey,projection.id,width,height,framedTube.crX.toFixed(3),framedTube.crY.toFixed(3),framedTube.collimationW.toFixed(3),framedTube.collimationH.toFixed(3),geometry.magnification.toFixed(5)].join("|");
   const cached=VIEW_CACHE.get(viewKey);if(cached){touchView(viewKey,cached);return cached;}
   const maps=await canonicalMaps({patient,projection,tube:framedTube,geometry,exposureKvp});
-
-  // Preserve true zero/near-zero atlas tissue rays. The renderer deliberately
-  // falls back to its procedural material-path model where the tissue atlas has
-  // no meaningful coverage. Flooring the canonical tissue map above the
-  // renderer's atlas threshold disabled that fallback everywhere and made sparse
-  // atlas regions look like an unnaturally transparent anatomical shell.
-  const tissue=cropCanonical(maps.tissue,maps.width,maps.height,framedTube,geometry,width,height);
+  const tissue=keepCanonicalAtlasRouting(cropCanonical(maps.tissue,maps.width,maps.height,framedTube,geometry,width,height));
   const bone=cropCanonical(maps.bone,maps.width,maps.height,framedTube,geometry,width,height);
   const result={bone,tissue};touchView(viewKey,result);return result;
 }
