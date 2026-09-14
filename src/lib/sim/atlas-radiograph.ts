@@ -1,17 +1,13 @@
 import type { Patient, Projection, SimPose, TubeState } from "./types";
 import type { ProjectionGeometry } from "./projection-physics";
 import { projectAtlasSkeletalOD } from "./atlas-skeletal-projector";
-import { linearAttenuation } from "./nist-attenuation";
+import { linearAttenuation, materialOpticalDepth } from "./nist-attenuation";
 
 /**
  * Compatibility facade for the renderer's legacy HU-shaped procedural paths.
- *
- * IMPORTANT: attenuation coefficients live in nist-attenuation.ts only.  This
- * function deliberately contains no independent X-ray attenuation table; it
- * maps the small set of legacy HU bands used by render-radiograph.ts onto the
- * canonical NIST/ICRU material model.  New renderer code should use
- * linearAttenuation()/materialOpticalDepth() directly rather than add another
- * HU or radiograph-specific coefficient table here.
+ * Attenuation coefficients live in nist-attenuation.ts only. New code should
+ * prefer materialOpticalDepth() so path length is evaluated through the
+ * polychromatic spectrum rather than treating kVp as a monochromatic energy.
  */
 export function muFromHU(hu:number,kvp:number):number{
   if(hu<=-950)return linearAttenuation("air",kvp);
@@ -20,18 +16,23 @@ export function muFromHU(hu:number,kvp:number):number{
   if(hu<300)return linearAttenuation("soft",kvp);
   if(hu<1000)return linearAttenuation("trabecularBone",kvp);
   if(hu<2000)return linearAttenuation("corticalBone",kvp);
-  // Metal is a simulator/device fallback rather than a biological material.
-  // Anchor it to the canonical cortical-bone curve instead of maintaining a
-  // second energy-dependent coefficient table.
   const excess=Math.max(0,Math.min(2000,hu-2000))/1000;
   return linearAttenuation("corticalBone",kvp)*(2.2+1.8*excess);
 }
 
-/**
- * Non-canonical projections delegate to the same skeletal projector used by
- * canonical views.  This wrapper exists only to preserve the current renderer
- * API while the procedural fallback path is retired.
- */
+export function opticalDepthFromHU(hu:number,pathCm:number,kvp:number):number{
+  if(pathCm<=0)return 0;
+  if(hu<=-950)return materialOpticalDepth("air",pathCm,kvp);
+  if(hu<=-300)return materialOpticalDepth("inflatedLung",pathCm,kvp);
+  if(hu<=-30)return materialOpticalDepth("adipose",pathCm,kvp);
+  if(hu<300)return materialOpticalDepth("soft",pathCm,kvp);
+  if(hu<1000)return materialOpticalDepth("trabecularBone",pathCm,kvp);
+  if(hu<2000)return materialOpticalDepth("corticalBone",pathCm,kvp);
+  const excess=Math.max(0,Math.min(2000,hu-2000))/1000;
+  return materialOpticalDepth("corticalBone",pathCm,kvp)*(2.2+1.8*excess);
+}
+
+/** Non-canonical projections delegate to the unified skeletal projector. */
 export async function atlasBoneOpticalDensity(args:{
   patient:Patient;
   projection:Projection;
