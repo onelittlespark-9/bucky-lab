@@ -1,0 +1,21 @@
+export const VSD_FULL_BODY = {
+  id: "vsd-full-body",
+  name: "VSDFullBody: The Virtual Skeleton Database Full Body CT Collection",
+  version: "1.0.0",
+  modality: "CT",
+  anatomy: "whole-body",
+  specimenType: "postmortem",
+  source: "Zenodo",
+  recordUrl: "https://zenodo.org/records/8270365",
+  doi: "10.5281/zenodo.8270365",
+  licence: "CC BY-NC-SA",
+  access: "open",
+  size: "116.3 GB",
+  citation: "Kistler, Michael. VSDFullBody: The Virtual Skeleton Database Full Body CT Collection. Zenodo. https://doi.org/10.5281/zenodo.8270365",
+  notes: [
+    "Anonymized postmortem whole-body CT scans originally published through the SICAS Medical Image Repository Virtual Skeleton Database.",
+    "The Zenodo record reports that the datasets were shared under Creative Commons Attribution-NonCommercial-ShareAlike (CC BY-NC-SA).",
+    "The record warns that the source collection contains inconsistencies including duplicate CT datasets; ingestion must validate and deduplicate cases.",
+    "Postmortem anatomy is suitable for development and geometric DRR validation but must not be represented as a normal living-patient CT examination.",
+  ],
+} as const;
