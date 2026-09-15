@@ -35,8 +35,6 @@ export async function projectAtlasTissuePaths(args:{patient:Patient;projection:P
     const left=P(p=>isAtlasLungParenchyma(p)&&p.mesh.getWorldPosition(new THREE.Vector3()).x<0,20,30,1);
     const right=P(p=>isAtlasLungParenchyma(p)&&p.mesh.getWorldPosition(new THREE.Vector3()).x>=0,20,30,1);
     const airway=P(p=>isAtlasAirway(p),1.8,5,1);
-    // Project disconnected thoracic/abdominal structures per atlas part. This prevents the front surface
-    // of one organ being paired with the back surface of another and keeps the atlas geometry authoritative.
     const heart=P(p=>p.system==="cardiac",8,18,1);
     const vessels=P(p=>p.system==="arterial"||p.system==="venous",.90,4.5,1);
     const diaphragm=P(p=>p.system==="muscular"&&/diaphragm/i.test(p.name),3.5,6,1);
@@ -55,11 +53,11 @@ export async function projectAtlasTissuePaths(args:{patient:Patient;projection:P
       const leftLung=left[i]!,rightLung=right[i]!;
       const leftPresence=clamp01((leftLung-.004)/.12),rightPresence=clamp01((rightLung-.004)/.12);
       const literalLung=leftLung*leftPresence+rightLung*rightPresence;
-      // Let the measured atlas lung chord dominate the thoracic material replacement. A small residual
-      // non-aerated fraction remains for vessels and mediastinal structures that genuinely overlap the lung.
       const lungTarget=Math.min(internal*.96,literalLung*.985);
       const lung={v:lungTarget},soft={v:Math.max(0,internal-lungTarget)};
       let mp=baseMuscle,bp=0,brainp=0,airp=0;
+      // Every organ replaces an equal amount of the current body chord. This conserves projected path
+      // length, so adding atlas anatomy changes material identity rather than artificially adding density.
       const heartTarget=Math.min(internal*.92,heart[i]!*.98);
       const vesselTarget=Math.min(internal*.28,vessels[i]!*.42);
       const diaphragmTarget=Math.min(internal*.42,diaphragm[i]!*.94);
@@ -67,10 +65,10 @@ export async function projectAtlasTissuePaths(args:{patient:Patient;projection:P
       r=replace(vesselTarget,lung,soft);bp+=r;
       r=replace(Math.min(internal*.14,airway[i]!*.86),lung,soft);airp+=r;
       r=replace(diaphragmTarget,lung,soft);mp+=r*.96;bp+=r*.04;
-      const br=Math.min(soft.v,brain[i]!*0.94);soft.v-=br;brainp+=br;
-      const lv=Math.min(soft.v,Math.min(internal*.66,liver[i]!*0.68));soft.v-=lv;mp+=lv*.46;bp+=lv*.54;
-      const renal=Math.min(soft.v,Math.min(internal*.26,urinary[i]!*0.46));soft.v-=renal;mp+=renal*.36;bp+=renal*.64;
-      const gas=Math.min(soft.v*.40,hollow[i]!*0.20);soft.v-=gas;airp+=gas;
+      r=replace(Math.min(internal*.96,brain[i]!*0.94),lung,soft);brainp+=r;
+      r=replace(Math.min(internal*.66,liver[i]!*0.68),lung,soft);mp+=r*.46;bp+=r*.54;
+      r=replace(Math.min(internal*.26,urinary[i]!*0.46),lung,soft);mp+=r*.36;bp+=r*.64;
+      r=replace(Math.min(internal*.40,hollow[i]!*0.20),lung,soft);airp+=r;
       maps.adipose[i]=fat;maps.muscle[i]=mp;maps.soft[i]=soft.v;maps.inflatedLung[i]=lung.v;maps.blood[i]=bp;maps.brain[i]=brainp;maps.air[i]=airp;
     }
     for(const p of a.parts)p.mesh.visible=true;scene.overrideMaterial=null;renderer.dispose();rt.dispose();fm.dispose();bm.dispose();
