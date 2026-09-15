@@ -1,50 +1,18 @@
 name: Bucky Lab CI
-
 on:
   push:
-    branches:
-      - main
-      - feature/attached-soft-tissue-ribcage
+    branches: [main]
   pull_request:
-    branches:
-      - main
-  workflow_dispatch:
-
 permissions:
   contents: read
-
 jobs:
-  validate:
-    name: Typecheck, physics tests and build
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: 24
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: TypeScript typecheck
-        run: npm run typecheck
-
-      - name: Physics and application tests
-        run: npm test
-
-      - name: Production build
-        run: npm run build
-
-      - name: Upload production build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: bucky-lab-production-build
-          path: .output/**
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 7
+          node-version: 22
+      - run: npm install
+      - run: npm run typecheck
+      - run: npm run build

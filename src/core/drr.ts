@@ -1,0 +1,6 @@
+import type{PatientVolume}from'./volume';
+export interface ProjectionGeometry{sidMm:number;source:[number,number,number];detectorWidthMm:number;detectorHeightMm:number;width:number;height:number}
+export interface Exposure{kVp:number;mAs:number}
+const clamp=(v:number,a:number,b:number)=>Math.max(a,Math.min(b,v));
+function muFromHu(hu:number,kVp:number){const water=0.19*(70/Math.max(45,kVp));if(hu<=-950)return 0.0002;if(hu<0)return water*(1+hu/1000);if(hu<300)return water*(1+hu/1000);return water*(1.3+hu/850);}
+export function projectDrr(volume:PatientVolume,g:ProjectionGeometry,e:Exposure){const out=new Float32Array(g.width*g.height);const[nx,ny,nz]=volume.manifest.dimensions,[sx,sy,sz]=volume.manifest.spacingMm;for(let py=0;py<g.height;py++){const vy=py/(g.height-1);for(let px=0;px<g.width;px++){const vx=px/(g.width-1);let od=0;for(let z=0;z<nz;z++){const ix=clamp(Math.round(vx*(nx-1)),0,nx-1),iy=clamp(Math.round(vy*(ny-1)),0,ny-1);const hu=volume.hu[(z*ny+iy)*nx+ix]??-1000;od+=muFromHu(hu,e.kVp)*(sz/10);}const primary=Math.exp(-od),quanta=Math.max(1,e.mAs*4500),noise=(Math.random()-.5)*Math.sqrt(Math.max(primary,1e-6)/quanta);out[py*g.width+px]=clamp(primary+noise,0,1);}}return out;}
