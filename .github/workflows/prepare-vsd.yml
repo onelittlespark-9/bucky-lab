@@ -35,8 +35,6 @@ jobs:
           from pathlib import Path
           import shutil, subprocess
           root=Path('data/work/z053/archive')
-          # VSD archives can contain imaging below dcm2niix's default recursion depth
-          # and may contain nested archives. Expand supported nested archives first.
           for _ in range(4):
               nested=[p for p in root.rglob('*') if p.is_file() and p.suffix.lower() in {'.zip','.7z'}]
               if not nested: break
@@ -45,33 +43,55 @@ jobs:
                   out=p.parent/(p.stem+'_expanded')
                   if out.exists(): continue
                   out.mkdir(parents=True,exist_ok=True)
-                  if p.suffix.lower()=='.zip':
-                      subprocess.run(['unzip','-q',str(p),'-d',str(out)],check=True)
-                  else:
-                      subprocess.run(['7z','x','-y',f'-o{out}',str(p)],check=True,stdout=subprocess.DEVNULL)
+                  if p.suffix.lower()=='.zip': subprocess.run(['unzip','-q',str(p),'-d',str(out)],check=True)
+                  else: subprocess.run(['7z','x','-y',f'-o{out}',str(p)],check=True,stdout=subprocess.DEVNULL)
                   changed=True
               if not changed: break
           files=[p for p in root.rglob('*') if p.is_file()]
           print('Extracted files:',len(files))
-          print('Maximum relative depth:',max((len(p.relative_to(root).parts) for p in files),default=0))
+          for p in files: print(p, p.stat().st_size)
           if not files: raise SystemExit('VSD archive extracted no files')
-          # Flatten via symlinks so dcm2niix does not miss deep DICOM files.
-          flat=Path('data/work/z053/dicom-flat'); flat.mkdir(parents=True,exist_ok=True)
-          n=0
-          for p in files:
-              if p.suffix.lower() in {'.zip','.7z','.txt','.pdf','.csv','.json','.xml'}: continue
+          PY
+          find data/work/z053/archive -type f -exec file {} \;
+      - name: Normalise imaging data to NIfTI
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import nibabel as nib
+          root=Path('data/work/z053/archive'); out=Path('data/work/z053/nifti'); out.mkdir(parents=True,exist_ok=True)
+          readable=[]
+          for p in root.rglob('*'):
+              if not p.is_file(): continue
+              try:
+                  im=nib.load(str(p))
+                  if len(im.shape)==3 and min(im.shape)>=32:
+                      readable.append((p,im))
+                      print('Nibabel-readable volume:',p,im.shape,im.header.get_zooms()[:3])
+              except Exception:
+                  pass
+          if readable:
+              for i,(p,im) in enumerate(readable):
+                  nib.save(im,str(out/f'vsd_z053_direct_{i}.nii'))
+              Path('data/work/z053/direct-volume-found').write_text('yes')
+          PY
+          if [ ! -f data/work/z053/direct-volume-found ]; then
+            mkdir -p data/work/z053/dicom-flat
+            python - <<'PY'
+          from pathlib import Path
+          import shutil
+          root=Path('data/work/z053/archive'); flat=Path('data/work/z053/dicom-flat'); n=0
+          for p in root.rglob('*'):
+              if not p.is_file() or p.suffix.lower() in {'.zip','.7z','.txt','.pdf','.csv','.json','.xml'}: continue
               target=flat/f'{n:07d}_{p.name}'
               try: target.symlink_to(p.resolve())
               except OSError: shutil.copy2(p,target)
               n+=1
-          print('Candidate imaging files:',n)
-          if n==0: raise SystemExit('No candidate imaging files found after recursive extraction')
+          print('DICOM candidates:',n)
           PY
-      - name: Convert imaging data to NIfTI
-        run: |
-          dcm2niix -d 9 -z n -f 'vsd_z053_%p_%s' -o data/work/z053/nifti data/work/z053/dicom-flat
+            dcm2niix -d 9 -z n -f 'vsd_z053_%p_%s' -o data/work/z053/nifti data/work/z053/dicom-flat
+          fi
           find data/work/z053/nifti -maxdepth 1 -type f -print
-          test -n "$(find data/work/z053/nifti -maxdepth 1 -name '*.nii' -print -quit)" || { echo 'dcm2niix produced no NIfTI volumes'; exit 1; }
+          test -n "$(find data/work/z053/nifti -maxdepth 1 -name '*.nii' -print -quit)" || { echo 'No usable NIfTI volume produced'; exit 1; }
       - name: Select diagnostic CT and build browser volume
         run: |
           python - <<'PY'
@@ -87,8 +107,7 @@ jobs:
                 if lo < -500 and hi > 300:
                   candidates.append((np.prod(shape),hi-lo,f))
                   print('CT candidate',shape,lo,hi,f)
-            except Exception as exc:
-              print('Skipping',f,exc)
+            except Exception as exc: print('Skipping',f,exc)
           if not candidates: raise SystemExit('No credible 3D CT series found')
           candidates.sort(reverse=True); chosen=candidates[0][2]; print('Selected',chosen)
           subprocess.run(['python','scripts/build-web-volume.py',chosen,'public/cases/vsd-z053','--case-id','vsd-z053','--voxel-mm','2.5','--chunk-mb','16'],check=True)
