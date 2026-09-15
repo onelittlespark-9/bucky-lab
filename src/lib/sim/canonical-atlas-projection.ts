@@ -6,7 +6,11 @@ import { primaryOpticalDepth } from "./nist-attenuation";
 
 const CANONICAL_W_CM=60;
 const CANONICAL_H_CM=180;
-const CANONICAL_CR_Y_CM=85;
+// The atlas is 170 cm tall inside a 180 cm canonical field. Centre the field at 90 cm so
+// the spare field is distributed symmetrically above the vertex and below the feet. The
+// previous 85 cm centre biased the canonical acquisition superiorly, which showed up most
+// clearly on AP full-body renders as excess space above the skull and clipped distal feet.
+const CANONICAL_CR_Y_CM=90;
 const BASE_WIDTH=448;
 const BASE_HEIGHT=1344;
 const MAX_CACHE_ENTRIES=4;
