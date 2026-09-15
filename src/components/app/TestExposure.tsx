@@ -4,9 +4,11 @@ import { ArrowLeft, Zap } from "lucide-react";
 import { PROJECTIONS } from "@/lib/sim/projections";
 import { patientById } from "@/lib/sim/patients";
 import { useSim } from "@/lib/sim/store";
+import { renderRadiograph } from "@/lib/sim/render-radiograph";
 import { Button } from "@/components/ui/button";
 
 const TEST_PATIENT = "amara";
+const TEST_RENDER_HEIGHT = 384;
 
 const GROUPS = [
   "Whole body",
@@ -24,7 +26,6 @@ export function TestExposure() {
   const applyHandbook = useSim(s => s.applyHandbook);
   const applySuggestedFactors = useSim(s => s.applySuggestedFactors);
   const patchExposure = useSim(s => s.patchExposure);
-  const expose = useSim(s => s.expose);
   const exposure = useSim(s => s.exposure);
   const tube = useSim(s => s.tube);
   const pose = useSim(s => s.pose);
@@ -40,12 +41,33 @@ export function TestExposure() {
   })).filter(g => g.projections.length), []);
 
   async function test(projectionId: string) {
+    if (useSim.getState().exposing) return;
     setSelected(projectionId);
     startExam(projectionId, TEST_PATIENT);
     applyHandbook();
     applySuggestedFactors();
     patchExposure({ marker: null });
-    await expose();
+
+    // The test bench is an iteration tool, not the diagnostic-size viewer. Render at half
+    // the normal detector height to cut CPU pixel work and atlas projection resolution,
+    // while preserving aspect ratio, physics, material paths and display processing.
+    const s = useSim.getState();
+    useSim.setState({ exposing: true, error: null, preparing: false });
+    try {
+      const benchmark = await renderRadiograph({
+        patient: patientById(s.patientId),
+        projection: PROJECTIONS.find(p => p.id === s.projectionId)!,
+        pose: s.pose,
+        tube: s.tube,
+        exposure: s.exposure,
+        pathologyId: "none",
+        caseId: null,
+        height: TEST_RENDER_HEIGHT,
+      });
+      useSim.setState({ result: benchmark, exposing: false });
+    } catch (err) {
+      useSim.setState({ exposing: false, error: err instanceof Error ? err.message : "Exposure failed" });
+    }
   }
 
   const selectedProjection = selected ? PROJECTIONS.find(p => p.id === selected) : undefined;
@@ -58,7 +80,7 @@ export function TestExposure() {
         </Link>
         <div className="min-w-0 flex-1">
           <h1 className="text-base font-semibold">Radiograph renderer test bench</h1>
-          <p className="text-xs text-muted">Gold-standard positioning · optimised exposure · correct grid/SID/collimation · one-click image</p>
+          <p className="text-xs text-muted">Gold-standard positioning · optimised exposure · correct grid/SID/collimation · fast preview render</p>
         </div>
         <span className="rounded border border-border px-2 py-1 text-[10px] font-semibold tracking-wide text-muted">TEST MODE</span>
       </header>
@@ -69,7 +91,7 @@ export function TestExposure() {
             <div className="font-medium">Fixed benchmark patient</div>
             <div className="mt-1 text-xs text-muted">{patient.name} · {patient.habitus} · {patient.heightCm} cm · pathology disabled</div>
             <div className="mt-2 text-xs leading-5 text-muted">
-              Every button starts a fresh benchmark exam and automatically applies the defined handbook patient position, detector setup, central ray, tube angle, SID, collimation, grid requirement, focal spot and patient-adjusted exposure factors before exposing. The whole-body benchmark is included so anatomy can be calibrated globally before refining individual projections.
+              Every button starts a fresh benchmark exam and automatically applies the defined handbook patient position, detector setup, central ray, tube angle, SID, collimation, grid requirement, focal spot and patient-adjusted exposure factors before exposing. Test mode uses a reduced detector matrix for faster iteration while keeping the same projection and material model.
             </div>
           </div>
 
@@ -113,7 +135,7 @@ export function TestExposure() {
             <div className="mt-3 space-y-3 text-sm">
               <div className="rounded-lg border border-border bg-surface p-3">
                 <div className="font-medium">{selectedProjection.name}</div>
-                <div className="mt-1 text-xs text-muted">{exposing ? "Exposing…" : result ? "Exposure complete" : "Preparing…"}</div>
+                <div className="mt-1 text-xs text-muted">{exposing ? "Rendering fast preview…" : result ? "Exposure complete" : "Preparing…"}</div>
               </div>
 
               {result?.dataUrl ? (
