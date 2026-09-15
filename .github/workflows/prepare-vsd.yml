@@ -33,7 +33,7 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          import shutil, subprocess
+          import subprocess
           root=Path('data/work/z053/archive')
           for _ in range(4):
               nested=[p for p in root.rglob('*') if p.is_file() and p.suffix.lower() in {'.zip','.7z'}]
@@ -58,20 +58,28 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           import nibabel as nib
+          import numpy as np
           root=Path('data/work/z053/archive'); out=Path('data/work/z053/nifti'); out.mkdir(parents=True,exist_ok=True)
           readable=[]
           for p in root.rglob('*'):
               if not p.is_file(): continue
               try:
-                  im=nib.load(str(p))
-                  if len(im.shape)==3 and min(im.shape)>=32:
-                      readable.append((p,im))
-                      print('Nibabel-readable volume:',p,im.shape,im.header.get_zooms()[:3])
+                  im=nib.load(str(p)); shape=im.shape
+                  spatial=tuple(d for d in shape if d != 1)
+                  if len(spatial)==3 and min(spatial)>=32:
+                      readable.append((p,im,spatial))
+                      print('Nibabel-readable volume:',p,shape,im.header.get_zooms()[:3])
               except Exception:
                   pass
           if readable:
-              for i,(p,im) in enumerate(readable):
-                  nib.save(im,str(out/f'vsd_z053_direct_{i}.nii'))
+              for i,(p,im,spatial) in enumerate(readable):
+                  if len(im.shape)==3:
+                      normalised=im
+                  else:
+                      data=np.asanyarray(im.dataobj).squeeze()
+                      if data.ndim != 3: raise RuntimeError(f'Cannot squeeze {p} to 3D: {im.shape}')
+                      normalised=nib.Nifti1Image(data,im.affine)
+                  nib.save(normalised,str(out/f'vsd_z053_direct_{i}.nii'))
               Path('data/work/z053/direct-volume-found').write_text('yes')
           PY
           if [ ! -f data/work/z053/direct-volume-found ]; then
@@ -81,12 +89,13 @@ jobs:
           import shutil
           root=Path('data/work/z053/archive'); flat=Path('data/work/z053/dicom-flat'); n=0
           for p in root.rglob('*'):
-              if not p.is_file() or p.suffix.lower() in {'.zip','.7z','.txt','.pdf','.csv','.json','.xml'}: continue
+              if not p.is_file() or p.suffix.lower() in {'.zip','.7z','.txt','.pdf','.csv','.json','.xml','.nii','.gz'}: continue
               target=flat/f'{n:07d}_{p.name}'
               try: target.symlink_to(p.resolve())
               except OSError: shutil.copy2(p,target)
               n+=1
           print('DICOM candidates:',n)
+          if n==0: raise SystemExit('No readable volume or DICOM candidates found')
           PY
             dcm2niix -d 9 -z n -f 'vsd_z053_%p_%s' -o data/work/z053/nifti data/work/z053/dicom-flat
           fi
