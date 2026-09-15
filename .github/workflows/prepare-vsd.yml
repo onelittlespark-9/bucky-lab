@@ -76,9 +76,15 @@ jobs:
                   if len(im.shape)==3:
                       normalised=im
                   else:
-                      data=np.asanyarray(im.dataobj).squeeze()
+                      # get_fdata applies NIfTI slope/intercept. This is essential for CT because
+                      # dropping header scaling can turn valid HU into arbitrary stored integers.
+                      data=np.asarray(im.get_fdata(dtype=np.float32)).squeeze()
                       if data.ndim != 3: raise RuntimeError(f'Cannot squeeze {p} to 3D: {im.shape}')
-                      normalised=nib.Nifti1Image(data,im.affine)
+                      header=im.header.copy()
+                      header.set_data_shape(data.shape)
+                      header.set_data_dtype(np.float32)
+                      header.set_slope_inter(1.0,0.0)
+                      normalised=nib.Nifti1Image(data,im.affine,header=header)
                   nib.save(normalised,str(out/f'vsd_z053_direct_{i}.nii'))
               Path('data/work/z053/direct-volume-found').write_text('yes')
           PY
@@ -112,12 +118,14 @@ jobs:
               if len(shape)==3 and min(shape[:2])>=128 and shape[2]>=100:
                 step=max(1,shape[2]//20)
                 d=np.asarray(im.dataobj[...,::step],dtype=np.float32)
-                lo=float(np.nanpercentile(d,1)); hi=float(np.nanpercentile(d,99))
-                if lo < -500 and hi > 300:
-                  candidates.append((np.prod(shape),hi-lo,f))
-                  print('CT candidate',shape,lo,hi,f)
+                finite=d[np.isfinite(d)]
+                if finite.size:
+                  lo=float(np.percentile(finite,1)); hi=float(np.percentile(finite,99))
+                  print('Volume HU check',shape,lo,hi,float(np.min(finite)),float(np.max(finite)),f)
+                  if lo < -500 and hi > 300:
+                    candidates.append((np.prod(shape),hi-lo,f))
             except Exception as exc: print('Skipping',f,exc)
-          if not candidates: raise SystemExit('No credible 3D CT series found')
+          if not candidates: raise SystemExit('No credible 3D CT series found after scaled-HU validation')
           candidates.sort(reverse=True); chosen=candidates[0][2]; print('Selected',chosen)
           subprocess.run(['python','scripts/build-web-volume.py',chosen,'public/cases/vsd-z053','--case-id','vsd-z053','--voxel-mm','2.5','--chunk-mb','16'],check=True)
           PY
