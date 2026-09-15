@@ -69,21 +69,14 @@ jobs:
                   if len(spatial)==3 and min(spatial)>=32:
                       readable.append((p,im,spatial))
                       print('Nibabel-readable volume:',p,shape,im.header.get_zooms()[:3])
-              except Exception:
-                  pass
+              except Exception: pass
           if readable:
               for i,(p,im,spatial) in enumerate(readable):
-                  if len(im.shape)==3:
-                      normalised=im
+                  if len(im.shape)==3: normalised=im
                   else:
-                      # get_fdata applies NIfTI slope/intercept. This is essential for CT because
-                      # dropping header scaling can turn valid HU into arbitrary stored integers.
                       data=np.asarray(im.get_fdata(dtype=np.float32)).squeeze()
                       if data.ndim != 3: raise RuntimeError(f'Cannot squeeze {p} to 3D: {im.shape}')
-                      header=im.header.copy()
-                      header.set_data_shape(data.shape)
-                      header.set_data_dtype(np.float32)
-                      header.set_slope_inter(1.0,0.0)
+                      header=im.header.copy(); header.set_data_shape(data.shape); header.set_data_dtype(np.float32); header.set_slope_inter(1.0,0.0)
                       normalised=nib.Nifti1Image(data,im.affine,header=header)
                   nib.save(normalised,str(out/f'vsd_z053_direct_{i}.nii'))
               Path('data/work/z053/direct-volume-found').write_text('yes')
@@ -105,8 +98,7 @@ jobs:
           PY
             dcm2niix -d 9 -z n -f 'vsd_z053_%p_%s' -o data/work/z053/nifti data/work/z053/dicom-flat
           fi
-          find data/work/z053/nifti -maxdepth 1 -type f -print
-          test -n "$(find data/work/z053/nifti -maxdepth 1 -name '*.nii' -print -quit)" || { echo 'No usable NIfTI volume produced'; exit 1; }
+          test -n "$(find data/work/z053/nifti -maxdepth 1 -name '*.nii' -print -quit)" || exit 1
       - name: Select diagnostic CT and build browser volume
         run: |
           python - <<'PY'
@@ -116,16 +108,17 @@ jobs:
             try:
               im=nib.load(f); shape=im.shape
               if len(shape)==3 and min(shape[:2])>=128 and shape[2]>=100:
-                step=max(1,shape[2]//20)
-                d=np.asarray(im.dataobj[...,::step],dtype=np.float32)
-                finite=d[np.isfinite(d)]
+                step=max(1,shape[2]//40); d=np.asarray(im.dataobj[...,::step],dtype=np.float32); finite=d[np.isfinite(d)]
                 if finite.size:
-                  lo=float(np.percentile(finite,1)); hi=float(np.percentile(finite,99))
-                  print('Volume HU check',shape,lo,hi,float(np.min(finite)),float(np.max(finite)),f)
-                  if lo < -500 and hi > 300:
-                    candidates.append((np.prod(shape),hi-lo,f))
+                  p1,p50,p99,p999=np.percentile(finite,[1,50,99,99.9]); mn,mx=float(np.min(finite)),float(np.max(finite)); bone_fraction=float(np.mean(finite>300)); air_fraction=float(np.mean(finite<-500))
+                  print('Volume HU check',shape,'p1/p50/p99/p99.9',p1,p50,p99,p999,'range',mn,mx,'air',air_fraction,'bone',bone_fraction,f)
+                  # Whole-body CT contains much more air/soft tissue than cortical bone, so p99 can legitimately
+                  # remain below 300 HU. Validate a meaningful air fraction plus either high-tail or observed bone.
+                  credible_air=p1 < -500 and air_fraction > 0.02
+                  credible_bone=p999 > 300 or (mx > 700 and bone_fraction > 0.0001)
+                  if credible_air and credible_bone: candidates.append((np.prod(shape),p999-p1,f))
             except Exception as exc: print('Skipping',f,exc)
-          if not candidates: raise SystemExit('No credible 3D CT series found after scaled-HU validation')
+          if not candidates: raise SystemExit('No credible 3D CT series found after HU-distribution validation')
           candidates.sort(reverse=True); chosen=candidates[0][2]; print('Selected',chosen)
           subprocess.run(['python','scripts/build-web-volume.py',chosen,'public/cases/vsd-z053','--case-id','vsd-z053','--voxel-mm','2.5','--chunk-mb','16'],check=True)
           PY
