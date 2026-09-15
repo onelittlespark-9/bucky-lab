@@ -3,7 +3,9 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['.github/workflows/prepare-vsd.yml']
+    paths:
+      - '.github/workflows/prepare-vsd.yml'
+      - 'scripts/build-web-volume.py'
 permissions:
   contents: read
 jobs:
@@ -13,21 +15,63 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: {node-version: 22}
+        with:
+          node-version: 22
       - name: Install imaging tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y dcm2niix unzip
+          sudo apt-get install -y dcm2niix unzip p7zip-full
           python -m pip install --upgrade pip
           python -m pip install nibabel scipy numpy
-      - name: Download verified VSD z053
+      - name: Download and verify VSD z053
         run: |
-          mkdir -p data/source data/work/z053/dicom data/work/z053/nifti
+          mkdir -p data/source data/work/z053/archive data/work/z053/nifti
           curl -L --fail --retry 4 -o data/source/z053.zip 'https://zenodo.org/records/8270365/files/z053.zip?download=1'
           echo '423ed28f54a9b498c9fc763f36da98df  data/source/z053.zip' | md5sum -c -
-          unzip -q data/source/z053.zip -d data/work/z053/dicom
-      - name: Convert DICOM to NIfTI
-        run: dcm2niix -z n -f 'vsd_z053_%p_%s' -o data/work/z053/nifti data/work/z053/dicom
+          unzip -q data/source/z053.zip -d data/work/z053/archive
+      - name: Expand nested archives and locate imaging files
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import shutil, subprocess
+          root=Path('data/work/z053/archive')
+          # VSD archives can contain imaging below dcm2niix's default recursion depth
+          # and may contain nested archives. Expand supported nested archives first.
+          for _ in range(4):
+              nested=[p for p in root.rglob('*') if p.is_file() and p.suffix.lower() in {'.zip','.7z'}]
+              if not nested: break
+              changed=False
+              for p in nested:
+                  out=p.parent/(p.stem+'_expanded')
+                  if out.exists(): continue
+                  out.mkdir(parents=True,exist_ok=True)
+                  if p.suffix.lower()=='.zip':
+                      subprocess.run(['unzip','-q',str(p),'-d',str(out)],check=True)
+                  else:
+                      subprocess.run(['7z','x','-y',f'-o{out}',str(p)],check=True,stdout=subprocess.DEVNULL)
+                  changed=True
+              if not changed: break
+          files=[p for p in root.rglob('*') if p.is_file()]
+          print('Extracted files:',len(files))
+          print('Maximum relative depth:',max((len(p.relative_to(root).parts) for p in files),default=0))
+          if not files: raise SystemExit('VSD archive extracted no files')
+          # Flatten via symlinks so dcm2niix does not miss deep DICOM files.
+          flat=Path('data/work/z053/dicom-flat'); flat.mkdir(parents=True,exist_ok=True)
+          n=0
+          for p in files:
+              if p.suffix.lower() in {'.zip','.7z','.txt','.pdf','.csv','.json','.xml'}: continue
+              target=flat/f'{n:07d}_{p.name}'
+              try: target.symlink_to(p.resolve())
+              except OSError: shutil.copy2(p,target)
+              n+=1
+          print('Candidate imaging files:',n)
+          if n==0: raise SystemExit('No candidate imaging files found after recursive extraction')
+          PY
+      - name: Convert imaging data to NIfTI
+        run: |
+          dcm2niix -d 9 -z n -f 'vsd_z053_%p_%s' -o data/work/z053/nifti data/work/z053/dicom-flat
+          find data/work/z053/nifti -maxdepth 1 -type f -print
+          test -n "$(find data/work/z053/nifti -maxdepth 1 -name '*.nii' -print -quit)" || { echo 'dcm2niix produced no NIfTI volumes'; exit 1; }
       - name: Select diagnostic CT and build browser volume
         run: |
           python - <<'PY'
@@ -37,13 +81,22 @@ jobs:
             try:
               im=nib.load(f); shape=im.shape
               if len(shape)==3 and min(shape[:2])>=128 and shape[2]>=100:
-                d=np.asarray(im.dataobj[...,::max(1,shape[2]//20)],dtype=np.float32)
-                if np.nanmin(d)<-500 and np.nanmax(d)>300:candidates.append((np.prod(shape),f))
-            except Exception: pass
+                step=max(1,shape[2]//20)
+                d=np.asarray(im.dataobj[...,::step],dtype=np.float32)
+                lo=float(np.nanpercentile(d,1)); hi=float(np.nanpercentile(d,99))
+                if lo < -500 and hi > 300:
+                  candidates.append((np.prod(shape),hi-lo,f))
+                  print('CT candidate',shape,lo,hi,f)
+            except Exception as exc:
+              print('Skipping',f,exc)
           if not candidates: raise SystemExit('No credible 3D CT series found')
-          candidates.sort(reverse=True); chosen=candidates[0][1]; print('Selected',chosen)
+          candidates.sort(reverse=True); chosen=candidates[0][2]; print('Selected',chosen)
           subprocess.run(['python','scripts/build-web-volume.py',chosen,'public/cases/vsd-z053','--case-id','vsd-z053','--voxel-mm','2.5','--chunk-mb','16'],check=True)
           PY
+      - name: Verify generated case
+        run: |
+          test -s public/cases/vsd-z053/manifest.json
+          find public/cases/vsd-z053 -type f -maxdepth 1 -print
       - name: Build application
         run: npm install && npm run build
       - name: Deploy real-volume build
