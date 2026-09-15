@@ -1,0 +1,13 @@
+import type {CtPhase} from "./ct-protocols";
+export type CtWindow="soft"|"lung"|"bone"|"brain";
+const WINDOWS:Record<CtWindow,[number,number]>={soft:[50,400],lung:[-600,1500],bone:[450,1800],brain:[40,80]};
+const clamp=(v:number,a=0,b=1)=>Math.max(a,Math.min(b,v));
+const ell=(x:number,y:number,cx:number,cy:number,rx:number,ry:number)=>1-((x-cx)/rx)**2-((y-cy)/ry)**2;
+function phaseBoost(phase:CtPhase){return phase==="arterial"?120:phase==="portal-venous"?70:phase==="delayed"?45:phase==="split-bolus-bastion"?100:0;}
+function huAt(protocol:string,phase:CtPhase,z:number,x:number,y:number){let hu=-1000;const body=ell(x,y,0,0,.86,.72);if(body>0)hu=25;if(body>0&&body<.12)hu=-85;const boost=phaseBoost(phase);
+ if(protocol==="ct-head"){const skull=ell(x,y,0,0,.72,.82),brain=ell(x,y,0,.01,.62,.70);if(skull>0)hu=950;if(brain>0)hu=35+6*Math.sin(x*12+y*9+z*4);const vent=Math.max(ell(x,y,-.10,.02,.10,.16),ell(x,y,.10,.02,.10,.16));if(vent>0)hu=8;if(phase!=="non-contrast"&&ell(x,y,0,.03,.025,.40)>0)hu=110+boost;return hu;}
+ const chest=z<.43,abd=z>=.34&&z<.78,pelvis=z>=.72;if(chest){const l=Math.max(ell(x,y,-.31,-.03,.28,.48),ell(x,y,.31,-.03,.28,.48));if(l>0)hu=-780+45*Math.sin(x*20+y*13+z*9);if(ell(x,y,.04,.10,.22,.28)>0)hu=45+boost*.35;if(ell(x,y,0,-.02,.035,.35)>0)hu=55+boost;}
+ if(abd){if(ell(x,y,-.24,-.05,.34,.25)>0)hu=58+(phase==="portal-venous"?35:boost*.25);if(ell(x,y,.37,-.08,.13,.19)>0)hu=52+boost*.22;for(const sx of[-1,1])if(ell(x,y,.27*sx,.12,.12,.18)>0)hu=35+boost*.32;const bowel=Math.max(ell(x,y,-.16,.24,.13,.10),ell(x,y,.15,.22,.14,.11));if(bowel>0)hu=-420;}
+ if(pelvis){if(ell(x,y,0,.16,.13,.12)>0)hu=10+boost*.12;}
+ const vertebra=ell(x,y,0,.35,.09,.075);if(vertebra>0)hu=420;const cortex=Math.abs(ell(x,y,0,.35,.09,.075))<.18&&vertebra>-.18;if(cortex)hu=1050;for(const sx of[-1,1]){const rib=ell(x,y,.62*sx,.12,.045,.045);if(rib>0)hu=800;}return hu;}
+export function renderCtSlice(protocol:string,phase:CtPhase,slice:number,window:CtWindow,size=512){const canvas=document.createElement("canvas");canvas.width=size;canvas.height=size;const g=canvas.getContext("2d");if(!g)throw new Error("CT renderer could not obtain canvas context");const img=g.createImageData(size,size),z=clamp(slice/100),[level,width]=WINDOWS[window];for(let py=0;py<size;py++)for(let px=0;px<size;px++){const x=(px/(size-1)-.5)*2,y=(py/(size-1)-.5)*2;let hu=huAt(protocol,phase,z,x,y);hu+=(Math.sin(px*.71+py*.37+slice)*3);const v=Math.round(clamp((hu-(level-width/2))/width)*255),i=(py*size+px)*4;img.data[i]=v;img.data[i+1]=v;img.data[i+2]=v;img.data[i+3]=255;}g.putImageData(img,0,0);return canvas.toDataURL("image/png");}
