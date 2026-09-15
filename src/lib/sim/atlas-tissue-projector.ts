@@ -44,31 +44,36 @@ export async function projectAtlasTissuePaths(args:{patient:Patient;projection:P
     const brain=blur(project(scene,a,p=>p.system==="nervous"&&/brain|cerebr|encephal/i.test(p.name),camera,renderer,rt,fm,bm,rw,rh),rw,rh,1);
     const maps:AtlasTissueMaterialPaths={adipose:new Float32Array(rw*rh),muscle:new Float32Array(rw*rh),soft:new Float32Array(rw*rh),inflatedLung:new Float32Array(rw*rh),blood:new Float32Array(rw*rh),brain:new Float32Array(rw*rh),air:new Float32Array(rw*rh)};
     for(let i=0;i<skinBody.length;i++){
-      const skin=skinBody[i]!,muscleChord=muscleBody[i]!;
-      const B=skin>.12?skin:(skin>.015?Math.max(skin,Math.min(muscleChord,skin*1.35)):(muscleChord>.04?Math.min(muscleChord,12):0));
-      if(B<=.003)continue;
-      const baseMuscle=Math.min(B*.28,Math.max(muscle[i]!*.12,B*.055));
-      const fat=Math.min(B*.24,Math.max(B*.045,(B-baseMuscle)*.12));
-      const internal=Math.max(0,B-baseMuscle-fat);
-      const leftLung=left[i]!,rightLung=right[i]!;
+      const skin=skinBody[i]!,muscleChord=muscleBody[i]!,leftLung=left[i]!,rightLung=right[i]!;
       const leftPresence=clamp01((leftLung-.004)/.12),rightPresence=clamp01((rightLung-.004)/.12);
       const literalLung=leftLung*leftPresence+rightLung*rightPresence;
-      // Aerated lung replaces the bulk soft-tissue chord. Preserve it except where a true solid organ
-      // occupies the same ray, so the two lung fields remain radiolucent rather than being refilled by vessels.
-      const lungTarget=Math.min(internal*.965,literalLung*1.04);
+      const envelope=skin>.12?skin:(skin>.015?Math.max(skin,Math.min(muscleChord,skin*1.35)):(muscleChord>.04?Math.min(muscleChord,12):0));
+      // Closed skin meshes normally provide the body chord. Respiratory/solid-organ chords also
+      // establish a conservative minimum depth so thin or imperfect integumentary meshes cannot
+      // collapse the thorax/abdomen into a shallow uniform slab.
+      const organChord=Math.max(literalLung,heart[i]!,liver[i]!,brain[i]!,urinary[i]!);
+      const B=Math.min(42,Math.max(envelope,organChord>0.08?organChord+2.4:0));
+      if(B<=.003)continue;
+      const pulmonary=literalLung>.08;
+      const baseMuscle=Math.min(B*(pulmonary?.18:.28),Math.max(muscle[i]!*.12,B*(pulmonary?.045:.055)));
+      const fat=Math.min(B*(pulmonary?.16:.24),Math.max(B*.04,(B-baseMuscle)*(pulmonary?.075:.12)));
+      const internal=Math.max(0,B-baseMuscle-fat);
+      // Lung is a replacement volume, not an additive tint. In pulmonary rays the measured lung
+      // chord is allowed to occupy nearly all internal depth, leaving chest-wall soft tissue intact.
+      const lungTarget=Math.min(internal*.985,literalLung*1.10);
       const lung={v:lungTarget},soft={v:Math.max(0,internal-lungTarget)};
       let mp=baseMuscle,bp=0,brainp=0,airp=0;
-      const heartTarget=Math.min(internal*.80,heart[i]!*1.02);
-      const vesselTarget=Math.min(internal*.16,vessels[i]!*0.22);
-      const diaphragmTarget=Math.min(internal*.30,diaphragm[i]!*0.72);
-      let r=replace(heartTarget,lung,soft);mp+=r*.30;bp+=r*.70;
+      const heartTarget=Math.min(internal*.82,heart[i]!*1.04);
+      const vesselTarget=Math.min(internal*.14,vessels[i]!*0.20);
+      const diaphragmTarget=Math.min(internal*.32,diaphragm[i]!*0.78);
+      let r=replace(heartTarget,lung,soft);mp+=r*.28;bp+=r*.72;
       r=replace(vesselTarget,lung,soft,true);bp+=r;
-      r=replace(Math.min(internal*.12,airway[i]!*.78),lung,soft);airp+=r;
+      r=replace(Math.min(internal*.12,airway[i]!*.82),lung,soft);airp+=r;
       r=replace(diaphragmTarget,lung,soft,true);mp+=r*.94;bp+=r*.06;
-      const br=Math.min(soft.v,brain[i]!*0.94);soft.v-=br;brainp+=br;
-      const lv=Math.min(soft.v,Math.min(internal*.58,liver[i]!*0.60));soft.v-=lv;mp+=lv*.46;bp+=lv*.54;
-      const renal=Math.min(soft.v,Math.min(internal*.23,urinary[i]!*0.42));soft.v-=renal;mp+=renal*.36;bp+=renal*.64;
-      const gas=Math.min(soft.v*.36,hollow[i]!*0.16);soft.v-=gas;airp+=gas;
+      const br=Math.min(soft.v,brain[i]!*0.96);soft.v-=br;brainp+=br;
+      const lv=Math.min(soft.v,Math.min(internal*.62,liver[i]!*0.68));soft.v-=lv;mp+=lv*.42;bp+=lv*.58;
+      const renal=Math.min(soft.v,Math.min(internal*.25,urinary[i]!*0.46));soft.v-=renal;mp+=renal*.34;bp+=renal*.66;
+      const gas=Math.min(soft.v*.40,hollow[i]!*0.18);soft.v-=gas;airp+=gas;
       maps.adipose[i]=fat;maps.muscle[i]=mp;maps.soft[i]=soft.v;maps.inflatedLung[i]=lung.v;maps.blood[i]=bp;maps.brain[i]=brainp;maps.air[i]=airp;
     }
     for(const p of a.parts)p.mesh.visible=true;scene.overrideMaterial=null;renderer.dispose();rt.dispose();fm.dispose();bm.dispose();
