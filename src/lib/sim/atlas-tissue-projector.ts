@@ -29,8 +29,6 @@ export async function projectAtlasTissuePaths(args:{patient:Patient;projection:P
     const a=await loadAtlas();a.root.position.set(0,0,0);a.root.rotation.set(0,0,0);a.root.quaternion.identity();a.root.scale.setScalar(patient.heightCm/100/ATLAS_HEIGHT_M);for(const p of a.parts){p.mesh.visible=true;p.mesh.quaternion.identity();}a.root.updateMatrixWorld(true);
     const bounds=new THREE.Box3().setFromObject(a.root),centre=bounds.getCenter(new THREE.Vector3());centre.x=0;const rw=Math.min(640,Math.max(256,width)),rh=Math.min(1600,Math.max(512,height));let target=centre.clone();if(!wholeBody){const y=projection.cr.y*patient.heightCm/170;target=new THREE.Vector3(projection.cr.x/100,patient.heightCm/100-y/100,0);}const lateral=/torso-lat|cspine-lat|skull-lat/.test(projection.anatomy),camera=new THREE.OrthographicCamera(0,1,1,0,.01,5),halfW=tube.collimationW/geometry.magnification/200,halfH=tube.collimationH/geometry.magnification/200;camera.left=-halfW;camera.right=halfW;camera.top=halfH;camera.bottom=-halfH;camera.position.copy(lateral?new THREE.Vector3(target.x+2.5,target.y,target.z):new THREE.Vector3(target.x,target.y,target.z+2.5));camera.lookAt(target);camera.updateProjectionMatrix();const renderer=new THREE.WebGLRenderer({antialias:false,alpha:false,preserveDrawingBuffer:false});renderer.setSize(rw,rh,false);renderer.setPixelRatio(1);renderer.outputColorSpace=THREE.LinearSRGBColorSpace;renderer.setClearColor(0xffffff,1);const scene=new THREE.Scene();scene.background=new THREE.Color(0xffffff);scene.add(a.root);const rt=new THREE.WebGLRenderTarget(rw,rh,{format:THREE.RGBAFormat,type:THREE.UnsignedByteType,depthBuffer:true,stencilBuffer:false}),vs=`varying float vDepth;void main(){vec4 mv=modelViewMatrix*vec4(position,1.0);gl_Position=projectionMatrix*mv;vDepth=gl_Position.z/gl_Position.w*.5+.5;}`,fs=`varying float vDepth;vec3 packDepth24(float v){v=clamp(v,0.0,0.999999);vec3 e=fract(v*vec3(1.0,255.0,65025.0));e-=e.yzz*vec3(1.0/255.0,1.0/255.0,0.0);return e;}void main(){gl_FragColor=vec4(packDepth24(vDepth),1.0);}`,fm=new THREE.ShaderMaterial({vertexShader:vs,fragmentShader:fs,side:THREE.FrontSide,depthTest:true,depthWrite:true}),bm=new THREE.ShaderMaterial({vertexShader:vs,fragmentShader:fs,side:THREE.BackSide,depthTest:true,depthWrite:true});
     const P=(test:(p:LoadedPart)=>boolean,cap:number,total:number,passes:number)=>blur(parts(scene,a,test,camera,renderer,rt,fm,bm,rw,rh,cap,total),rw,rh,passes);
-    // The integumentary mesh is the outer patient envelope. Project it alone first: combining it with
-    // disconnected muscles can make front/back depth select unrelated surfaces and collapse the ray chord.
     const skinBody=blur(project(scene,a,p=>p.system==="integumentary",camera,renderer,rt,fm,bm,rw,rh),rw,rh,3);
     const muscleBody=blur(project(scene,a,p=>p.system==="muscular",camera,renderer,rt,fm,bm,rw,rh),rw,rh,3);
     const muscle=P(p=>p.system==="muscular"&&!/diaphragm/i.test(p.name),8,24,3);
@@ -46,29 +44,31 @@ export async function projectAtlasTissuePaths(args:{patient:Patient;projection:P
     const brain=blur(project(scene,a,p=>p.system==="nervous"&&/brain|cerebr|encephal/i.test(p.name),camera,renderer,rt,fm,bm,rw,rh),rw,rh,1);
     const maps:AtlasTissueMaterialPaths={adipose:new Float32Array(rw*rh),muscle:new Float32Array(rw*rh),soft:new Float32Array(rw*rh),inflatedLung:new Float32Array(rw*rh),blood:new Float32Array(rw*rh),brain:new Float32Array(rw*rh),air:new Float32Array(rw*rh)};
     for(let i=0;i<skinBody.length;i++){
-      // Prefer the closed skin envelope; muscle depth is a conservative fallback for atlas gaps in hands/feet.
       const skin=skinBody[i]!,muscleChord=muscleBody[i]!,B=skin>.12?skin:muscleChord;
       if(B<=.003)continue;
       const baseMuscle=Math.min(B*.28,Math.max(muscle[i]!*.12,B*.055));
       const fat=Math.min(B*.24,Math.max(B*.045,(B-baseMuscle)*.12));
       const internal=Math.max(0,B-baseMuscle-fat);
-      // Each projected lung is already a physical chord. It replaces the soft-tissue envelope rather than
-      // being added to it; using max preserves separate left/right fields without doubling overlap.
-      const literalLung=Math.max(left[i]!,right[i]!);
-      const lungPresence=clamp01((literalLung-.025)/.22);
-      const lungTarget=Math.min(internal*.94,literalLung*lungPresence);
+      // Preserve the two independently projected lung fields. In a frontal view they occupy different
+      // detector rays; where projection overlap does occur, cap their summed chord by the body interior.
+      const leftLung=left[i]!,rightLung=right[i]!;
+      const leftPresence=clamp01((leftLung-.012)/.12),rightPresence=clamp01((rightLung-.012)/.12);
+      const literalLung=leftLung*leftPresence+rightLung*rightPresence;
+      const lungTarget=Math.min(internal*.96,literalLung);
       const lung={v:lungTarget},soft={v:Math.max(0,internal-lungTarget)};
       let mp=baseMuscle,bp=0,brainp=0,airp=0;
-      const heartTarget=Math.min(internal*.80,heart[i]!*1.00);
-      const vesselTarget=Math.min(internal*.18,vessels[i]!*0.24);
-      const diaphragmTarget=Math.min(internal*.28,diaphragm[i]!*0.72);
-      let r=replace(heartTarget,lung,soft);mp+=r*.35;bp+=r*.65;
+      // Central thoracic structures displace aerated lung locally, producing natural superimposition
+      // rather than a uniformly lucent chest.
+      const heartTarget=Math.min(internal*.84,heart[i]!*1.06);
+      const vesselTarget=Math.min(internal*.20,vessels[i]!*0.28);
+      const diaphragmTarget=Math.min(internal*.32,diaphragm[i]!*0.78);
+      let r=replace(heartTarget,lung,soft);mp+=r*.32;bp+=r*.68;
       r=replace(vesselTarget,lung,soft);bp+=r;
       r=replace(Math.min(internal*.12,airway[i]!*.78),lung,soft);airp+=r;
-      r=replace(diaphragmTarget,lung,soft);mp+=r*.95;bp+=r*.05;
+      r=replace(diaphragmTarget,lung,soft);mp+=r*.94;bp+=r*.06;
       const br=Math.min(soft.v,brain[i]!*0.94);soft.v-=br;brainp+=br;
-      const lv=Math.min(soft.v,Math.min(internal*.52,liver[i]!*0.50));soft.v-=lv;mp+=lv*.50;bp+=lv*.50;
-      const renal=Math.min(soft.v,Math.min(internal*.20,urinary[i]!*0.36));soft.v-=renal;mp+=renal*.40;bp+=renal*.60;
+      const lv=Math.min(soft.v,Math.min(internal*.54,liver[i]!*0.54));soft.v-=lv;mp+=lv*.48;bp+=lv*.52;
+      const renal=Math.min(soft.v,Math.min(internal*.21,urinary[i]!*0.38));soft.v-=renal;mp+=renal*.38;bp+=renal*.62;
       const gas=Math.min(soft.v*.34,hollow[i]!*0.14);soft.v-=gas;airp+=gas;
       maps.adipose[i]=fat;maps.muscle[i]=mp;maps.soft[i]=soft.v;maps.inflatedLung[i]=lung.v;maps.blood[i]=bp;maps.brain[i]=brainp;maps.air[i]=airp;
     }
