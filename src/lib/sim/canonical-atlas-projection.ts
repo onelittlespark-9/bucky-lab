@@ -7,10 +7,7 @@ import { primaryOpticalDepth } from "./nist-attenuation";
 const CANONICAL_W_CM=60;
 const CANONICAL_H_CM=180;
 // The whole-body atlas projectors centre their orthographic camera on the 170 cm atlas bounds.
-// Express canonical detector Y relative to that 85 cm anatomical centre. Previously cropCanonical
-// treated row zero as anatomical Y=0 even though the 180 cm source field extends 5 cm above the
-// vertex; this discarded the superior 5 cm of the source map and stopped centring changes from
-// propagating predictably to the displayed full-body image.
+// Express canonical detector Y relative to that 85 cm anatomical centre.
 const CANONICAL_CR_Y_CM=85;
 const BASE_WIDTH=448;
 const BASE_HEIGHT=1344;
@@ -32,10 +29,36 @@ function cropCanonical(src:Float32Array|null,sw:number,sh:number,tube:TubeState,
 function cropTissue(src:AtlasTissueMaterialPaths|null,sw:number,sh:number,tube:TubeState,geometry:ProjectionGeometry,width:number,height:number):AtlasTissueMaterialPaths|null{if(!src)return null;return{adipose:cropCanonical(src.adipose,sw,sh,tube,geometry,width,height)!,muscle:cropCanonical(src.muscle,sw,sh,tube,geometry,width,height)!,soft:cropCanonical(src.soft,sw,sh,tube,geometry,width,height)!,inflatedLung:cropCanonical(src.inflatedLung,sw,sh,tube,geometry,width,height)!,blood:cropCanonical(src.blood,sw,sh,tube,geometry,width,height)!,brain:cropCanonical(src.brain,sw,sh,tube,geometry,width,height)!,air:cropCanonical(src.air,sw,sh,tube,geometry,width,height)!};}
 function cropSkeletal(src:AtlasSkeletalMaterialPaths|null,sw:number,sh:number,tube:TubeState,geometry:ProjectionGeometry,width:number,height:number):AtlasSkeletalMaterialPaths|null{if(!src)return null;return{corticalBone:cropCanonical(src.corticalBone,sw,sh,tube,geometry,width,height)!,trabecularBone:cropCanonical(src.trabecularBone,sw,sh,tube,geometry,width,height)!,adipose:cropCanonical(src.adipose,sw,sh,tube,geometry,width,height)!,displacedSoft:cropCanonical(src.displacedSoft,sw,sh,tube,geometry,width,height)!};}
 function tissueMask(paths:AtlasTissueMaterialPaths|null){if(!paths)return null;const out=new Float32Array(paths.soft.length);for(let i=0;i<out.length;i++)out[i]=(paths.adipose[i]!+paths.muscle[i]!+paths.soft[i]!+paths.inflatedLung[i]!+paths.blood[i]!+paths.brain[i]!+paths.air[i]!)>.003?1:0;return out;}
+
+// Whole-body views expose errors that are hidden by tight collimation. Refine the material maps rather
+// than applying a display-contrast trick: aerated lung must replace internal soft-tissue path, while
+// mediastinal/diaphragmatic blood and muscle remain superimposed. The atlas geometry is untouched.
+function refineWholeBodyMaterials(tissue:AtlasTissueMaterialPaths|null,skeletal:AtlasSkeletalMaterialPaths|null){
+  if(tissue){for(let i=0;i<tissue.soft.length;i++){
+    const lung=tissue.inflatedLung[i]!;if(lung>.20){
+      const presence=Math.min(1,(lung-.20)/2.8),blood=tissue.blood[i]!,muscle=tissue.muscle[i]!,fat=tissue.adipose[i]!;
+      // A projected lung ray should carry chest wall plus aerated parenchyma, not a residual solid
+      // thoracic chord. Keep true organ paths, but progressively exchange excess generic soft tissue
+      // for lung as the atlas lung chord deepens.
+      const wallAllowance=2.2+fat*.42+muscle*.34+blood*.22;
+      const excess=Math.max(0,tissue.soft[i]!-wallAllowance);
+      const exchanged=excess*(.72+.22*presence);
+      tissue.soft[i]-=exchanged;tissue.inflatedLung[i]+=exchanged;
+    }
+  }}
+  if(skeletal){for(let i=0;i<skeletal.corticalBone.length;i++){
+    const cortical=skeletal.corticalBone[i]!,trab=skeletal.trabecularBone[i]!,total=cortical+trab;if(total<=.002)continue;
+    // Avoid the atlas reading as uniformly painted white bone at whole-body scale. Dense overlapping
+    // cortex is preserved; thinner single-bone rays shift part of their response into trabecular/marrow
+    // behaviour, retaining cortical edges and medullary lucency without changing bone silhouettes.
+    const overlap=Math.min(1,total/.95),corticalKeep=.72+.20*overlap,shift=cortical*(1-corticalKeep);
+    skeletal.corticalBone[i]=cortical-shift;skeletal.trabecularBone[i]=trab+shift*.30;skeletal.adipose[i]+=shift*.18;
+  }}
+}
 function clinicallyFramedTube(tube:TubeState,projection:Projection):TubeState{if(projection.id!=="pa-chest"&&projection.id!=="lat-chest")return tube;const requestedTop=tube.crY-tube.collimationH*.5,requestedBottom=tube.crY+tube.collimationH*.5,top=Math.max(21.0,requestedTop),bottom=Math.min(54.5,requestedBottom),safeTop=Math.min(top,bottom-8),safeBottom=Math.max(bottom,safeTop+8);return{...tube,crY:(safeTop+safeBottom)*.5,collimationH:safeBottom-safeTop};}
 async function canonicalMaps(args:{patient:Patient;projection:Projection;tube:TubeState;geometry:ProjectionGeometry;}){const{patient,projection,tube,geometry}=args,key=canonicalKey(patient,projection),existing=CACHE.get(key);if(existing){touchCache(key,existing);return existing;}const canonicalTube:TubeState={...tube,crX:0,crY:CANONICAL_CR_Y_CM,collimationW:CANONICAL_W_CM,collimationH:CANONICAL_H_CM},objectGeometry:ProjectionGeometry={...geometry,magnification:1,effectiveObjectScale:1};const pending=Promise.all([projectAtlasSkeletalPaths({patient,projection,tube:canonicalTube,width:BASE_WIDTH,height:BASE_HEIGHT,geometry:objectGeometry,wholeBody:true}),projectAtlasTissuePaths({patient,projection,tube:canonicalTube,width:BASE_WIDTH,height:BASE_HEIGHT,geometry:objectGeometry,wholeBody:true})]).then(([skeletal,tissue])=>({skeletal,tissue,width:BASE_WIDTH,height:BASE_HEIGHT})).catch(err=>{CACHE.delete(key);throw err;});touchCache(key,pending);return pending;}
 
-export async function canonicalAtlasMaterialProjection(args:{patient:Patient;projection:Projection;tube:TubeState;width:number;height:number;geometry:ProjectionGeometry;}):Promise<CanonicalAtlasMaterialMaps>{const{patient,projection,tube,width,height,geometry}=args,framedTube=clinicallyFramedTube(tube,projection),baseKey=canonicalKey(patient,projection),viewKey=[baseKey,projection.id,width,height,framedTube.crX.toFixed(3),framedTube.crY.toFixed(3),framedTube.collimationW.toFixed(3),framedTube.collimationH.toFixed(3),geometry.magnification.toFixed(5)].join("|"),cached=VIEW_CACHE.get(viewKey);if(cached){touchView(viewKey,cached);return cached;}const maps=await canonicalMaps({patient,projection,tube:framedTube,geometry}),tissue=cropTissue(maps.tissue,maps.width,maps.height,framedTube,geometry,width,height),skeletal=cropSkeletal(maps.skeletal,maps.width,maps.height,framedTube,geometry,width,height),result={tissue,skeletal,tissueMask:tissueMask(tissue)};touchView(viewKey,result);return result;}
+export async function canonicalAtlasMaterialProjection(args:{patient:Patient;projection:Projection;tube:TubeState;width:number;height:number;geometry:ProjectionGeometry;}):Promise<CanonicalAtlasMaterialMaps>{const{patient,projection,tube,width,height,geometry}=args,framedTube=clinicallyFramedTube(tube,projection),baseKey=canonicalKey(patient,projection),viewKey=[baseKey,projection.id,width,height,framedTube.crX.toFixed(3),framedTube.crY.toFixed(3),framedTube.collimationW.toFixed(3),framedTube.collimationH.toFixed(3),geometry.magnification.toFixed(5)].join("|"),cached=VIEW_CACHE.get(viewKey);if(cached){touchView(viewKey,cached);return cached;}const maps=await canonicalMaps({patient,projection,tube:framedTube,geometry}),tissue=cropTissue(maps.tissue,maps.width,maps.height,framedTube,geometry,width,height),skeletal=cropSkeletal(maps.skeletal,maps.width,maps.height,framedTube,geometry,width,height);if(projection.id==="ap-full-body")refineWholeBodyMaterials(tissue,skeletal);const result={tissue,skeletal,tissueMask:tissueMask(tissue)};touchView(viewKey,result);return result;}
 
 /** Compatibility facade for legacy callers. New rendering should consume material path maps directly. */
 export async function canonicalAtlasProjection(args:{patient:Patient;projection:Projection;tube:TubeState;exposureKvp:number;width:number;height:number;geometry:ProjectionGeometry;}){const maps=await canonicalAtlasMaterialProjection(args),n=args.width*args.height,bone=new Float32Array(n),tissue=new Float32Array(n);for(let i=0;i<n;i++){if(maps.tissue)tissue[i]=primaryOpticalDepth({adipose:maps.tissue.adipose[i]!,muscle:maps.tissue.muscle[i]!,soft:maps.tissue.soft[i]!,inflatedLung:maps.tissue.inflatedLung[i]!,blood:maps.tissue.blood[i]!,brain:maps.tissue.brain[i]!,air:maps.tissue.air[i]!},args.exposureKvp);if(maps.skeletal){const full=primaryOpticalDepth({corticalBone:maps.skeletal.corticalBone[i]!,trabecularBone:maps.skeletal.trabecularBone[i]!,adipose:maps.skeletal.adipose[i]!},args.exposureKvp),displaced=primaryOpticalDepth({soft:maps.skeletal.displacedSoft[i]!},args.exposureKvp);bone[i]=Math.max(0,full-displaced);}}return{bone,tissue};}
