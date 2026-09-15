@@ -29,21 +29,20 @@ export async function projectAtlasTissuePaths(args:{patient:Patient;projection:P
     const a=await loadAtlas();a.root.position.set(0,0,0);a.root.rotation.set(0,0,0);a.root.quaternion.identity();a.root.scale.setScalar(patient.heightCm/100/ATLAS_HEIGHT_M);for(const p of a.parts){p.mesh.visible=true;p.mesh.quaternion.identity();}a.root.updateMatrixWorld(true);
     const bounds=new THREE.Box3().setFromObject(a.root),centre=bounds.getCenter(new THREE.Vector3());centre.x=0;const rw=Math.min(640,Math.max(256,width)),rh=Math.min(1600,Math.max(512,height));let target=centre.clone();if(!wholeBody){const y=projection.cr.y*patient.heightCm/170;target=new THREE.Vector3(projection.cr.x/100,patient.heightCm/100-y/100,0);}const lateral=/torso-lat|cspine-lat|skull-lat/.test(projection.anatomy),camera=new THREE.OrthographicCamera(0,1,1,0,.01,5),halfW=tube.collimationW/geometry.magnification/200,halfH=tube.collimationH/geometry.magnification/200;camera.left=-halfW;camera.right=halfW;camera.top=halfH;camera.bottom=-halfH;camera.position.copy(lateral?new THREE.Vector3(target.x+2.5,target.y,target.z):new THREE.Vector3(target.x,target.y,target.z+2.5));camera.lookAt(target);camera.updateProjectionMatrix();const renderer=new THREE.WebGLRenderer({antialias:false,alpha:false,preserveDrawingBuffer:false});renderer.setSize(rw,rh,false);renderer.setPixelRatio(1);renderer.outputColorSpace=THREE.LinearSRGBColorSpace;renderer.setClearColor(0xffffff,1);const scene=new THREE.Scene();scene.background=new THREE.Color(0xffffff);scene.add(a.root);const rt=new THREE.WebGLRenderTarget(rw,rh,{format:THREE.RGBAFormat,type:THREE.UnsignedByteType,depthBuffer:true,stencilBuffer:false}),vs=`varying float vDepth;void main(){vec4 mv=modelViewMatrix*vec4(position,1.0);gl_Position=projectionMatrix*mv;vDepth=gl_Position.z/gl_Position.w*.5+.5;}`,fs=`varying float vDepth;vec3 packDepth24(float v){v=clamp(v,0.0,0.999999);vec3 e=fract(v*vec3(1.0,255.0,65025.0));e-=e.yzz*vec3(1.0/255.0,1.0/255.0,0.0);return e;}void main(){gl_FragColor=vec4(packDepth24(vDepth),1.0);}`,fm=new THREE.ShaderMaterial({vertexShader:vs,fragmentShader:fs,side:THREE.FrontSide,depthTest:true,depthWrite:true}),bm=new THREE.ShaderMaterial({vertexShader:vs,fragmentShader:fs,side:THREE.BackSide,depthTest:true,depthWrite:true});
     const P=(test:(p:LoadedPart)=>boolean,cap:number,total:number,passes:number)=>blur(parts(scene,a,test,camera,renderer,rt,fm,bm,rw,rh,cap,total),rw,rh,passes);
-    // Build the outer envelope per atlas part. A single depth render across disconnected skin meshes can
-    // pair the front surface of one part with the back surface of another, creating slab-like neck/shoulder artefacts.
     const skinBody=P(p=>p.system==="integumentary",30,60,2);
-    // Muscle is only a gap-filler for genuinely missing distal skin; it must never create a second silhouette.
     const muscleBody=P(p=>p.system==="muscular"&&!/diaphragm/i.test(p.name),12,30,2);
     const muscle=P(p=>p.system==="muscular"&&!/diaphragm/i.test(p.name),8,24,3);
     const left=P(p=>isAtlasLungParenchyma(p)&&p.mesh.getWorldPosition(new THREE.Vector3()).x<0,20,30,1);
     const right=P(p=>isAtlasLungParenchyma(p)&&p.mesh.getWorldPosition(new THREE.Vector3()).x>=0,20,30,1);
     const airway=P(p=>isAtlasAirway(p),1.8,5,1);
-    const heart=blur(project(scene,a,p=>p.system==="cardiac",camera,renderer,rt,fm,bm,rw,rh),rw,rh,1);
-    const vessels=P(p=>p.system==="arterial"||p.system==="venous",.70,3.0,1);
-    const diaphragm=blur(project(scene,a,p=>p.system==="muscular"&&/diaphragm/i.test(p.name),camera,renderer,rt,fm,bm,rw,rh),rw,rh,1);
-    const liver=P(p=>p.system==="digestive"&&/liver|hepat/i.test(p.name),10,12,1);
-    const hollow=P(p=>p.system==="digestive"&&/stomach|colon|intestin|cecum|rect|duoden/i.test(p.name),4,8,1);
-    const urinary=P(p=>p.system==="urinary"&&/kidney|renal|bladder/i.test(p.name),5,8,1);
+    // Project disconnected thoracic/abdominal structures per atlas part. This prevents the front surface
+    // of one organ being paired with the back surface of another and keeps the atlas geometry authoritative.
+    const heart=P(p=>p.system==="cardiac",8,18,1);
+    const vessels=P(p=>p.system==="arterial"||p.system==="venous",.90,4.5,1);
+    const diaphragm=P(p=>p.system==="muscular"&&/diaphragm/i.test(p.name),3.5,6,1);
+    const liver=P(p=>p.system==="digestive"&&/liver|hepat/i.test(p.name),12,16,1);
+    const hollow=P(p=>p.system==="digestive"&&/stomach|colon|intestin|cecum|rect|duoden/i.test(p.name),5,10,1);
+    const urinary=P(p=>p.system==="urinary"&&/kidney|renal|bladder/i.test(p.name),6,10,1);
     const brain=blur(project(scene,a,p=>p.system==="nervous"&&/brain|cerebr|encephal/i.test(p.name),camera,renderer,rt,fm,bm,rw,rh),rw,rh,1);
     const maps:AtlasTissueMaterialPaths={adipose:new Float32Array(rw*rh),muscle:new Float32Array(rw*rh),soft:new Float32Array(rw*rh),inflatedLung:new Float32Array(rw*rh),blood:new Float32Array(rw*rh),brain:new Float32Array(rw*rh),air:new Float32Array(rw*rh)};
     for(let i=0;i<skinBody.length;i++){
@@ -54,24 +53,24 @@ export async function projectAtlasTissuePaths(args:{patient:Patient;projection:P
       const fat=Math.min(B*.24,Math.max(B*.045,(B-baseMuscle)*.12));
       const internal=Math.max(0,B-baseMuscle-fat);
       const leftLung=left[i]!,rightLung=right[i]!;
-      // Feather parenchymal boundaries and retain a small non-aerated thoracic path so hilar/mediastinal
-      // structures superimpose naturally instead of producing binary black lung windows.
-      const leftPresence=clamp01((leftLung-.006)/.16),rightPresence=clamp01((rightLung-.006)/.16);
+      const leftPresence=clamp01((leftLung-.004)/.12),rightPresence=clamp01((rightLung-.004)/.12);
       const literalLung=leftLung*leftPresence+rightLung*rightPresence;
-      const lungTarget=Math.min(internal*.90,literalLung*.94);
+      // Let the measured atlas lung chord dominate the thoracic material replacement. A small residual
+      // non-aerated fraction remains for vessels and mediastinal structures that genuinely overlap the lung.
+      const lungTarget=Math.min(internal*.96,literalLung*.985);
       const lung={v:lungTarget},soft={v:Math.max(0,internal-lungTarget)};
       let mp=baseMuscle,bp=0,brainp=0,airp=0;
-      const heartTarget=Math.min(internal*.84,heart[i]!*1.06);
-      const vesselTarget=Math.min(internal*.20,vessels[i]!*0.28);
-      const diaphragmTarget=Math.min(internal*.32,diaphragm[i]!*0.78);
-      let r=replace(heartTarget,lung,soft);mp+=r*.32;bp+=r*.68;
+      const heartTarget=Math.min(internal*.92,heart[i]!*.98);
+      const vesselTarget=Math.min(internal*.28,vessels[i]!*.42);
+      const diaphragmTarget=Math.min(internal*.42,diaphragm[i]!*.94);
+      let r=replace(heartTarget,lung,soft);mp+=r*.28;bp+=r*.72;
       r=replace(vesselTarget,lung,soft);bp+=r;
-      r=replace(Math.min(internal*.12,airway[i]!*.78),lung,soft);airp+=r;
-      r=replace(diaphragmTarget,lung,soft);mp+=r*.94;bp+=r*.06;
+      r=replace(Math.min(internal*.14,airway[i]!*.86),lung,soft);airp+=r;
+      r=replace(diaphragmTarget,lung,soft);mp+=r*.96;bp+=r*.04;
       const br=Math.min(soft.v,brain[i]!*0.94);soft.v-=br;brainp+=br;
-      const lv=Math.min(soft.v,Math.min(internal*.54,liver[i]!*0.54));soft.v-=lv;mp+=lv*.48;bp+=lv*.52;
-      const renal=Math.min(soft.v,Math.min(internal*.21,urinary[i]!*0.38));soft.v-=renal;mp+=renal*.38;bp+=renal*.62;
-      const gas=Math.min(soft.v*.34,hollow[i]!*0.14);soft.v-=gas;airp+=gas;
+      const lv=Math.min(soft.v,Math.min(internal*.66,liver[i]!*0.68));soft.v-=lv;mp+=lv*.46;bp+=lv*.54;
+      const renal=Math.min(soft.v,Math.min(internal*.26,urinary[i]!*0.46));soft.v-=renal;mp+=renal*.36;bp+=renal*.64;
+      const gas=Math.min(soft.v*.40,hollow[i]!*0.20);soft.v-=gas;airp+=gas;
       maps.adipose[i]=fat;maps.muscle[i]=mp;maps.soft[i]=soft.v;maps.inflatedLung[i]=lung.v;maps.blood[i]=bp;maps.brain[i]=brainp;maps.air[i]=airp;
     }
     for(const p of a.parts)p.mesh.visible=true;scene.overrideMaterial=null;renderer.dispose();rt.dispose();fm.dispose();bm.dispose();
