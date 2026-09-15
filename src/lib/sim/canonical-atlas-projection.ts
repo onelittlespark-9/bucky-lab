@@ -6,8 +6,6 @@ import { primaryOpticalDepth } from "./nist-attenuation";
 
 const CANONICAL_W_CM=60;
 const CANONICAL_H_CM=180;
-// The whole-body atlas projectors centre their orthographic camera on the 170 cm atlas bounds.
-// Express canonical detector Y relative to that 85 cm anatomical centre.
 const CANONICAL_CR_Y_CM=85;
 const BASE_WIDTH=448;
 const BASE_HEIGHT=1344;
@@ -30,29 +28,37 @@ function cropTissue(src:AtlasTissueMaterialPaths|null,sw:number,sh:number,tube:T
 function cropSkeletal(src:AtlasSkeletalMaterialPaths|null,sw:number,sh:number,tube:TubeState,geometry:ProjectionGeometry,width:number,height:number):AtlasSkeletalMaterialPaths|null{if(!src)return null;return{corticalBone:cropCanonical(src.corticalBone,sw,sh,tube,geometry,width,height)!,trabecularBone:cropCanonical(src.trabecularBone,sw,sh,tube,geometry,width,height)!,adipose:cropCanonical(src.adipose,sw,sh,tube,geometry,width,height)!,displacedSoft:cropCanonical(src.displacedSoft,sw,sh,tube,geometry,width,height)!};}
 function tissueMask(paths:AtlasTissueMaterialPaths|null){if(!paths)return null;const out=new Float32Array(paths.soft.length);for(let i=0;i<out.length;i++)out[i]=(paths.adipose[i]!+paths.muscle[i]!+paths.soft[i]!+paths.inflatedLung[i]!+paths.blood[i]!+paths.brain[i]!+paths.air[i]!)>.003?1:0;return out;}
 
-// Whole-body views expose errors that are hidden by tight collimation. Refine the material maps rather
-// than applying a display-contrast trick: aerated lung must replace internal soft-tissue path, while
-// mediastinal/diaphragmatic blood and muscle remain superimposed. The atlas geometry is untouched.
 function refineWholeBodyMaterials(tissue:AtlasTissueMaterialPaths|null,skeletal:AtlasSkeletalMaterialPaths|null){
   if(tissue){for(let i=0;i<tissue.soft.length;i++){
-    const lung=tissue.inflatedLung[i]!;if(lung>.20){
-      const presence=Math.min(1,(lung-.20)/2.8),blood=tissue.blood[i]!,muscle=tissue.muscle[i]!,fat=tissue.adipose[i]!;
-      // A projected lung ray should carry chest wall plus aerated parenchyma, not a residual solid
-      // thoracic chord. Keep true organ paths, but progressively exchange excess generic soft tissue
-      // for lung as the atlas lung chord deepens.
-      const wallAllowance=2.2+fat*.42+muscle*.34+blood*.22;
-      const excess=Math.max(0,tissue.soft[i]!-wallAllowance);
-      const exchanged=excess*(.72+.22*presence);
-      tissue.soft[i]-=exchanged;tissue.inflatedLung[i]+=exchanged;
+    const lung=tissue.inflatedLung[i]!;
+    if(lung>.06){
+      const presence=Math.min(1,(lung-.06)/3.0);
+      // Make aerated parenchyma a true replacement volume. Preserve a thin chest wall and
+      // independently projected mediastinal/cardiac blood instead of leaving a grey torso slab.
+      const keepMuscle=tissue.muscle[i]!*(.82-.20*presence);
+      const keepFat=tissue.adipose[i]!*(.90-.10*presence);
+      const generic=tissue.soft[i]!;
+      const exchange=generic*(.58+.30*presence);
+      tissue.soft[i]=Math.max(.18,generic-exchange);
+      tissue.muscle[i]=keepMuscle;
+      tissue.adipose[i]=keepFat;
+      tissue.inflatedLung[i]=Math.min(30,lung+exchange+(tissue.muscle[i]!-keepMuscle)*.25);
+      // Keep the mediastinum/heart visibly superimposed but not as a solid central block.
+      tissue.blood[i]*=.88+.12*(1-presence);
     }
+    // Solid abdominal organs remain superimposed while generic abdominal fill is slightly
+    // heterogeneous in attenuation rather than one uniform material slab.
+    const organ=tissue.blood[i]!+tissue.muscle[i]!;
+    if(lung<=.06&&organ>1.2&&tissue.soft[i]!>1.5){const shift=Math.min(tissue.soft[i]!*0.10,.55);tissue.soft[i]-=shift;tissue.adipose[i]+=shift*.45;tissue.muscle[i]+=shift*.35;}
   }}
   if(skeletal){for(let i=0;i<skeletal.corticalBone.length;i++){
     const cortical=skeletal.corticalBone[i]!,trab=skeletal.trabecularBone[i]!,total=cortical+trab;if(total<=.002)continue;
-    // Avoid the atlas reading as uniformly painted white bone at whole-body scale. Dense overlapping
-    // cortex is preserved; thinner single-bone rays shift part of their response into trabecular/marrow
-    // behaviour, retaining cortical edges and medullary lucency without changing bone silhouettes.
-    const overlap=Math.min(1,total/.95),corticalKeep=.72+.20*overlap,shift=cortical*(1-corticalKeep);
-    skeletal.corticalBone[i]=cortical-shift;skeletal.trabecularBone[i]=trab+shift*.30;skeletal.adipose[i]+=shift*.18;
+    // Whole-body projection should not render every bone as an opaque white mesh. Preserve
+    // overlapping cortex while making single-bone rays substantially more trabecular/marrow-like.
+    const overlap=Math.min(1,total/1.35),keep=.48+.34*overlap,shift=cortical*(1-keep);
+    skeletal.corticalBone[i]=cortical-shift;
+    skeletal.trabecularBone[i]=trab+shift*.38;
+    skeletal.adipose[i]+=shift*.34;
   }}
 }
 function clinicallyFramedTube(tube:TubeState,projection:Projection):TubeState{if(projection.id!=="pa-chest"&&projection.id!=="lat-chest")return tube;const requestedTop=tube.crY-tube.collimationH*.5,requestedBottom=tube.crY+tube.collimationH*.5,top=Math.max(21.0,requestedTop),bottom=Math.min(54.5,requestedBottom),safeTop=Math.min(top,bottom-8),safeBottom=Math.max(bottom,safeTop+8);return{...tube,crY:(safeTop+safeBottom)*.5,collimationH:safeBottom-safeTop};}
@@ -60,5 +66,4 @@ async function canonicalMaps(args:{patient:Patient;projection:Projection;tube:Tu
 
 export async function canonicalAtlasMaterialProjection(args:{patient:Patient;projection:Projection;tube:TubeState;width:number;height:number;geometry:ProjectionGeometry;}):Promise<CanonicalAtlasMaterialMaps>{const{patient,projection,tube,width,height,geometry}=args,framedTube=clinicallyFramedTube(tube,projection),baseKey=canonicalKey(patient,projection),viewKey=[baseKey,projection.id,width,height,framedTube.crX.toFixed(3),framedTube.crY.toFixed(3),framedTube.collimationW.toFixed(3),framedTube.collimationH.toFixed(3),geometry.magnification.toFixed(5)].join("|"),cached=VIEW_CACHE.get(viewKey);if(cached){touchView(viewKey,cached);return cached;}const maps=await canonicalMaps({patient,projection,tube:framedTube,geometry}),tissue=cropTissue(maps.tissue,maps.width,maps.height,framedTube,geometry,width,height),skeletal=cropSkeletal(maps.skeletal,maps.width,maps.height,framedTube,geometry,width,height);if(projection.id==="ap-full-body")refineWholeBodyMaterials(tissue,skeletal);const result={tissue,skeletal,tissueMask:tissueMask(tissue)};touchView(viewKey,result);return result;}
 
-/** Compatibility facade for legacy callers. New rendering should consume material path maps directly. */
 export async function canonicalAtlasProjection(args:{patient:Patient;projection:Projection;tube:TubeState;exposureKvp:number;width:number;height:number;geometry:ProjectionGeometry;}){const maps=await canonicalAtlasMaterialProjection(args),n=args.width*args.height,bone=new Float32Array(n),tissue=new Float32Array(n);for(let i=0;i<n;i++){if(maps.tissue)tissue[i]=primaryOpticalDepth({adipose:maps.tissue.adipose[i]!,muscle:maps.tissue.muscle[i]!,soft:maps.tissue.soft[i]!,inflatedLung:maps.tissue.inflatedLung[i]!,blood:maps.tissue.blood[i]!,brain:maps.tissue.brain[i]!,air:maps.tissue.air[i]!},args.exposureKvp);if(maps.skeletal){const full=primaryOpticalDepth({corticalBone:maps.skeletal.corticalBone[i]!,trabecularBone:maps.skeletal.trabecularBone[i]!,adipose:maps.skeletal.adipose[i]!},args.exposureKvp),displaced=primaryOpticalDepth({soft:maps.skeletal.displacedSoft[i]!},args.exposureKvp);bone[i]=Math.max(0,full-displaced);}}return{bone,tissue};}
