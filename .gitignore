@@ -5,3 +5,8 @@ dist
 *.log
 .env
 .env.*
+data/source/
+data/work/
+public/cases/**/*.i16
+public/cases/**/*.nii
+public/cases/**/*.nii.gz

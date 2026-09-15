@@ -1,0 +1,5 @@
+#!/usr/bin/env node
+import{createHash}from'node:crypto';import{createReadStream,createWriteStream}from'node:fs';import{mkdir}from'node:fs/promises';import{Readable}from'node:stream';import{pipeline}from'node:stream/promises';
+const id=(process.argv[2]??'001').padStart(3,'0');
+const known={'001':'481c0b8e422ff4f8f907a974ffaf6094','002':'04e5d6a814eb125f0f7566462c315496','003':'c12bb6ea6cde96801b2cd3bf54a28a23','004':'dde5d1b62c5f64b569e73382ef3d97f8'};
+await mkdir('data/source',{recursive:true});const dest=`data/source/${id}.zip`,url=`https://zenodo.org/records/8270365/files/${id}.zip?download=1`;const r=await fetch(url,{redirect:'follow'});if(!r.ok||!r.body)throw new Error(`Download failed ${r.status}`);await pipeline(Readable.fromWeb(r.body),createWriteStream(dest));const expected=known[id];if(expected){const h=createHash('md5');for await(const chunk of createReadStream(dest))h.update(chunk);const actual=h.digest('hex');if(actual!==expected)throw new Error(`MD5 mismatch ${actual}`)}console.log(dest);
