@@ -6,6 +6,11 @@ import { primaryOpticalDepth } from "./nist-attenuation";
 
 const CANONICAL_W_CM=60;
 const CANONICAL_H_CM=180;
+// The whole-body atlas projectors centre their orthographic camera on the 170 cm atlas bounds.
+// Express canonical detector Y relative to that 85 cm anatomical centre. Previously cropCanonical
+// treated row zero as anatomical Y=0 even though the 180 cm source field extends 5 cm above the
+// vertex; this discarded the superior 5 cm of the source map and stopped centring changes from
+// propagating predictably to the displayed full-body image.
 const CANONICAL_CR_Y_CM=85;
 const BASE_WIDTH=448;
 const BASE_HEIGHT=1344;
@@ -23,7 +28,7 @@ function projectionFamily(projection:Projection){return projection.anatomy==="to
 function canonicalKey(patient:Patient,projection:Projection){return`${patientKey(patient)}|${projectionFamily(projection)}`;}
 function touchCache(key:string,pending:Promise<CanonicalMaps>){CACHE.delete(key);CACHE.set(key,pending);while(CACHE.size>MAX_CACHE_ENTRIES){const oldest=CACHE.keys().next().value as string|undefined;if(!oldest)break;CACHE.delete(oldest);for(const viewKey of VIEW_CACHE.keys())if(viewKey.startsWith(`${oldest}|`))VIEW_CACHE.delete(viewKey);}}
 function touchView(key:string,value:CanonicalAtlasMaterialMaps){VIEW_CACHE.delete(key);VIEW_CACHE.set(key,value);while(VIEW_CACHE.size>MAX_VIEW_CACHE_ENTRIES){const oldest=VIEW_CACHE.keys().next().value as string|undefined;if(!oldest)break;VIEW_CACHE.delete(oldest);}}
-function cropCanonical(src:Float32Array|null,sw:number,sh:number,tube:TubeState,geometry:ProjectionGeometry,width:number,height:number){if(!src)return null;const out=new Float32Array(width*height);for(let py=0;py<height;py++){const cmY=((py+.5)/height-.5)*tube.collimationH/geometry.magnification,globalY=tube.crY+cmY,v=(globalY/CANONICAL_H_CM)*(sh-1);for(let px=0;px<width;px++){const cmX=((px+.5)/width-.5)*tube.collimationW/geometry.magnification,globalX=tube.crX+cmX,u=(.5+globalX/CANONICAL_W_CM)*(sw-1);out[py*width+px]=sampleBilinear(src,sw,sh,u,v);}}return out;}
+function cropCanonical(src:Float32Array|null,sw:number,sh:number,tube:TubeState,geometry:ProjectionGeometry,width:number,height:number){if(!src)return null;const out=new Float32Array(width*height);for(let py=0;py<height;py++){const cmY=((py+.5)/height-.5)*tube.collimationH/geometry.magnification,globalY=tube.crY+cmY,v=(.5+(globalY-CANONICAL_CR_Y_CM)/CANONICAL_H_CM)*(sh-1);for(let px=0;px<width;px++){const cmX=((px+.5)/width-.5)*tube.collimationW/geometry.magnification,globalX=tube.crX+cmX,u=(.5+globalX/CANONICAL_W_CM)*(sw-1);out[py*width+px]=sampleBilinear(src,sw,sh,u,v);}}return out;}
 function cropTissue(src:AtlasTissueMaterialPaths|null,sw:number,sh:number,tube:TubeState,geometry:ProjectionGeometry,width:number,height:number):AtlasTissueMaterialPaths|null{if(!src)return null;return{adipose:cropCanonical(src.adipose,sw,sh,tube,geometry,width,height)!,muscle:cropCanonical(src.muscle,sw,sh,tube,geometry,width,height)!,soft:cropCanonical(src.soft,sw,sh,tube,geometry,width,height)!,inflatedLung:cropCanonical(src.inflatedLung,sw,sh,tube,geometry,width,height)!,blood:cropCanonical(src.blood,sw,sh,tube,geometry,width,height)!,brain:cropCanonical(src.brain,sw,sh,tube,geometry,width,height)!,air:cropCanonical(src.air,sw,sh,tube,geometry,width,height)!};}
 function cropSkeletal(src:AtlasSkeletalMaterialPaths|null,sw:number,sh:number,tube:TubeState,geometry:ProjectionGeometry,width:number,height:number):AtlasSkeletalMaterialPaths|null{if(!src)return null;return{corticalBone:cropCanonical(src.corticalBone,sw,sh,tube,geometry,width,height)!,trabecularBone:cropCanonical(src.trabecularBone,sw,sh,tube,geometry,width,height)!,adipose:cropCanonical(src.adipose,sw,sh,tube,geometry,width,height)!,displacedSoft:cropCanonical(src.displacedSoft,sw,sh,tube,geometry,width,height)!};}
 function tissueMask(paths:AtlasTissueMaterialPaths|null){if(!paths)return null;const out=new Float32Array(paths.soft.length);for(let i=0;i<out.length;i++)out[i]=(paths.adipose[i]!+paths.muscle[i]!+paths.soft[i]!+paths.inflatedLung[i]!+paths.blood[i]!+paths.brain[i]!+paths.air[i]!)>.003?1:0;return out;}
